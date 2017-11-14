@@ -136,7 +136,7 @@ class Human:
 
 	def take_action(self, env):
 		while True:
-			move = raw_input("Enter location of next move row,column (0..2): ")
+			move = input("Enter location of next move row,column (0..2): ")
 			x, y = move.split(',')
 			x = int(x)
 			y = int(y)
@@ -205,4 +205,5 @@ if __name__ == '__main__':
 	player2 = Agent()
 
 	env = Environment()
+	board_tests()
 	
