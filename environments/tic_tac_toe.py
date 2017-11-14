@@ -1,11 +1,21 @@
 from __future__ import print_function
 
 import numpy as np
+from PyQt5.QtWidget import QWidget
 
 class Environment:
 	def __init__(self):
+		self.state = None
+	
+	def game_over(self):
+		return True
+	
+	def draw_board(self):
 		pass
-
+	
+	def get_state(self):
+		return self.state
+	
 class Board:
 	#Values for pieces
 	PIECE_X = 2
@@ -118,30 +128,6 @@ class Board:
 
 		return sstr
 
-class Agent:
-	def __init__(self, eps=0.1, alpha=0.5):
-		self.eps = eps
-		self.alpha = alpha
-
-	def take_action(self,env):
-
-		pass
-
-class Human:
-	def __init__(self):
-		pass
-
-	def set_piece(self, piece):
-		self.piece = piece
-
-	def take_action(self, env):
-		while True:
-			move = input("Enter location of next move row,column (0..2): ")
-			x, y = move.split(',')
-			x = int(x)
-			y = int(y)
-			#place piece on board	
-			break	
 
 def board_tests():
 	board = Board()
@@ -197,13 +183,7 @@ def board_tests():
 	board4.print_board()
 	board4.check_for_game_over()
 
-def play_game(p1, p2, env):
-	pass
-
 if __name__ == '__main__':
-	player1 = Agent()
-	player2 = Agent()
 
-	env = Environment()
 	board_tests()
 	

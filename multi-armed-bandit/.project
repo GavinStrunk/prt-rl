@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <projectDescription>
-	<name>tic-tac-toe</name>
+	<name>multi-armed-bandit</name>
 	<comment></comment>
 	<projects>
-		<project>environments</project>
 	</projects>
 	<buildSpec>
 		<buildCommand>

@@ -1,20 +1,20 @@
-
+from __future__ import division
 
 import numpy as np
 import matplotlib.pyplot as plt
 
 class Bandits:
-	def __init__(self,m):
+	def __init__(self,m, mean_max=10):
 		self.m = m
-		self.mean = 0
-		self.N = 0
+		self.mean = mean_max
+		self.N = 1
 
 	def pull(self):
 		return np.random.randn() + self.m
 
 	def update(self, x):
 		self.N += 1
-		self.mean = (1 - (1 / self.N)) * self.mean + (1 / self.N) * x
+		self.mean = (1.0 - (1.0 / self.N)) * self.mean + (1.0 / self.N) * x
 
 def run_experiment(m1,m2,m3,eps,N):
 	
@@ -23,12 +23,8 @@ def run_experiment(m1,m2,m3,eps,N):
 	data = np.empty(N)
 
 	for i in range(N):
-		#epsilon greedy
-		p = np.random.random()
-		if p < eps:
-			j = np.random.choice(3)
-		else:
-			j = np.argmax([b.mean for b in bandits])
+		#greedy
+		j = np.argmax([b.mean for b in bandits])
 
 		x = bandits[j].pull()
 		bandits[j].update(x)
@@ -45,7 +41,7 @@ def run_experiment(m1,m2,m3,eps,N):
 	plt.show()
 
 	for b in bandits:
-		print b.mean
+		print(b.mean)
 
 	return cummulative_avg
 
