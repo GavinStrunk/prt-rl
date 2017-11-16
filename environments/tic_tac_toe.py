@@ -1,20 +1,30 @@
 from __future__ import print_function
 
 import numpy as np
-from PyQt5.QtWidget import QWidget
+
+LENGTH = 3
 
 class Environment:
 	def __init__(self):
-		self.state = None
+		self.board = Board()
+		self.winner = None
+		self.ended = False
+		self.num_states = 3**(LENGTH * LENGTH)
 	
 	def game_over(self):
 		return True
 	
 	def draw_board(self):
-		pass
+		self.board.print_board()
 	
 	def get_state(self):
 		return self.state
+	
+	def reward(self, symbol):
+		if not self.game_over():
+			return 0
+		
+		return 1 if self.winner == symbol else 0
 	
 class Board:
 	#Values for pieces
@@ -22,10 +32,10 @@ class Board:
 	PIECE_O = 3
 
 	def __init__(self):
-		self.state = np.zeros((3,3), dtype=int)
+		self.state = np.zeros((LENGTH,LENGTH), dtype=int)
 		self.place_cnt = 0
-		self.row_sum = np.zeros(3)
-		self.column_sum = np.zeros(3)
+		self.row_sum = np.zeros(LENGTH)
+		self.column_sum = np.zeros(LENGTH)
 		self.pos_diag_sum = 0
 		self.neg_diag_sum = 0
 
