@@ -2,10 +2,7 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="c724f383-1d7c-412b-a5da-5df7f0faaa00" name="Default Changelist" comment="">
-      <change afterPath="$PROJECT_DIR$/demos/taxi.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/environments/taxi_monitor.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/temporal_difference.py" beforeDir="false" afterPath="$PROJECT_DIR$/temporal_difference.py" afterDir="false" />
     </list>
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
     <option name="SHOW_DIALOG" value="false" />
@@ -46,17 +43,18 @@
     <session id="-988324261">
       <usages-collector id="statistics.lifecycle.project">
         <counts>
-          <entry key="project.closed" value="4" />
+          <entry key="project.closed" value="6" />
           <entry key="project.open.time.0" value="1" />
+          <entry key="project.open.time.3" value="1" />
           <entry key="project.open.time.4" value="1" />
           <entry key="project.open.time.5" value="1" />
           <entry key="project.open.time.6" value="2" />
-          <entry key="project.opened" value="5" />
+          <entry key="project.opened" value="6" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.file.types.open">
         <counts>
-          <entry key="Python" value="21" />
+          <entry key="Python" value="22" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.vcs.git.usages" />
@@ -74,74 +72,13 @@
       </usages-collector>
       <usages-collector id="statistics.file.extensions.open">
         <counts>
-          <entry key="py" value="21" />
+          <entry key="py" value="22" />
         </counts>
       </usages-collector>
     </session>
   </component>
   <component name="FileEditorManager">
-    <splitter split-orientation="horizontal" split-proportion="0.2644938">
-      <split-first>
-        <leaf>
-          <file pinned="false" current-in-tab="true">
-            <entry file="file://$PROJECT_DIR$/demos/taxi.py">
-              <provider selected="true" editor-type-id="text-editor">
-                <state relative-caret-position="735">
-                  <caret line="49" column="109" selection-start-line="49" selection-start-column="109" selection-end-line="49" selection-end-column="109" />
-                  <folding>
-                    <element signature="e#0#33#0" expanded="true" />
-                  </folding>
-                </state>
-              </provider>
-            </entry>
-          </file>
-        </leaf>
-      </split-first>
-      <split-second>
-        <splitter split-orientation="horizontal" split-proportion="0.3654902">
-          <split-first>
-            <leaf>
-              <file pinned="false" current-in-tab="true">
-                <entry file="file://$PROJECT_DIR$/temporal_difference.py">
-                  <provider selected="true" editor-type-id="text-editor">
-                    <state relative-caret-position="1875">
-                      <caret line="125" column="50" selection-start-line="125" selection-start-column="50" selection-end-line="125" selection-end-column="50" />
-                      <folding>
-                        <element signature="e#0#42#0" expanded="true" />
-                        <marker date="1541426138267" expanded="true" signature="526:882" ph="..." />
-                        <marker date="1541426138267" expanded="true" signature="929:934" ph="..." />
-                        <marker date="1541426138267" expanded="true" signature="2332:2337" ph="..." />
-                        <marker date="1541426138267" expanded="true" signature="2332:3350" ph="..." />
-                        <marker date="1541426138267" expanded="true" signature="3408:3454" ph="..." />
-                        <marker date="1541426138267" expanded="true" signature="3408:3455" ph="..." />
-                        <marker date="1541426138267" expanded="true" signature="3408:3456" ph="..." />
-                        <marker date="1541426138267" expanded="true" signature="3408:3460" ph="..." />
-                      </folding>
-                    </state>
-                  </provider>
-                </entry>
-              </file>
-            </leaf>
-          </split-first>
-          <split-second>
-            <leaf>
-              <file pinned="false" current-in-tab="true">
-                <entry file="file://$PROJECT_DIR$/environments/taxi_monitor.py">
-                  <provider selected="true" editor-type-id="text-editor">
-                    <state relative-caret-position="405">
-                      <caret line="27" column="22" selection-start-line="27" selection-start-column="22" selection-end-line="27" selection-end-column="22" />
-                      <folding>
-                        <element signature="e#0#29#0" expanded="true" />
-                      </folding>
-                    </state>
-                  </provider>
-                </entry>
-              </file>
-            </leaf>
-          </split-second>
-        </splitter>
-      </split-second>
-    </splitter>
+    <leaf />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -200,6 +137,7 @@
       <foldersAlwaysOnTop value="true" />
     </navigator>
     <panes>
+      <pane id="Scope" />
       <pane id="ProjectPane">
         <subPane>
           <expand>
@@ -221,7 +159,6 @@
           <select />
         </subPane>
       </pane>
-      <pane id="Scope" />
     </panes>
   </component>
   <component name="PropertiesComponent">
@@ -385,23 +322,22 @@
     <servers />
   </component>
   <component name="ToolWindowManager">
-    <frame x="65" y="-4" width="3775" height="2164" extended-state="6" />
-    <editor active="true" />
+    <frame x="64" y="-11" width="3777" height="2172" extended-state="6" />
     <layout>
       <window_info content_ui="combo" id="Project" order="0" visible="true" weight="0.07595949" />
       <window_info id="Structure" order="1" side_tool="true" weight="0.25" />
       <window_info id="Favorites" order="2" side_tool="true" />
       <window_info anchor="bottom" id="Message" order="0" />
       <window_info anchor="bottom" id="Find" order="1" />
-      <window_info active="true" anchor="bottom" id="Run" order="2" visible="true" weight="0.20825148" />
+      <window_info anchor="bottom" id="Run" order="2" weight="0.20825148" />
       <window_info anchor="bottom" id="Debug" order="3" weight="0.4" />
       <window_info anchor="bottom" id="Cvs" order="4" weight="0.25" />
       <window_info anchor="bottom" id="Inspection" order="5" weight="0.4" />
       <window_info anchor="bottom" id="TODO" order="6" />
       <window_info anchor="bottom" id="Version Control" order="7" show_stripe_button="false" />
-      <window_info anchor="bottom" id="Terminal" order="8" />
+      <window_info active="true" anchor="bottom" id="Terminal" order="8" visible="true" weight="0.3295678" />
       <window_info anchor="bottom" id="Event Log" order="9" side_tool="true" />
-      <window_info anchor="bottom" id="Python Console" order="10" weight="0.3294979" />
+      <window_info anchor="bottom" id="Python Console" order="10" weight="0.32907662" />
       <window_info anchor="right" id="Commander" internal_type="SLIDING" order="0" type="SLIDING" weight="0.4" />
       <window_info anchor="right" id="Ant Build" order="1" weight="0.25" />
       <window_info anchor="right" content_ui="combo" id="Hierarchy" order="2" weight="0.25" />
@@ -432,20 +368,6 @@
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="2100">
           <caret line="140" selection-start-line="140" selection-end-line="140" />
-          <folding>
-            <marker date="1537901881677" expanded="true" signature="188:193" ph="..." />
-            <marker date="1537901881677" expanded="true" signature="881:952" ph="..." />
-            <marker date="1537901881677" expanded="true" signature="1010:1015" ph="..." />
-            <marker date="1537901881677" expanded="true" signature="1442:1814" ph="..." />
-            <marker date="1537901881677" expanded="true" signature="1900:2214" ph="..." />
-            <marker date="1537901881677" expanded="true" signature="2247:2451" ph="..." />
-            <marker date="1537901881677" expanded="true" signature="2480:2612" ph="..." />
-            <marker date="1537901881677" expanded="true" signature="2692:2697" ph="..." />
-            <marker date="1537901881677" expanded="true" signature="3186:3187" ph="..." />
-            <marker date="1537901881677" expanded="true" signature="3186:3192" ph="..." />
-            <marker date="1537901881677" expanded="true" signature="3697:3698" ph="..." />
-            <marker date="1537901881677" expanded="true" signature="3697:3702" ph="..." />
-          </folding>
         </state>
       </provider>
     </entry>
@@ -453,13 +375,6 @@
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="480">
           <caret line="32" column="74" selection-start-line="32" selection-start-column="74" selection-end-line="32" selection-end-column="74" />
-          <folding>
-            <element signature="e#0#18#0" expanded="true" />
-            <marker date="1541421822119" expanded="true" signature="146:151" ph="..." />
-            <marker date="1541421822119" expanded="true" signature="312:1128" ph="..." />
-            <marker date="1541421822119" expanded="true" signature="1294:1295" ph="..." />
-            <marker date="1541421822119" expanded="true" signature="1294:1819" ph="..." />
-          </folding>
         </state>
       </provider>
     </entry>
@@ -467,10 +382,6 @@
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="345">
           <caret line="23" column="15" selection-start-line="23" selection-start-column="15" selection-end-line="23" selection-end-column="15" />
-          <folding>
-            <element signature="e#0#10#0" expanded="true" />
-            <marker date="1541421822119" expanded="true" signature="1125:1423" ph="..." />
-          </folding>
         </state>
       </provider>
     </entry>
@@ -478,21 +389,6 @@
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="45">
           <caret line="3" column="22" lean-forward="true" selection-start-line="3" selection-start-column="22" selection-end-line="3" selection-end-column="22" />
-          <folding>
-            <element signature="e#0#18#0" expanded="true" />
-          </folding>
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/demos/cliffwalking_td.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="945">
-          <caret line="63" column="4" selection-start-line="63" selection-start-column="4" selection-end-line="63" selection-end-column="4" />
-          <folding>
-            <element signature="e#0#10#0" expanded="true" />
-            <marker date="1541425338460" expanded="true" signature="1555:2137" ph="..." />
-            <marker date="1541425338460" expanded="true" signature="2148:2324" ph="..." />
-          </folding>
         </state>
       </provider>
     </entry>
@@ -507,9 +403,6 @@
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="405">
           <caret line="27" column="22" selection-start-line="27" selection-start-column="22" selection-end-line="27" selection-end-column="22" />
-          <folding>
-            <element signature="e#0#29#0" expanded="true" />
-          </folding>
         </state>
       </provider>
     </entry>
@@ -517,27 +410,20 @@
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="1875">
           <caret line="125" column="50" selection-start-line="125" selection-start-column="50" selection-end-line="125" selection-end-column="50" />
-          <folding>
-            <element signature="e#0#42#0" expanded="true" />
-            <marker date="1541426138267" expanded="true" signature="526:882" ph="..." />
-            <marker date="1541426138267" expanded="true" signature="929:934" ph="..." />
-            <marker date="1541426138267" expanded="true" signature="2332:2337" ph="..." />
-            <marker date="1541426138267" expanded="true" signature="2332:3350" ph="..." />
-            <marker date="1541426138267" expanded="true" signature="3408:3454" ph="..." />
-            <marker date="1541426138267" expanded="true" signature="3408:3455" ph="..." />
-            <marker date="1541426138267" expanded="true" signature="3408:3456" ph="..." />
-            <marker date="1541426138267" expanded="true" signature="3408:3460" ph="..." />
-          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/demos/cliffwalking_td.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="945">
+          <caret line="63" column="4" selection-start-line="63" selection-start-column="4" selection-end-line="63" selection-end-column="4" />
         </state>
       </provider>
     </entry>
     <entry file="file://$PROJECT_DIR$/demos/taxi.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="735">
-          <caret line="49" column="109" selection-start-line="49" selection-start-column="109" selection-end-line="49" selection-end-column="109" />
-          <folding>
-            <element signature="e#0#33#0" expanded="true" />
-          </folding>
+        <state relative-caret-position="840">
+          <caret line="56" lean-forward="true" selection-start-line="56" selection-end-line="56" />
         </state>
       </provider>
     </entry>
