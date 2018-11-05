@@ -8,12 +8,12 @@ def update_Q(Qsa, Qsa_next, reward, alpha, gamma):
     return Qsa + (alpha * (reward + (gamma * Qsa_next) - Qsa))
 
 
-def epsilon_greedy_probs(env, Q_s, i_eps, eps=None):
+def epsilon_greedy_probs(nA, Q_s, i_eps, eps=None):
     epsilon = 1.0 / i_eps
     if eps is not None:
         epsilon = eps
-    policy_s = np.ones(env.nA) * epsilon / env.nA
-    policy_s[np.argmax(Q_s)] = 1 - epsilon + (epsilon / env.nA)
+    policy_s = np.ones(nA) * epsilon / nA
+    policy_s[np.argmax(Q_s)] = 1 - epsilon + (epsilon / nA)
 
     return policy_s
 
@@ -42,7 +42,7 @@ def sarsa(env, num_episodes, alpha, gamma=1.0):
 
         score = 0
         state = env.reset()
-        policy_s = epsilon_greedy_probs(env, Q[state], i_episode)
+        policy_s = epsilon_greedy_probs(env.nA, Q[state], i_episode)
         action = np.random.choice(np.arange(env.nA), p=policy_s)
 
         for t_step in np.arange(300):
@@ -50,7 +50,7 @@ def sarsa(env, num_episodes, alpha, gamma=1.0):
             score += reward
 
             if not done:
-                policy_s = epsilon_greedy_probs(env, Q[next_state], i_episode)
+                policy_s = epsilon_greedy_probs(env.nA, Q[next_state], i_episode)
                 next_action = np.random.choice(np.arange(env.nA), p=policy_s)
                 Q[state][action] = update_Q(Q[state][action], Q[next_state][next_action], reward, alpha, gamma)
                 state = next_state
@@ -83,7 +83,7 @@ def q_learning(env, num_episodes, alpha, gamma=1.0):
         score = 0
         state = env.reset()
         while True:
-            policy_s = epsilon_greedy_probs(env, Q[state], i_episode)
+            policy_s = epsilon_greedy_probs(env.nA, Q[state], i_episode)
             action = np.random.choice(np.arange(env.nA), p=policy_s)
             next_state, reward, done, info = env.step(action)
             score += reward
@@ -118,12 +118,12 @@ def expected_sarsa(env, num_episodes, alpha, gamma=1.0):
 
         score = 0
         state = env.reset()
-        policy_s = epsilon_greedy_probs(env, Q[state], i_episode, 0.005)
+        policy_s = epsilon_greedy_probs(env.nA, Q[state], i_episode, 0.005)
         while True:
             action = np.random.choice(np.arange(env.nA), p=policy_s)
             next_state, reward, done, info = env.step(action)
             score += reward
-            policy_s = epsilon_greedy_probs(env, Q[next_state], i_episode, 0.005)
+            policy_s = epsilon_greedy_probs(env.nA, Q[next_state], i_episode, 0.005)
 
             Q[state][action] = update_Q(Q[state][action], np.dot(policy_s, Q[next_state]), reward, alpha, gamma)
 
