@@ -2,8 +2,10 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="c724f383-1d7c-412b-a5da-5df7f0faaa00" name="Default Changelist" comment="">
-      <change afterPath="$PROJECT_DIR$/monte_carlo.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/black_jack_monte_carlo.py" beforeDir="false" afterPath="$PROJECT_DIR$/black_jack_monte_carlo.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frozenlake_dynamic_programming.py" beforeDir="false" afterPath="$PROJECT_DIR$/demos/frozenlake_dynamic_programming.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/monte_carlo.py" beforeDir="false" afterPath="$PROJECT_DIR$/monte_carlo.py" afterDir="false" />
     </list>
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
     <option name="SHOW_DIALOG" value="false" />
@@ -44,52 +46,53 @@
     <session id="-988324261">
       <usages-collector id="statistics.lifecycle.project">
         <counts>
-          <entry key="project.closed" value="2" />
+          <entry key="project.closed" value="4" />
+          <entry key="project.open.time.0" value="1" />
           <entry key="project.open.time.4" value="1" />
           <entry key="project.open.time.5" value="1" />
-          <entry key="project.opened" value="2" />
+          <entry key="project.open.time.6" value="2" />
+          <entry key="project.opened" value="5" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.file.types.open">
         <counts>
-          <entry key="Python" value="6" />
+          <entry key="Python" value="9" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.vcs.git.usages" />
       <usages-collector id="statistics.file.types.edit">
         <counts>
           <entry key="PLAIN_TEXT" value="30" />
-          <entry key="Python" value="5089" />
+          <entry key="Python" value="6964" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.file.extensions.edit">
         <counts>
           <entry key="dummy" value="30" />
-          <entry key="py" value="5089" />
+          <entry key="py" value="6964" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.file.extensions.open">
         <counts>
-          <entry key="py" value="6" />
+          <entry key="py" value="9" />
         </counts>
       </usages-collector>
     </session>
   </component>
   <component name="FileEditorManager">
-    <splitter split-orientation="horizontal" split-proportion="0.5">
+    <splitter split-orientation="horizontal" split-proportion="0.5211999">
       <split-first>
-        <splitter split-orientation="vertical" split-proportion="0.64691234">
+        <splitter split-orientation="horizontal" split-proportion="0.5">
           <split-first>
             <leaf SIDE_TABS_SIZE_LIMIT_KEY="300">
               <file pinned="false" current-in-tab="true">
-                <entry file="file://$PROJECT_DIR$/monte_carlo.py">
+                <entry file="file://$PROJECT_DIR$/black_jack_monte_carlo.py">
                   <provider selected="true" editor-type-id="text-editor">
-                    <state relative-caret-position="480">
-                      <caret line="32" lean-forward="true" selection-start-line="32" selection-end-line="32" />
+                    <state relative-caret-position="975">
+                      <caret line="65" column="4" selection-start-line="65" selection-start-column="4" selection-end-line="65" selection-end-column="4" />
                       <folding>
-                        <marker date="1538505837463" expanded="true" signature="77:82" ph="..." />
-                        <marker date="1538505837463" expanded="true" signature="281:428" ph="..." />
-                        <marker date="1538505837463" expanded="true" signature="462:467" ph="..." />
+                        <element signature="e#0#10#0" expanded="true" />
+                        <marker date="1541421529711" expanded="true" signature="1125:1423" ph="..." />
                       </folding>
                     </state>
                   </provider>
@@ -100,12 +103,16 @@
           <split-second>
             <leaf>
               <file pinned="false" current-in-tab="true">
-                <entry file="file://$PROJECT_DIR$/black_jack_monte_carlo.py">
+                <entry file="file://$PROJECT_DIR$/monte_carlo.py">
                   <provider selected="true" editor-type-id="text-editor">
-                    <state relative-caret-position="120">
-                      <caret line="8" selection-start-line="8" selection-end-line="8" />
+                    <state relative-caret-position="480">
+                      <caret line="32" column="74" selection-start-line="32" selection-start-column="74" selection-end-line="32" selection-end-column="74" />
                       <folding>
-                        <element signature="e#0#10#0" expanded="true" />
+                        <element signature="e#0#18#0" expanded="true" />
+                        <marker date="1541421124507" expanded="true" signature="146:151" ph="..." />
+                        <marker date="1541421124507" expanded="true" signature="312:1128" ph="..." />
+                        <marker date="1541421124507" expanded="true" signature="1294:1295" ph="..." />
+                        <marker date="1541421124507" expanded="true" signature="1294:1819" ph="..." />
                       </folding>
                     </state>
                   </provider>
@@ -116,7 +123,7 @@
         </splitter>
       </split-first>
       <split-second>
-        <leaf>
+        <leaf SIDE_TABS_SIZE_LIMIT_KEY="300">
           <file pinned="false" current-in-tab="true">
             <entry file="file://$PROJECT_DIR$/dynamic_programming.py">
               <provider selected="true" editor-type-id="text-editor">
@@ -158,20 +165,20 @@
     <option name="CHANGED_PATHS">
       <list>
         <option value="$PROJECT_DIR$/environments/blackjack_plot_utils.py" />
-        <option value="$PROJECT_DIR$/black_jack_monte_carlo.py" />
         <option value="$PROJECT_DIR$/iterative_policy_evaluation.py" />
         <option value="$PROJECT_DIR$/environments/frozenlake_plot_utils.py" />
         <option value="$PROJECT_DIR$/frozenlake_dynamic_programming.py" />
         <option value="$PROJECT_DIR$/dynamic_programming.py" />
         <option value="$PROJECT_DIR$/monte_carlo.py" />
+        <option value="$PROJECT_DIR$/black_jack_monte_carlo.py" />
       </list>
     </option>
   </component>
-  <component name="ProjectFrameBounds">
-    <option name="x" value="1952" />
-    <option name="y" value="24" />
-    <option name="width" value="1888" />
-    <option name="height" value="2136" />
+  <component name="ProjectFrameBounds" extendedState="6">
+    <option name="x" value="65" />
+    <option name="y" value="-4" />
+    <option name="width" value="3775" />
+    <option name="height" value="2164" />
   </component>
   <component name="ProjectInspectionProfilesVisibleTreeState">
     <entry key="Project Default">
@@ -196,7 +203,6 @@
       <foldersAlwaysOnTop value="true" />
     </navigator>
     <panes>
-      <pane id="Scope" />
       <pane id="ProjectPane">
         <subPane>
           <expand>
@@ -207,12 +213,18 @@
             <path>
               <item name="udacity" type="b2602c69:ProjectViewProjectNode" />
               <item name="udacity" type="462c0819:PsiDirectoryNode" />
+              <item name="demos" type="462c0819:PsiDirectoryNode" />
+            </path>
+            <path>
+              <item name="udacity" type="b2602c69:ProjectViewProjectNode" />
+              <item name="udacity" type="462c0819:PsiDirectoryNode" />
               <item name="environments" type="462c0819:PsiDirectoryNode" />
             </path>
           </expand>
           <select />
         </subPane>
       </pane>
+      <pane id="Scope" />
     </panes>
   </component>
   <component name="PropertiesComponent">
@@ -220,6 +232,9 @@
     <property name="settings.editor.selected.configurable" value="com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable" />
   </component>
   <component name="RecentsManager">
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/demos" />
+    </key>
     <key name="CopyFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/environments" />
     </key>
@@ -291,7 +306,7 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/frozenlake_dynamic_programming.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/demos/frozenlake_dynamic_programming.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -327,14 +342,15 @@
     <servers />
   </component>
   <component name="ToolWindowManager">
-    <frame x="1952" y="24" width="1888" height="2136" extended-state="0" />
+    <frame x="65" y="-4" width="3775" height="2164" extended-state="6" />
+    <editor active="true" />
     <layout>
-      <window_info content_ui="combo" id="Project" order="0" visible="true" weight="0.15281501" />
+      <window_info content_ui="combo" id="Project" order="0" visible="true" weight="0.07595949" />
       <window_info id="Structure" order="1" side_tool="true" weight="0.25" />
       <window_info id="Favorites" order="2" side_tool="true" />
       <window_info anchor="bottom" id="Message" order="0" />
       <window_info anchor="bottom" id="Find" order="1" />
-      <window_info anchor="bottom" id="Run" order="2" weight="0.20069721" />
+      <window_info active="true" anchor="bottom" id="Run" order="2" visible="true" weight="0.20039293" />
       <window_info anchor="bottom" id="Debug" order="3" weight="0.4" />
       <window_info anchor="bottom" id="Cvs" order="4" weight="0.25" />
       <window_info anchor="bottom" id="Inspection" order="5" weight="0.4" />
@@ -390,35 +406,34 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/frozenlake_dynamic_programming.py">
+    <entry file="file://$PROJECT_DIR$/demos/frozenlake_dynamic_programming.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="480">
+        <state relative-caret-position="435">
           <caret line="32" column="64" selection-start-line="32" selection-start-column="64" selection-end-line="32" selection-end-column="64" />
-          <folding>
-            <element signature="e#0#18#0" expanded="true" />
-            <marker date="1537901791691" expanded="true" signature="282:1216" ph="..." />
-          </folding>
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/black_jack_monte_carlo.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="120">
-          <caret line="8" selection-start-line="8" selection-end-line="8" />
-          <folding>
-            <element signature="e#0#10#0" expanded="true" />
-          </folding>
         </state>
       </provider>
     </entry>
     <entry file="file://$PROJECT_DIR$/monte_carlo.py">
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="480">
-          <caret line="32" lean-forward="true" selection-start-line="32" selection-end-line="32" />
+          <caret line="32" column="74" selection-start-line="32" selection-start-column="74" selection-end-line="32" selection-end-column="74" />
           <folding>
-            <marker date="1538505837463" expanded="true" signature="77:82" ph="..." />
-            <marker date="1538505837463" expanded="true" signature="281:428" ph="..." />
-            <marker date="1538505837463" expanded="true" signature="462:467" ph="..." />
+            <element signature="e#0#18#0" expanded="true" />
+            <marker date="1541421124507" expanded="true" signature="146:151" ph="..." />
+            <marker date="1541421124507" expanded="true" signature="312:1128" ph="..." />
+            <marker date="1541421124507" expanded="true" signature="1294:1295" ph="..." />
+            <marker date="1541421124507" expanded="true" signature="1294:1819" ph="..." />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/black_jack_monte_carlo.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="975">
+          <caret line="65" column="4" selection-start-line="65" selection-start-column="4" selection-end-line="65" selection-end-column="4" />
+          <folding>
+            <element signature="e#0#10#0" expanded="true" />
+            <marker date="1541421529711" expanded="true" signature="1125:1423" ph="..." />
           </folding>
         </state>
       </provider>

@@ -1,32 +1,50 @@
 import numpy as np
-
-def first_visit_mc_prediction(env, policy, num_episodes):
-    N = np.zeros(env.nS)
-
-    returns_sums = np.zeros(env.nS)
-    for i in range(num_episodes):
-        episode = generate_episode(env, policy)
+from collections import defaultdict
+import sys
 
 
-def every_visit_mc_prediction(env, policy, num_episodes):
-    N = np.zeros(env.nS)
-
-    returns_sums = np.zeros(env.nS)
-    for i in range(num_episodes):
-        episode = generate_episode(env, policy)
+def first_visit_mc_prediction(env, num_episodes, generate_episode, gamma=1.0):
+    N = np.zeros(env.action_space.n)
+    returns_sums = np.zeros(env.action_space.n)
 
 
-def generate_episode(env, policy):
-    episode = []
-    state = env.reset()
+def every_visit_mc_prediction(env, num_episodes, generate_episode, gamma=1.0):
+    returns_sums = defaultdict(lambda: np.zeros(env.action_space.n))
+    N = defaultdict(lambda: np.zeros(env.action_space.n))
+    Q = defaultdict(lambda: np.zeros(env.action_space.n))
 
-    while True:
-        probs = [0.8, 0.2] if state[0] > 18 else [0.2, 0.8]
-        action = np.random.choice(np.arange(2), p=probs)
-        next_state, reward, done, info = env.step(action)
-        episode.append((state, action, reward))
-        state = next_state
-        if done:
-            break
+    for i_episode in range(num_episodes):
 
-    return episode
+        if i_episode % 1000 == 0:
+            print("\rEpisode {}/{}.".format(i_episode, num_episodes), end="")
+            sys.stdout.flush()
+
+        episode = generate_episode(env)
+        states, actions, rewards = zip(*episode)
+
+        gamma_array = np.array([gamma ** i for i in range(len(rewards) + 1)])
+        for i, state in enumerate(states):
+            returns_sums[state][actions[i]] += sum(gamma_array[:-(i + 1)] * rewards[i:])
+            N[state][actions[i]] += 1
+            Q[state][actions[i]] = returns_sums[state][actions[i]] / N[state][actions[i]]
+    return Q
+
+
+def every_visit_mc_control(env, generate_episode, update_Q, num_episodes, alpha, gamma=1.0, eps_start=1.0,
+                           eps_decay=.9999, eps_min=0.05):
+    nA = env.action_space.n
+    Q = defaultdict(lambda: np.zeros(nA))
+    epsilon = eps_start
+
+    for i_episode in range(1, num_episodes + 1):
+        if i_episode % 1000 == 0:
+            print("\rEpisode {}/{}.".format(i_episode, num_episodes), end="")
+            sys.stdout.flush()
+
+        epsilon = max(epsilon * eps_decay, eps_min)
+        episode = generate_episode(env, Q, epsilon, nA)
+        Q = update_Q(episode, Q, alpha, gamma)
+
+    policy = dict((k, np.argmax(v)) for k,v in Q.items())
+
+    return policy, Q
