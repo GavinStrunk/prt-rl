@@ -59,7 +59,7 @@ qt-gui==0.3.11
 qt-gui-app==0.3.11
 qt-gui-cpp==0.3.11
 qt-gui-py-common==0.3.11
-requests==2.19.1
+requests>=2.20.0
 resource-retriever==1.12.4
 rocon-app-manager==0.9.1
 rocon-app-utilities==0.9.1
