@@ -42,7 +42,7 @@ moveit-commander==0.9.15
 moveit-python==0.3.1
 moveit-ros-planning-interface==0.9.15
 moveit-ros-visualization==0.9.15
-numpy==1.15.2
+numpy==1.22.0
 openni2-launch==0.4.1
 pandas==0.23.4
 pluginlib==1.11.3
