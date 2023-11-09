@@ -1,0 +1,27 @@
+output_file: "models/mountain_car_ppo.zip"
+environment: "MountainCarContinuous-v0"
+ppo:
+  device: 'cuda:0'
+  policy:
+    num_cells: 64
+    depth: 3
+  value:
+    num_cells: 64
+    depth: 3
+  collector:
+    frame_skip: 1
+    frames_per_batch: 1000
+    total_frames: 100_000
+  loss:
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_epsilon: 0.2
+    loss_critic_type: 'smooth_l1'
+    entropy_eps: 1e-4
+    critic_coef: 1.0
+    normalize_advantage: true
+    max_grad_norm: 1.0
+    mini_batch_size: 200
+    epochs: 10
+  optim:
+    lr: 3e-4

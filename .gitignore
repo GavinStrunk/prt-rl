@@ -1,3 +1,5 @@
+.idea/
+torchrl/models/*
 .metadata
 
 # Byte-compiled / optimized / DLL files
