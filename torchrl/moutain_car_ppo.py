@@ -131,8 +131,10 @@ class PPOAgent:
                 # network which is updated in the inner loop.
                 with torch.no_grad():
                     self.advantage_module(tensordict_data)
+
                 data_view = tensordict_data.reshape(-1)
                 self.replay_buffer.extend(data_view.cpu())
+
                 for _ in range(self.config.ppo.collector.frames_per_batch // self.config.ppo.loss.mini_batch_size):
                     subdata = self.replay_buffer.sample(self.config.ppo.loss.mini_batch_size)
                     loss_vals = self.loss_module(subdata.to(self.config.ppo.device))
@@ -214,7 +216,7 @@ def transform_env(env):
             StepCounter(),
         ),
     )
-    env.transform[0].init_stats(num_iter=1000, reduce_dim=0, cat_dim=0)
+    env.transform[0].init_stats(num_iter=10, reduce_dim=0, cat_dim=0)
     return env
 
 
@@ -238,13 +240,45 @@ def execute(config: SimConfig):
     policy = torch.load(config.output_file).to(config.ppo.device)
     tensor_out = env.reset()
 
-    done = False
-    while not done:
+    while True:
         action = policy(tensor_out)
         tensor_out = env.step(action)
         done = tensor_out['next']['done'].item()
 
+        if done:
+            break
+
+
+@hydra.main(config_path='configs', config_name='mountain_car_ppo.yaml', version_base=None)
+def baseline(config: SimConfig):
+    """
+    Baseline is the Stable Baselines3 PPO implementation
+    """
+    from stable_baselines3 import PPO
+    import gymnasium as gym
+
+    env = gym.make(config.environment)
+    policy = PPO('MlpPolicy', env=env, verbose=1)
+    policy.learn(total_timesteps=config.ppo.collector.total_frames)
+    policy.save('models/mountain_car_sb3.zip')
+    env.close()
+
+    eval_env = gym.make(config.environment, render_mode="human")
+    p = PPO.load('models/mountain_car_sb3.zip')
+
+    obs, _ = eval_env.reset()
+
+    while True:
+        action, _ = p.predict(obs)
+        obs, reward, done, trunc, info = eval_env.step(action)
+
+        if done or trunc:
+            eval_env.close()
+            print('Final Reward: {}'.format(reward))
+            break
+
 
 if __name__ == '__main__':
-    # train()
+    # baseline()
+    train()
     execute()
