@@ -3,25 +3,25 @@ environment: "MountainCarContinuous-v0"
 ppo:
   device: 'cuda:0'
   policy:
-    num_cells: 256
-    depth: 3
+    num_cells: 64
+    depth: 2
   value:
-    num_cells: 256
-    depth: 3
+    num_cells: 64
+    depth: 2
   collector:
     frame_skip: 1
-    frames_per_batch: 1000
-    total_frames: 1_000_000
+    frames_per_batch: 8
+    total_frames: 20_000
   loss:
-    gamma: 0.99
-    gae_lambda: 0.95
-    clip_epsilon: 0.2
+    gamma: 0.9999
+    gae_lambda: 0.9
+    clip_epsilon: 0.1
     loss_critic_type: 'smooth_l1'
-    entropy_eps: 1e-4
+    entropy_eps: 0.00429
     critic_coef: 1.0
     normalize_advantage: true
-    max_grad_norm: 1.0
-    mini_batch_size: 1000
+    max_grad_norm: 5.0
+    mini_batch_size: 256
     epochs: 10
   optim:
-    lr: 1e-3
+    lr: 7.77e-05

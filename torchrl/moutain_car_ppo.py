@@ -1,4 +1,5 @@
 from collections import defaultdict
+import gymnasium as gym
 import hydra
 from torch.nn import Sequential
 from torchrl.modules import MLP
@@ -19,7 +20,7 @@ from torchrl.envs import (
     StepCounter,
     TransformedEnv,
 )
-from torchrl.envs.libs.gym import GymEnv
+from torchrl.envs.libs.gym import GymEnv, GymWrapper
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 from torchrl.modules import ProbabilisticActor, TanhNormal, ValueOperator
 from torchrl.objectives import ClipPPOLoss
@@ -61,7 +62,6 @@ class PPOAgent:
             distribution_kwargs={
                 "min": env.action_spec.space.minimum,
                 "max": env.action_spec.space.maximum,
-                # "tanh_loc": False,
             },
             # default_interaction_type=ExplorationType.RANDOM,
             return_log_prob=True,
@@ -222,6 +222,9 @@ def transform_env(env):
 
 @hydra.main(config_path='configs', config_name='mountain_car_ppo.yaml', version_base=None)
 def train(config: SimConfig):
+
+    # env = gym.wrappers.NormalizeObservation(gym.make(config.environment))
+    # env = GymWrapper(env)
     frame_skip = 1
     env = GymEnv(config.environment, device='cuda', frame_skip=frame_skip)
     env = transform_env(env)
@@ -234,6 +237,9 @@ def train(config: SimConfig):
 
 @hydra.main(config_path='configs', config_name='mountain_car_ppo.yaml', version_base=None)
 def execute(config: SimConfig):
+
+    # env = gym.wrappers.NormalizeObservation(gym.make(config.environment, render_mode="human"))
+    # env = GymWrapper(env)
     env = GymEnv(config.environment, device='cuda', render_mode="human")
     env = transform_env(env)
 
@@ -242,6 +248,7 @@ def execute(config: SimConfig):
 
     while True:
         action = policy(tensor_out)
+        print("Action: {}".format(action["action"]))
         tensor_out = env.step(action)
         done = tensor_out['next']['done'].item()
 
@@ -257,19 +264,33 @@ def baseline(config: SimConfig):
     from stable_baselines3 import PPO
     import gymnasium as gym
 
-    env = gym.make(config.environment)
-    policy = PPO('MlpPolicy', env=env, verbose=1)
-    policy.learn(total_timesteps=config.ppo.collector.total_frames)
-    policy.save('models/mountain_car_sb3.zip')
-    env.close()
+    # env = gym.wrappers.NormalizeObservation(gym.make(config.environment))
+    # policy = PPO(policy='MlpPolicy',
+    #              env=env,
+    #              learning_rate=7.77e-05,
+    #              batch_size=256,
+    #              n_steps=8,
+    #              gamma=0.9999,
+    #              ent_coef=0.00429,
+    #              clip_range=0.1,
+    #              gae_lambda=0.9,
+    #              max_grad_norm=5,
+    #              vf_coef=0.19,
+    #              use_sde=True,
+    #              policy_kwargs=dict(log_std_init=-3.29, ortho_init=False),
+    #              verbose=1)
+    # policy.learn(total_timesteps=config.ppo.collector.total_frames)
+    # policy.save('models/mountain_car_sb3.zip')
+    # env.close()
 
-    eval_env = gym.make(config.environment, render_mode="human")
+    eval_env = gym.wrappers.NormalizeObservation(gym.make(config.environment, render_mode="human"))
     p = PPO.load('models/mountain_car_sb3.zip')
 
     obs, _ = eval_env.reset()
 
     while True:
         action, _ = p.predict(obs)
+        print("Action: {}".format(action))
         obs, reward, done, trunc, info = eval_env.step(action)
 
         if done or trunc:
@@ -281,4 +302,4 @@ def baseline(config: SimConfig):
 if __name__ == '__main__':
     # baseline()
     train()
-    execute()
+    # execute()

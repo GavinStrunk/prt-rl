@@ -103,9 +103,9 @@ class PPOAgent:
             entropy_bonus=bool(self.config.ppo.loss.entropy_eps),
             entropy_coef=self.config.ppo.loss.entropy_eps,
             # these keys match by default but we set this for completeness
-            value_target_key=self.advantage_module.value_target_key,
+            # value_target_key=self.advantage_module.value_target_key,
             critic_coef=self.config.ppo.loss.critic_coef,
-            gamma=self.config.ppo.loss.gamma,
+            # gamma=self.config.ppo.loss.gamma,
             loss_critic_type=self.config.ppo.loss.loss_critic_type,
         )
         self.loss_module.make_value_estimator(gamma=self.config.ppo.loss.gamma)
@@ -251,5 +251,5 @@ def execute(config: SimConfig):
 
 
 if __name__ == '__main__':
-    # train()
-    execute()
+    train()
+    # execute()
