@@ -1,17 +1,19 @@
 [tool.poetry]
-name = "reinforcement-learning"
+name = "prt-rl"
 version = "0.1.0"
 description = ""
 authors = ["Gavin Strunk <gavin.strunk@ssci.com>"]
 readme = "README.md"
-packages = [{include = "reinforcement_learning"}]
+#packages = [{include = "prt_rl"}]
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.13"
-torch = "^2.5.1"
+torch = "^2.4.1"
 gymnasium = {extras = ["all"], version = "^1.0.0"}
 flappy-bird-gymnasium = "^0.4.0"
 mlflow = "^2.19.0"
+pytest = "^8.3.4"
+tensordict = "^0.6.2"
 
 
 [build-system]
