@@ -1,7 +1,9 @@
 import numpy as np
 import random
 import os
-from prt.simulation.rendering import GridworldRender
+from typing import Tuple, Optional
+from prt_sim.jhu.base import BaseEnvironment
+from prt_sim.rendering import GridworldRender
 
 
 def get_state_index(x, y, z):
@@ -11,7 +13,7 @@ def get_state_index(x, y, z):
     return x_idx + y_idx + z_idx   # ranges from 0 to 127
 
 
-class GoldExplorer:
+class GoldExplorer(BaseEnvironment):
     """
     The Gold Explorer puzzle
 
@@ -120,11 +122,14 @@ class GoldExplorer:
         return get_state_index(self.expl_x, self.expl_y, self.expl_z)
 
     # Set the current state to the initial state
-    def reset(self, exp_starts):
+    def reset(self,
+              seed: Optional[int] = None,
+              randomize_start: Optional[bool] = False
+              ) -> int:
         x = 0
         y = 0
         z = 0
-        if exp_starts:
+        if randomize_start:
             done = False
             while not done:
                 x = random.randint(0, 7)
@@ -141,7 +146,9 @@ class GoldExplorer:
         st = get_state_index(self.expl_x, self.expl_y, self.expl_z)
         return st
 
-    def execute_action(self, action: int) -> tuple:
+    def execute_action(self,
+                       action: int
+                       ) -> Tuple[int, float, bool]:
         """
         Executes an action for the explorer.
 
@@ -244,7 +251,7 @@ class GoldExplorer:
 
 if __name__ == '__main__':
     env = GoldExplorer()
-    env.reset(exp_starts=False)
+    env.reset(randomize_start=False)
     env.render()
 
     for _ in range(20):

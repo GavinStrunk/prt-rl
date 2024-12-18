@@ -2,9 +2,8 @@
 name = "prt-rl"
 version = "0.1.0"
 description = ""
-authors = ["Gavin Strunk <gavin.strunk@ssci.com>"]
+authors = ["Gavin Strunk <gavin.strunk@gmail.com>"]
 readme = "README.md"
-#packages = [{include = "prt_rl"}]
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.13"

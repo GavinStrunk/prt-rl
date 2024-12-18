@@ -1,7 +1,38 @@
 import numpy as np
-from prt.rl.exact.policies import epsilon_greedy
 
-class SampleAverage:
+from prt_rl.env.interface import EnvParams
+from prt_rl.utils.policies import epsilon_greedy, QTablePolicy
+from prt_rl.utils.qtable import QTable
+from prt_rl.utils.decision_functions import EpsilonGreedy
+
+from tensordict import TensorDict
+from prt_rl.exact.trainers import TDTrainer
+
+class SampleAverage(TDTrainer):
+    def __init__(self,
+                 env_params: EnvParams,
+                 epsilon: float,
+                 ):
+        policy = QTablePolicy(
+            q_table=QTable(
+                state_dim=env_params.observation_shape,
+                action_dim=env_params.action_shape,
+                initial_value=0
+            ),
+            decision_function=EpsilonGreedy(
+                epsilon=epsilon,
+            ),
+        )
+        super().__init__(env_params, policy)
+
+    def update_policy(self, trajectory: TensorDict) -> None:
+        action = trajectory.get('next', 'action')
+        reward = trajectory.get('next','reward')
+
+        pass
+
+
+class SampleAverage2:
     """
     Sample Average method estimates the value of action by estimating the average sample of relevant rewards.
 

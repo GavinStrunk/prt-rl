@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import t
 from typing import List
-from prt.simulation.jhu.bandits import KArmBandits
+from prt_sim.jhu.bandits import KArmBandits
 
 def plot_bandit_probabilities(env: KArmBandits) -> None:
     """

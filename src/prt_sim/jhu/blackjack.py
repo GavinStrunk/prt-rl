@@ -1,6 +1,6 @@
-import numpy as np
 import random
-
+from typing import Tuple, Optional
+from prt_sim.jhu.base import BaseEnvironment
 
 class CardDeck:
     """For shuffling and dealing cards"""
@@ -19,7 +19,7 @@ class CardDeck:
         return self.deal_seq.pop(0)
 
 
-class Blackjack:
+class Blackjack(BaseEnvironment):
     r"""
     Blackjack simulation class
 
@@ -36,35 +36,22 @@ class Blackjack:
         self.num_states = 203
         self.num_actions = 2
 
-    def get_number_of_states(self):
+    def get_number_of_states(self) -> int:
         return self.num_states
 
-    def get_number_of_actions(self):
+    def get_number_of_actions(self) -> int:
         return self.num_actions
 
-    def get_state(self):
-        return self.current_state
 
-    def get_state_index(self):
-        a_idx = self.agent_total - 12
-        d_idx = 10 * (self.dealer_card - 1)
-        u_idx = 100 * self.usable_ace
-        return a_idx + d_idx + u_idx
 
-    def get_next_state(self):
-        new_card = self.deck.deal_card()
-        self.agent_total += new_card
-        if self.agent_total > 21 and self.usable_ace == 1:
-            self.usable_ace = 0
-            self.agent_total -= 10
-        # print("Agent drew a", new_card, "and now has", self.agent_total, "points.")
-        if self.agent_total > 21:
-            new_state = 201      # 201 is the losing state
-        else:
-            new_state = self.get_state_index()
-        return new_state
+    def reset(self,
+              seed: Optional[int] = None,
+              randomize_start: Optional[bool] = False
+              ) -> int:
+        assert not randomize_start, "Randomizing the start is not supported"
+        if seed is not None:
+            random.seed(seed)
 
-    def reset(self):
         self.deck.shuffle_cards()
         self.agent_total = 0
         self.usable_ace = 0
@@ -116,7 +103,9 @@ class Blackjack:
         return self.current_state
 
     # Use the agent's action to determine the next state and reward
-    def execute_action(self, action):
+    def execute_action(self,
+                       action: int
+                       ) -> Tuple[int, float, bool]:
         # action is 'stick'
         if action == 0:
             # dealer's turn
@@ -163,6 +152,28 @@ class Blackjack:
 
         # print("new_state =", new_state, "reward = ", reward, "game_end =", game_end)
         self.current_state = new_state
-        return new_state, reward, game_end
+        return new_state, float(reward), game_end
+
+    def get_state(self):
+        return self.current_state
+
+    def get_state_index(self):
+        a_idx = self.agent_total - 12
+        d_idx = 10 * (self.dealer_card - 1)
+        u_idx = 100 * self.usable_ace
+        return a_idx + d_idx + u_idx
+
+    def get_next_state(self):
+        new_card = self.deck.deal_card()
+        self.agent_total += new_card
+        if self.agent_total > 21 and self.usable_ace == 1:
+            self.usable_ace = 0
+            self.agent_total -= 10
+        # print("Agent drew a", new_card, "and now has", self.agent_total, "points.")
+        if self.agent_total > 21:
+            new_state = 201      # 201 is the losing state
+        else:
+            new_state = self.get_state_index()
+        return new_state
 
 

@@ -1,6 +1,12 @@
 import torch
 
 class QTable:
+    """
+
+    Todo:
+    support keeping track of the visit count
+
+    """
     def __init__(self,
                  state_dim,
                  action_dim,

@@ -1,9 +1,11 @@
 import numpy as np
 import os
-from prt.simulation.rendering import GridworldRender
+from typing import Optional, Tuple
+from prt_sim.jhu.base import BaseEnvironment
+from prt_sim.rendering import GridworldRender
 
 
-class RobotGame:
+class RobotGame(BaseEnvironment):
     """
     Robot Game is a discrete grid world navigated by Fred the robot.
 
@@ -85,39 +87,29 @@ class RobotGame:
         """
         return 4
 
-    def get_state(self) -> int:
-        """
-        Returns the current world state, which is the location of the robot.
 
-        Returns:
-            int: current location of the robot
-        """
-        state = self.current_position[1] * self.grid_width + self.current_position[0] + 1
-        if state > 6:
-            state -= 1
-        return state
 
-    def reset(self, initial_state: int = None) -> int:
+    def reset(self,
+              seed: Optional[int] = None,
+              randomize_start: Optional[bool] = False
+              ) -> int:
         """
         Resets the world to initial state. If initial_state is None, the robot is initialized to state 8.
 
         Args:
-            initial_state (int): initial location of the robot
+            seed (int, optional): Random seed. Defaults to None.
+            randomize_start (bool, optional): Whether to randomize the starting state. Not all environments will support this. Defaults to False.
 
         Returns:
-            int: initial location of the robot
+            int: current state value
         """
-        if initial_state is None:
-            self.current_position = np.array([0, 2])
-        else:
-            if initial_state <= 6:
-                initial_state -= 1
-            y_pos = int(initial_state / self.grid_width)
-            x_pos = int(initial_state - y_pos * self.grid_width)
-            self.current_position = np.array([x_pos, y_pos])
+        assert not randomize_start, "Randomizing the start is not supported"
+        self.current_position = np.array([0, 2])
         return self.get_state()
 
-    def execute_action(self, action: int) -> tuple:
+    def execute_action(self,
+                       action: int
+                       ) -> Tuple[int, float, bool]:
         """
         Executes the action and a step of the world.
 
@@ -154,7 +146,19 @@ class RobotGame:
             reward = -25
             done = True
 
-        return self.get_state(), reward, done
+        return self.get_state(), float(reward), done
+
+    def get_state(self) -> int:
+        """
+        Returns the current world state, which is the location of the robot.
+
+        Returns:
+            int: current location of the robot
+        """
+        state = self.current_position[1] * self.grid_width + self.current_position[0] + 1
+        if state > 6:
+            state -= 1
+        return state
 
     def _check_if_valid_action(self, position: list[int]) -> bool:
         """

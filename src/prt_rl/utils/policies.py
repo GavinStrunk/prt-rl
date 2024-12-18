@@ -26,14 +26,14 @@ class Policy(ABC):
         else:
             raise ValueError(f"Parameter '{name}' not found in Policy.")
 
-    @staticmethod
-    def load_from_file(filename: str) -> 'Policy':
-        raise NotImplementedError
+    # @staticmethod
+    # def load_from_file(filename: str) -> 'Policy':
+    #     raise NotImplementedError
+    #
+    # def save(self, filename: str):
+    #     raise NotImplementedError
 
-    def save(self, filename: str):
-        raise NotImplementedError
-
-class QTablePolicy:
+class QTablePolicy(Policy):
     def __init__(self,
                  q_table: QTable,
                  decision_function: DecisionFunction,

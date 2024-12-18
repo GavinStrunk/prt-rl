@@ -1,5 +1,5 @@
 import numpy as np
-from prt_rl.exact.policies import epsilon_greedy
+from prt_rl.utils.policies import epsilon_greedy
 
 class SARSA:
     r"""
