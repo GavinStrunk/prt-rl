@@ -1,4 +1,5 @@
-from tensordict import tensordict
+from tensordict.tensordict import TensorDict
+import torch
 from prt_sim.jhu.base import BaseEnvironment
 from prt_rl.env.interface import EnvironmentInterface, EnvParams
 
@@ -18,7 +19,7 @@ class JhuWrapper(EnvironmentInterface):
             action_shape=(1,),
             action_continuous=False,
             action_min=0,
-            action_max=self.env.get_number_of_actions(),
+            action_max=self.env.get_number_of_actions()-1,
             observation_shape=(1,),
             observation_continuous=False,
             observation_min=0,
@@ -26,15 +27,20 @@ class JhuWrapper(EnvironmentInterface):
         )
         return params
 
-    def reset(self) -> tensordict:
+    def reset(self) -> TensorDict:
         state = self.env.reset()
-        state_td = tensordict.TensorDict(state)
+        state_td = TensorDict(
+            {
+                'observation': torch.tensor([[state]])
+            },
+            batch_size=torch.Size([1])
+        )
         return state_td
 
-    def step(self, action: tensordict) -> tensordict:
+    def step(self, action: TensorDict) -> TensorDict:
         action_val = action['action']
         state, reward, done = self.env.execute_action(action_val)
-        trajectory_td = tensordict.TensorDict(action)
+        trajectory_td = TensorDict(action)
         trajectory_td['next'] = {
             'observation': state,
             'reward': reward,
