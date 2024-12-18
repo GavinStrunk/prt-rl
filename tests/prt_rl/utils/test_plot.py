@@ -3,7 +3,8 @@ import numpy as np
 import pytest
 
 from prt_rl.utils.plot import plot_scalar_metric
-# skip these tests because they generate plots
+
+@pytest.mark.skip(reason="Generates a plot")
 def test_plotting_single_scalar_metric():
     name = 'Random Value'
     value = np.random.rand(100)
@@ -12,6 +13,7 @@ def test_plotting_single_scalar_metric():
     plot_scalar_metric(name, value)
     plt.show()
 
+@pytest.mark.skip(reason="Generates a plot")
 def test_plotting_single_scalar_with_one_agent():
     name = 'Random Value'
     value = np.random.rand(1, 100)
@@ -20,6 +22,7 @@ def test_plotting_single_scalar_with_one_agent():
     plot_scalar_metric(name, value)
     plt.show()
 
+@pytest.mark.skip(reason="Generates a plot")
 def test_plotting_conf_interval_for_single_scalar():
     name = 'Random Value'
     value = np.random.rand(5, 100)
@@ -28,6 +31,7 @@ def test_plotting_conf_interval_for_single_scalar():
     plot_scalar_metric(name, value)
     plt.show()
 
+@pytest.mark.skip(reason="Generates a plot")
 def test_plotting_multiple_labels():
     name = 'Random Value'
     value1 = np.random.rand(100)
@@ -36,6 +40,7 @@ def test_plotting_multiple_labels():
     plot_scalar_metric(name, metric_values={'value1': value1, 'value2': value2})
     plt.show()
 
+@pytest.mark.skip(reason="Generates a plot")
 def test_plotting_with_max_value():
     name = 'Random Value'
     value1 = np.random.rand(10, 100)
@@ -44,6 +49,7 @@ def test_plotting_with_max_value():
     plot_scalar_metric(name, metric_values={'value1': value1, 'value2': value2}, max_value=1.0)
     plt.show()
 
+@pytest.mark.skip(reason="Generates a plot")
 def test_plotting_invalid_scalar_data():
     name = 'Random Value'
     value = np.random.rand(1, 100, 2)

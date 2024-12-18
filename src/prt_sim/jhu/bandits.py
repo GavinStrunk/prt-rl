@@ -19,6 +19,7 @@ class KArmBandits(BaseEnvironment):
     """
     def __init__(self,
                  num_bandits: int = 10,
+
                  ) -> None:
         assert num_bandits > 0, "Number of bandits must be greater than 0"
         self.num_bandits = num_bandits

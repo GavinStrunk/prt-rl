@@ -27,17 +27,6 @@ def test_bandits_get_actions():
     actions = env.get_number_of_actions()
     assert actions  == 10
 
-def test_bandits_explicit_reset():
-    env = KArmBandits(num_bandits=3)
-    probs = [0.1, 0.5, 0.4]
-    env.reset(initial_state=probs)
-
-    np.testing.assert_allclose(env.bandit_probs, probs)
-
-    bad_probs = [0.1, 0.9]
-    with pytest.raises(AssertionError):
-        env.reset(initial_state=bad_probs)
-
 def test_bandits_implicit_reset():
     env = KArmBandits(num_bandits=3)
     np.random.seed(0)
@@ -47,14 +36,12 @@ def test_bandits_implicit_reset():
 
 def test_bandits_get_optimal_bandit():
     env = KArmBandits(num_bandits=3)
-    probs = [0.1, 0.5, 0.4]
-    env.reset(initial_state=probs)
+    env.reset(seed=2)
 
     opt_band = env.get_optimal_bandit()
     assert opt_band  == 1
 
-    np.random.seed(0)
-    env.reset()
+    env.reset(seed=0)
     opt_band = env.get_optimal_bandit()
     assert opt_band == 0
 

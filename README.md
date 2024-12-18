@@ -2,7 +2,6 @@
 My code related to learning and using RL outside of a specific project
 
 ## To Do
-
 - implement random policy
 - unit test jhu wrapper
 - unit test decision functions

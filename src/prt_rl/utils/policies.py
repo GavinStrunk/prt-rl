@@ -3,6 +3,7 @@ from typing import Any
 
 import numpy as np
 import torch
+from prt_rl.env.interface import EnvParams
 from prt_rl.utils.qtable import QTable
 from prt_rl.utils.decision_functions import DecisionFunction
 
@@ -32,6 +33,17 @@ class Policy(ABC):
     #
     # def save(self, filename: str):
     #     raise NotImplementedError
+
+class RandomPolicy(Policy):
+    def __init__(self,
+                 env_params: EnvParams,
+                 ) -> None:
+        super().__init__(DecisionFunction())
+        self.env_params = env_params
+
+    def get_action(self, state: torch.Tensor) -> torch.Tensor:
+        pass
+
 
 class QTablePolicy(Policy):
     def __init__(self,
