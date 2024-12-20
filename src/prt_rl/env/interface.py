@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Union
 
-from tensordict import tensordict
+from tensordict.tensordict import TensorDict
 
 @dataclass
 class EnvParams:
@@ -75,24 +75,24 @@ class EnvironmentInterface(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def reset(self) -> tensordict:
+    def reset(self) -> TensorDict:
         """
         Resets the environment to the initial state and returns the initial observation.
 
         Returns:
-            tensordict: initial observation
+            TensorDict: initial observation
         """
         raise NotImplementedError()
 
     @abstractmethod
-    def step(self, action: tensordict) -> tensordict:
+    def step(self, action: TensorDict) -> TensorDict:
         """
-        Steps the simulation using the "action" key in the tensordict and returns the new trajectory.
+        Steps the simulation using the "action" key in the TensorDict and returns the new trajectory.
 
         Args:
-            action (tensordict): Tensordict with "action" key that is a tensor with shape (# env, # actions)
+            action (TensorDict): TensorDict with "action" key that is a tensor with shape (# env, # actions)
 
         Returns:
-            tensordict: Tensordict trajectory with the "next" key
+            TensorDict: TensorDict trajectory with the "next" key
         """
         raise NotImplementedError()

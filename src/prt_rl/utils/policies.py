@@ -3,6 +3,7 @@ from typing import Any
 
 import numpy as np
 import torch
+from tensordict.tensordict import TensorDict
 from prt_rl.env.interface import EnvParams
 from prt_rl.utils.qtable import QTable
 from prt_rl.utils.decision_functions import DecisionFunction
@@ -10,7 +11,8 @@ from prt_rl.utils.decision_functions import DecisionFunction
 
 class Policy(ABC):
     def __init__(self,
-                 decision_function: DecisionFunction,):
+                 decision_function: DecisionFunction,
+                 ) -> None:
         self.decision_function = decision_function
 
     @abstractmethod
@@ -34,15 +36,36 @@ class Policy(ABC):
     # def save(self, filename: str):
     #     raise NotImplementedError
 
-class RandomPolicy(Policy):
+class RandomPolicy:
+    """
+    Implements a policy that uniformly samples random actions.
+
+    Args:
+        env_params (EnvParams): environment parameters
+    """
     def __init__(self,
                  env_params: EnvParams,
                  ) -> None:
-        super().__init__(DecisionFunction())
         self.env_params = env_params
 
-    def get_action(self, state: torch.Tensor) -> torch.Tensor:
-        pass
+    def get_action(self,
+                   state: TensorDict
+                   ) -> TensorDict:
+        """
+        Randomly samples an action from action space.
+
+        Returns:
+            TensorDict: Tensordict with the "action" key added
+        """
+        if not self.env_params.action_continuous:
+            action = torch.randint(low=self.env_params.action_min, high=self.env_params.action_max,
+                                   size=(*state.batch_size, *self.env_params.action_shape))
+        else:
+            action = torch.rand(size=(*state.batch_size, *self.env_params.action_shape))
+            action = action * (self.env_params.action_max - self.env_params.action_min) + self.env_params.action_min
+
+        state['action'] = action
+        return state
 
 
 class QTablePolicy(Policy):
@@ -54,7 +77,8 @@ class QTablePolicy(Policy):
         self.decision_function = decision_function
 
     def get_action(self,
-                   state: torch.Tensor) -> torch.Tensor:
+                   state: torch.Tensor
+                   ) -> torch.Tensor:
         q_values = self.q_table.get_action_values(state)
         return self.decision_function.select_action(q_values)
 

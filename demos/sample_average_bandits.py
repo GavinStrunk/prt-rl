@@ -7,6 +7,7 @@ In this example, we show how to solve the K-arm Bandits problem with Sample Aver
 """
 import numpy as np
 import matplotlib.pyplot as plt
+import mlflow
 from prt_rl.exact.sample_average import SampleAverage
 from prt_rl.env.wrappers import JhuWrapper
 from prt_sim.jhu.bandits import KArmBandits
