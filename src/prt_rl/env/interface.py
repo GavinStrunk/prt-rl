@@ -97,8 +97,21 @@ class EnvironmentInterface(ABC):
         """
         raise NotImplementedError()
 
-    def step_mdp(self, mdp: TensorDict) -> TensorDict:
+    @staticmethod
+    def step_mdp(mdp: TensorDict) -> TensorDict:
         """
+        Steps the provided MDP TensorDict by moving the next state to the current state
 
+        Args:
+            mdp (TensorDict): MDP TensorDict
+
+        Returns:
+            TensorDict: updated MDP TensorDict
         """
-        pass
+        # Update the current observation
+        mdp['observation'] = mdp['next','observation']
+
+        # Remove the action and next keys
+        del mdp['action']
+        del mdp['next']
+        return mdp
