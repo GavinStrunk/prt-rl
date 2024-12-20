@@ -42,9 +42,9 @@ class GridworldRender:
         self.window_surface = None
         self.clock = None
 
-    def __del__(self) -> None:
+    def close(self) -> None:
         """
-        Destructor safely closes pygame and the display.
+        Safely closes pygame and the display.
 
         """
         if self.window_surface is not None:
