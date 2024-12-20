@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Union
+from typing import Union, Optional
 
 from tensordict.tensordict import TensorDict
 
@@ -64,6 +64,17 @@ class EnvironmentInterface(ABC):
     The shape of each tensor is (N, M) where N is the number of environments and M is the size of the value. For example, if an agent has two output actions and we are training with four environments then the "action" key will have shape (4,2).
 
     """
+    metadata = {
+        "render_modes": ["human", "rgb_array"],
+    }
+    def __init__(self,
+                 render_mode: Optional[str] = None,
+                 ) -> None:
+        self.render_mode = render_mode
+
+        if self.render_mode is not None:
+            assert self.render_mode in EnvironmentInterface.metadata["render_modes"], f"Valid render_modes are: {EnvironmentInterface.metadata['render_modes']}"
+
     @abstractmethod
     def get_parameters(self) -> EnvParams:
         """

@@ -1,5 +1,6 @@
 from tensordict.tensordict import TensorDict
 import torch
+from typing import Optional
 from prt_sim.jhu.base import BaseEnvironment
 from prt_rl.env.interface import EnvironmentInterface, EnvParams
 
@@ -10,8 +11,10 @@ class JhuWrapper(EnvironmentInterface):
     The JHU environments are games and puzzles that were used in the JHU 705.741 RL course.
     """
     def __init__(self,
-                 environment: BaseEnvironment
+                 environment: BaseEnvironment,
+                 render_mode: Optional[str] = None,
                  ) -> None:
+        super().__init__(render_mode)
         self.env = environment
 
     def get_parameters(self) -> EnvParams:
@@ -31,7 +34,7 @@ class JhuWrapper(EnvironmentInterface):
         state = self.env.reset()
         state_td = TensorDict(
             {
-                'observation': torch.tensor([[state]])
+                'observation': torch.tensor([[state]], dtype=torch.int),
             },
             batch_size=torch.Size([1])
         )
@@ -45,4 +48,8 @@ class JhuWrapper(EnvironmentInterface):
             'reward': torch.tensor([[reward]], dtype=torch.float),
             'done': torch.tensor([[done]], dtype=torch.bool),
         }
+
+        if self.render_mode is not None:
+            self.env.render()
+
         return action

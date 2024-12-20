@@ -2,7 +2,7 @@ from prt_rl.utils.policies import RandomPolicy
 from prt_rl.env.wrappers import JhuWrapper
 from prt_sim.jhu.robot_game import RobotGame
 
-env = JhuWrapper(environment=RobotGame())
+env = JhuWrapper(environment=RobotGame(), render_mode="human")
 policy = RandomPolicy(env_params=env.get_parameters())
 
 state_td = env.reset()
