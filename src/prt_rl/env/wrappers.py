@@ -38,6 +38,10 @@ class JhuWrapper(EnvironmentInterface):
             },
             batch_size=torch.Size([1])
         )
+
+        if self.render_mode is not None:
+            self.env.render()
+
         return state_td
 
     def step(self, action: TensorDict) -> TensorDict:
