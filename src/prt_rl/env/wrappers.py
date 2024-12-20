@@ -26,7 +26,7 @@ class JhuWrapper(EnvironmentInterface):
             observation_shape=(1,),
             observation_continuous=False,
             observation_min=0,
-            observation_max=self.env.get_number_of_states()-1,
+            observation_max=max(self.env.get_number_of_states()-1, 0),
         )
         return params
 

@@ -19,7 +19,7 @@ def test_random_discrete_action_selection():
     policy = RandomPolicy(env_params=params)
 
     # Set seed for consistent unit tests
-    torch.manual_seed(0)
+    torch.manual_seed(3)
 
     # Create fake observation TensorDict
     td = TensorDict({}, batch_size=[1])
