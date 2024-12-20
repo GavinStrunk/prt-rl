@@ -96,3 +96,9 @@ class EnvironmentInterface(ABC):
             TensorDict: TensorDict trajectory with the "next" key
         """
         raise NotImplementedError()
+
+    def step_mdp(self, mdp: TensorDict) -> TensorDict:
+        """
+
+        """
+        pass

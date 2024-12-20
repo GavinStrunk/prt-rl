@@ -8,5 +8,7 @@ policy = RandomPolicy(env_params=env.get_parameters())
 state_td = env.reset()
 done = False
 while not done:
-    state_td = env.step(policy.get_action(state_td))
+    action_td = policy.get_action(state_td)
+    state_td = env.step(action_td)
     done = state_td['next', 'done']
+    print(f"State: {state_td['observation']}  Action: {state_td['action']}  Next State: {state_td['next', 'observation']} Reward: {state_td['next', 'reward']}  Done: {state_td['next', 'done']}")

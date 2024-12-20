@@ -10,10 +10,19 @@ from prt_rl.utils.decision_functions import DecisionFunction
 
 
 class Policy(ABC):
+    """
+    Base class for implementing policies.
+
+    Args:
+        decision_function (DecisionFunction): The decision function to use.
+        device (str): The device to use.
+    """
     def __init__(self,
                  decision_function: DecisionFunction,
+                 device: str = 'cpu',
                  ) -> None:
         self.decision_function = decision_function
+        self.device = device
 
     @abstractmethod
     def get_action(self,
@@ -58,7 +67,8 @@ class RandomPolicy:
             TensorDict: Tensordict with the "action" key added
         """
         if not self.env_params.action_continuous:
-            action = torch.randint(low=self.env_params.action_min, high=self.env_params.action_max,
+            # Add 1 to the high value because randint samples between low and 1 less than the high: [low,high)
+            action = torch.randint(low=self.env_params.action_min, high=self.env_params.action_max + 1,
                                    size=(*state.batch_size, *self.env_params.action_shape))
         else:
             action = torch.rand(size=(*state.batch_size, *self.env_params.action_shape))

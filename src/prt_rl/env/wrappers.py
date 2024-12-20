@@ -38,12 +38,11 @@ class JhuWrapper(EnvironmentInterface):
         return state_td
 
     def step(self, action: TensorDict) -> TensorDict:
-        action_val = action['action']
+        action_val = action['action'][0].item()
         state, reward, done = self.env.execute_action(action_val)
-        trajectory_td = TensorDict(action)
-        trajectory_td['next'] = {
-            'observation': state,
-            'reward': reward,
-            'done': done,
+        action['next'] = {
+            'observation': torch.tensor([[state]], dtype=torch.int),
+            'reward': torch.tensor([[reward]], dtype=torch.float),
+            'done': torch.tensor([[done]], dtype=torch.bool),
         }
-        return trajectory_td
+        return action
