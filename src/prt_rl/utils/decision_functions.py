@@ -2,22 +2,77 @@ from abc import abstractmethod, ABC
 import torch
 from typing import Any
 
+
+def stochastic_selection(action_pmf: torch.Tensor) -> torch.Tensor:
+    """
+    Perform a stochastic selection of an action based on a given PMF.
+
+    Samples \pi(a \mid s) \rightarrow a
+
+    Args:
+        action_pmf (torch.Tensor): 1D tensor containing probabilities for each action.
+                                   Must sum to 1 and have non-negative values.
+
+    Returns:
+        torch.Tensor: The index of the selected action.
+    """
+    if action_pmf.ndim != 2:
+        raise ValueError(
+            f"Expected a 2D tensor (# env, action_pmf) for action PMF, but got a tensor with shape: {action_pmf.shape}")
+
+    if not torch.isclose(action_pmf.sum(dim=1), torch.ones(action_pmf.shape[0], device=action_pmf.device)).all():
+        raise ValueError("The probabilities in the PMF must sum to 1.")
+
+    if (action_pmf < 0).any():
+        raise ValueError("The PMF cannot contain negative probabilities.")
+
+    # Use torch.multinomial for stochastic sampling
+    selected_action = torch.multinomial(action_pmf, 1)
+
+    return selected_action
+
+
 class DecisionFunction(ABC):
     """
     A decision function takes in the state-action values from a Q function and returns a selected action.
+
+    Input:
+    Tensor of action values with shape (# env, # action values)
+
+    Output:
+    Tensor of selected actions with shape (# env, 1)
     """
+
     @abstractmethod
     def select_action(self, action_values: torch.Tensor) -> torch.Tensor:
+        """
+        Selects an action from a vector of q values.
+
+        Args:
+            action_values (torch.Tensor): tensor of q values with shape (# environments, # actions)
+
+        Returns:
+            torch.Tensor: tensor of selected actions with shape (# environments, 1)
+        """
         raise NotImplementedError
 
     def set_parameter(self,
                       name: str,
                       value: Any
                       ) -> None:
+        """
+        Sets a named parameter in the decision function. This is used to set or update parameters values for example epsilon in epsilon-greedy.
+
+        Args:
+            name (str): name of the parameter
+            value (Any): value to set
+
+        """
         if hasattr(self, name):
             setattr(self, name, value)
         else:
             raise ValueError(f"Parameter '{name}' not found.")
+
 
 class Greedy(DecisionFunction):
     """
@@ -35,70 +90,84 @@ class Greedy(DecisionFunction):
     Returns:
         torch.Tensor: Selected action index.
     """
-    def select_action(self, action_values: torch.Tensor) -> torch.Tensor:
-        if action_values.ndim != 1:
+
+    def select_action(self,
+                      action_values: torch.Tensor
+                      ) -> torch.Tensor:
+        if action_values.ndim != 2:
             raise ValueError(
-                "Expected a 1D tensor for actions, but got a tensor with shape: {}".format(action_values.shape))
+                "Expected a tensor with shape (# env, # actions) for actions, but got a tensor with shape: {}".format(
+                    action_values.shape))
 
         # Find indices of the maximum value(s)
-        max_value = torch.max(action_values)
-        max_indices = torch.nonzero(action_values == max_value, as_tuple=False).squeeze(-1)
+        max_value, _ = torch.max(action_values, dim=1)
 
-        # Randomly select one if there are multiple maximum indices
-        if len(max_indices) > 1:
-            random_index = torch.randint(len(max_indices), (1,), device=action_values.device)
-            selected_action = max_indices[random_index]
-        else:
-            selected_action = max_indices[0]
+        # Find all indices where the value equals the max value
+        max_indices_list = [
+            (action_values[n] == max_value[n]).nonzero(as_tuple=True)[0].tolist()
+            for n in range(action_values.size(0))
+        ]
 
-        return selected_action
+        # Randomly choose one index from the list of max indices for each dimension along N
+        chosen_indices = torch.tensor([
+            indices[torch.randint(len(indices), (1,)).item()] if len(indices) > 1 else indices[0]
+            for indices in max_indices_list
+        ]).unsqueeze(-1)
 
-class EpsilonGreedy(DecisionFunction):
-    def __init__(self, epsilon: float):
+        return chosen_indices
+
+
+class EpsilonGreedy(Greedy):
+    """
+    Epsilon-greedy is a soft policy version of greedy action selection, where a random action is chosen with probability epsilon and the maximum value action otherwise.
+
+    Parameters:
+        epsilon (float): probability of selecting a random action
+
+    Args:
+        epsilon (float): probability of selecting a random action
+    """
+
+    def __init__(self,
+                 epsilon: float
+                 ) -> None:
         self.epsilon = epsilon
 
-    def select_action(self, action_values: torch.Tensor) -> torch.Tensor:
+    def select_action(self,
+                      action_values: torch.Tensor
+                      ) -> torch.Tensor:
         """
         Epsilon-greedy policy chooses the action with the highest value and samples all actions randomly with probability epsilon.
 
         If :math:`b > \epsilon`, use Greedy; otherwise choose randomly from among all actions.
 
         Args:
-            actions (torch.Tensor): 1D tensor of action values.
-            epsilon (float): Probability of choosing a random exploratory action.
+            action_values (torch.Tensor): Tensor of action values.
 
         Returns:
             torch.Tensor: Selected action index.
         """
-        if action_values.ndim != 1:
-            raise ValueError("Expected a 1D tensor for actions, but got a tensor with shape: {}".format(actions.shape))
-
-        # Determine device
-        device = action_values.device
-
-        # Greedy part: Find indices of the maximum value(s)
-        max_value = torch.max(action_values)
-        max_indices = torch.nonzero(action_values == max_value, as_tuple=False).squeeze(-1)
-
-        # Randomly select one if there are multiple maximum indices
-        if len(max_indices) > 1:
-            random_index = torch.randint(len(max_indices), (1,), device=device)
-            greedy_action = max_indices[random_index]
-        else:
-            greedy_action = max_indices[0]
+        # Greedy action selection
+        greedy_actions = Greedy.select_action(self, action_values)
 
         # Epsilon-greedy logic
-        if torch.rand(1, device=device).item() > self.epsilon:
-            # Exploit: Choose greedy action
-            action = greedy_action
-        else:
-            # Explore: Choose a random action
-            random_action = torch.randint(len(action_values), (1,), device=device)
-            action = random_action[0]
+        # Generate random values and check if they are larger than epsilon
+        random_actions = torch.rand(action_values.size(0), device=action_values.device) > self.epsilon
+        actions = torch.zeros((action_values.shape[0], 1), device=action_values.device, dtype=torch.int)
+        for i, _ in enumerate(random_actions):
+            if random_actions[i]:
+                actions[i] = torch.randint(len(action_values), (1,), device=action_values.device)
+            else:
+                actions[i] = greedy_actions[i]
 
-        return action
+        return actions
+
 
 class Softmax(DecisionFunction):
+    """
+    Soft-max
+    """
+
     def __init__(self, tau: float):
         self.tau = tau
 
@@ -114,45 +183,19 @@ class Softmax(DecisionFunction):
             torch.Tensor: Selected action index.
         """
         if action_values.ndim != 1:
-            raise ValueError("Expected a 1D tensor for actions, but got a tensor with shape: {}".format(action_values.shape))
+            raise ValueError(
+                "Expected a 1D tensor for actions, but got a tensor with shape: {}".format(action_values.shape))
 
         # Compute exponential values scaled by tau
         exp_values = torch.exp(action_values / self.tau)
 
         # Normalize to get probabilities
-        action_probs = exp_values / torch.sum(exp_values)
+        action_pmf = exp_values / torch.sum(exp_values)
 
         # Sample from the probabilities to get the action
-        action = torch.multinomial(action_probs, 1).squeeze(0)
+        action = stochastic_selection(action_pmf)
 
         return action
-
-
-class StochasticSelection:
-    def select_action(self, action_pmf: torch.Tensor) -> torch.Tensor:
-        """
-        Perform a stochastic selection of an action based on a given PMF.
-
-        Args:
-            action_pmf (torch.Tensor): 1D tensor containing probabilities for each action.
-                                       Must sum to 1 and have non-negative values.
-
-        Returns:
-            torch.Tensor: The index of the selected action.
-        """
-        if action_pmf.ndim != 1:
-            raise ValueError(f"Expected a 1D tensor for action PMF, but got a tensor with shape: {action_pmf.shape}")
-
-        if not torch.isclose(action_pmf.sum(), torch.tensor(1.0, device=action_pmf.device)):
-            raise ValueError("The probabilities in the PMF must sum to 1.")
-
-        if (action_pmf < 0).any():
-            raise ValueError("The PMF cannot contain negative probabilities.")
-
-        # Use torch.multinomial for stochastic sampling
-        selected_action = torch.multinomial(action_pmf, 1).squeeze(0)
-
-        return selected_action
 
 
 class UpperConfidenceBound(DecisionFunction):

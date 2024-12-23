@@ -1,12 +1,10 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict
-
-import numpy as np
+from typing import Any, Dict, Optional
 import torch
 from tensordict.tensordict import TensorDict
 from prt_rl.env.interface import EnvParams
 from prt_rl.utils.qtable import QTable
-from prt_rl.utils.decision_functions import DecisionFunction
+from prt_rl.utils.decision_functions import DecisionFunction, EpsilonGreedy
 
 
 class Policy(ABC):
@@ -14,38 +12,36 @@ class Policy(ABC):
     Base class for implementing policies.
 
     Args:
-        decision_function (DecisionFunction): The decision function to use.
+        env_params (EnvParams): Environment parameters.
         device (str): The device to use.
     """
     def __init__(self,
-                 decision_function: DecisionFunction,
+                 env_params: EnvParams,
                  device: str = 'cpu',
                  ) -> None:
-        self.decision_function = decision_function
+        self.env_params = env_params
         self.device = device
 
     @abstractmethod
     def get_action(self,
-                   state: torch.Tensor) -> torch.Tensor:
+                   state: TensorDict
+                   ) -> TensorDict:
         raise NotImplementedError
 
     def set_parameter(self,
                       name: str,
                       value: Any
                       ) -> None:
-        if hasattr(self.decision_function, name):
-            self.decision_function.set_parameter(name, value)
-        else:
-            raise ValueError(f"Parameter '{name}' not found in Policy.")
+        pass
 
-    # @staticmethod
-    # def load_from_file(filename: str) -> 'Policy':
-    #     raise NotImplementedError
-    #
-    # def save(self, filename: str):
-    #     raise NotImplementedError
+    @staticmethod
+    def load_from_file(filename: str) -> 'Policy':
+        raise NotImplementedError
 
-class RandomPolicy:
+    def save(self, filename: str):
+        raise NotImplementedError
+
+class RandomPolicy(Policy):
     """
     Implements a policy that uniformly samples random actions.
 
@@ -55,7 +51,7 @@ class RandomPolicy:
     def __init__(self,
                  env_params: EnvParams,
                  ) -> None:
-        self.env_params = env_params
+        super(RandomPolicy, self).__init__(env_params=env_params)
 
     def get_action(self,
                    state: TensorDict
@@ -78,7 +74,7 @@ class RandomPolicy:
         return state
 
 
-class KeyboardPolicy:
+class KeyboardPolicy(Policy):
     """
     The keyboard policy allows interactive control of the agent using keyboard input.
 
@@ -117,9 +113,8 @@ class KeyboardPolicy:
                 "The 'pynput' library is required for KeyboardPolicy but is not installed. "
                 "Please install it using 'pip install pynput'."
             ) from e
+        super(KeyboardPolicy, self).__init__(env_params=env_params)
         self.keyboard = keyboard
-
-        self.env_params = env_params
         self.key_action_map = key_action_map
         self.blocking = blocking
 
@@ -172,33 +167,56 @@ class KeyboardPolicy:
 
         return key_pressed
 
-
-
-
 class QTablePolicy(Policy):
+    """
+    A Q-Table policy combines a q-table action value function with a decision function.
+    
+    """
     def __init__(self,
-                 q_table: QTable,
-                 decision_function: DecisionFunction,
+                 env_params: EnvParams,
+                 num_envs: int = 1,
+                 decision_function: Optional[DecisionFunction] = None,
+                 initial_qvalue: float = 0.0,
+                 device: str = 'cpu'
                  ):
-        self.q_table = q_table
-        self.decision_function = decision_function
+        super(QTablePolicy, self).__init__(env_params=env_params, device=device)
+        assert env_params.action_continuous == False, "QTablePolicy only supports discrete action spaces."
+        assert env_params.observation_continuous == False, "QTablePolicy only supports discrete observation spaces."
+
+        self.num_envs = num_envs
+        self.q_table = QTable(
+                state_dim=self.env_params.observation_max+1,
+                action_dim=self.env_params.action_max+1,
+                batch_size=num_envs,
+                initial_value=initial_qvalue
+            )
+
+        if decision_function is None:
+            self.decision_function = EpsilonGreedy(epsilon=0.1)
+        else:
+            self.decision_function = decision_function
 
     def get_action(self,
-                   state: torch.Tensor
-                   ) -> torch.Tensor:
-        q_values = self.q_table.get_action_values(state)
-        return self.decision_function.select_action(q_values)
+                   state: TensorDict
+                   ) -> TensorDict:
+        obs_val = state['observation']
+        q_values = self.q_table.get_action_values(obs_val)
+
+        action = self.decision_function.select_action(q_values)
+        state['action'] = action
+        return state
 
     def set_parameter(self,
                       name: str,
                       value: Any
                       ) -> None:
-        if hasattr(self.q_table, name):
-            setattr(self.q_table, name, value)
-        elif hasattr(self.decision_function, name):
+        if hasattr(self.decision_function, name):
             self.decision_function.set_parameter(name, value)
         else:
             raise ValueError(f"Parameter '{name}' not found in QTablePolicy.")
+
+    def get_qtable(self) -> QTable:
+        return self.q_table
 
 class QNetworkPolicy:
     def __init__(self,
@@ -223,108 +241,3 @@ class QNetworkPolicy:
             self.decision_function.set_parameter(name, value)
         else:
             raise ValueError(f"Parameter '{name}' not found in QNetworkPolicy.")
-
-def greedy(actions: list[int]) -> int:
-    """
-    Greedy policy chooses the action with the highest value.
-
-    .. math::
-        A_t \equiv argmax Q_t(a)
-
-    Notes:
-        If there are multiple actions with the same maximum value, they are sampled randomly to choose the action.
-
-    Args:
-        actions (list[int]): list of action values
-
-    Returns:
-        int: Selected action
-    """
-    # Select action with largest value, choose randomly if there is more than 1
-    a_star = np.where(actions == np.max(actions))[0]
-    if len(a_star) > 1:
-        a_star = np.random.choice(a_star)
-    else:
-        a_star = a_star[0]
-
-    return a_star
-
-def epsilon_greedy(actions: list[int], epsilon: float) -> int:
-    """
-    Epsilon-greedy policy chooses the action with the highest value and samples all actions randomly with probability epsilon.
-
-    If :math:`b > \epsilon` , use Greedy; otherwise choose randomly from amount all actions
-
-    Args:
-        actions (list[int]): list of action values
-        epsilon (float): probability of choosing a random exploratory action
-
-    Returns:
-        int: Selected action
-    """
-    # Select action with largest value, choose randomly if there is more than 1
-    a_star = np.where(actions == np.max(actions))[0]
-    if len(a_star) > 1:
-        a_star = np.random.choice(a_star)
-    else:
-        a_star = a_star[0]
-
-    if np.random.random() > epsilon:
-        action = a_star
-    else:
-        # Choose random from actions
-        action = np.random.choice(len(actions))
-
-    return action
-
-def softmax(actions: list[int], tau: float) -> int:
-    """
-    Soft-Max policy models a Boltzmann (or Gibbs) distribution to select an action probabilistically with the highest value.
-
-    $$Pr(A_t = a) \equiv \pi_t(a) \equiv \frac{a}{b}$$
-
-    Args:
-        actions (list[int]): list of action values
-        tau (float): probability of choosing a random exploratory action
-
-    Returns:
-        int: Selected action
-    """
-    # Compute exponential values
-    exp_values = np.exp(np.array(actions) / tau)
-
-    # Normalize to get probabilities
-    action_probs = exp_values / np.sum(exp_values)
-
-    # Sample from the probabilities to get the action
-    action = np.random.choice(len(actions), p=action_probs)
-
-    return action
-
-def upper_confidence_bound(actions: list[int], action_selections: list[int], c: float, t: int) -> int:
-    """
-    Upper Confidence Bound selects among the non-greedy actions based on their potential for being optimal.
-
-    .. math::
-        A_t \equiv argmax [Q_t(a) + c\sqrt{\frac{ln t}{N_t(a)}}
-
-    Args:
-        actions (list[int]): list of action values
-        action_selections (int): Number of times the actions have been selected prior to time t
-        c (float): Constant controlling degree of exploration
-        t (int): time step
-
-    Returns:
-        int: Selected action
-    """
-    assert c > 0, "Constant controlling degree of exploration must be > 0"
-    assert len(actions) == len(action_selections), "Action values and action selections must be same length"
-
-    a_star = actions + c*np.sqrt((np.log(t) / action_selections))
-    a_star = np.where(a_star == np.max(a_star))[0]
-    if len(a_star) > 1:
-        a_star = np.random.choice(a_star)
-    else:
-        a_star = a_star[0]
-
-    return a_star
