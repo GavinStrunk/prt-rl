@@ -4,9 +4,53 @@ import numpy as np
 import random
 import torch
 import torch.nn as nn
-from typing import List
+from typing import Optional
 
-class DQN:
+from tensordict import TensorDict
+from prt_rl.env.interface import EnvironmentInterface
+from prt_rl.exact.trainers import TDTrainer
+from prt_rl.utils.buffers import ReplayBuffer
+from prt_rl.utils.decision_functions import DecisionFunction
+from prt_rl.utils.policies import QNetworkPolicy
+
+class DQN(TDTrainer):
+    def __init__(self,
+                 env: EnvironmentInterface,
+                 num_envs: int = 1,
+                 decision_function: Optional[DecisionFunction] = None,
+                 alpha: float = 0.1,
+                 gamma: float = 0.99,
+                 buffer_size: int = 50000,
+                 min_buffer_size: int = 320,
+                 mini_batch_size: int = 64,
+                 target_update_steps: int = 15,
+                 device: str = 'cpu'
+                 ) -> None:
+        self.env_params = env.get_parameters()
+        self.num_envs = num_envs
+        self.device = device
+        self.replay_buffer = ReplayBuffer(
+            capacity=buffer_size,
+            state_dim=self.env_params.observation_shape,
+            action_dim=self.env_params.action_shape,
+            device=self.device
+        )
+
+        policy = QNetworkPolicy(
+            env_params=self.env_params,
+            num_envs=1,
+            decision_function=decision_function,
+            device=device
+        )
+        super(DQN, self).__init__(env, policy=policy)
+
+        self.target_network = copy.deepcopy(self.policy)
+
+    def update_policy(self, experience: TensorDict) -> None:
+        pass
+
+
+class DQN2:
     """
     Deep Q Network
 
@@ -137,17 +181,3 @@ class ReplayBuffer:
         return len(self.memory)
 
 
-class DQNNetwork(nn.Module):
-    def __init__(self, state_size, action_size):
-        super(DQNNetwork, self).__init__()
-        self.layers = nn.Sequential(
-            nn.Linear(state_size, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, action_size),
-        )
-
-    def forward(self, x):
-        x = self.layers(x)
-        return x
