@@ -1,97 +1,52 @@
-import numpy as np
-from prt_rl.utils.policies import epsilon_greedy
+from tensordict.tensordict import TensorDict
+import torch
+from typing import Optional
+from prt_rl.env.interface import EnvironmentInterface
+from prt_rl.exact.trainers import TDTrainer
+from prt_rl.utils.decision_functions import DecisionFunction
+from prt_rl.utils.policies import QTablePolicy
 
-class SARSA:
-    r"""
+
+class SARSA(TDTrainer):
+    """
     SARSA algorithm.
 
-    .. math::
-        Q(S_t,A_t) \leftarrow Q(S_t,A_t) + \alpha[R_{t+1} + \gamma Q(S_{t+1},A_{t+1}) - Q(S_t,A_t)]
-
     """
-
     def __init__(self,
-                 num_states,
-                 num_actions,
-                 alpha=0.1,
-                 gamma=0.99,
-                 epsilon=0.1,
+                 env: EnvironmentInterface,
+                 num_envs: int = 1,
+                 decision_function: Optional[DecisionFunction] = None,
+                 gamma: float = 0.99,
+                 alpha: float = 0.1,
                  ) -> None:
-        self.num_states = num_states
-        self.num_actions = num_actions
-        self.alpha = alpha
         self.gamma = gamma
-        self.epsilon = epsilon
-        self.q_table = np.zeros((self.num_states, self.num_actions))
+        self.alpha = alpha
+        self.env_params = env.get_parameters()
 
-    def select_action(self, state) -> int:
-        """
-        Selects an action based on the epsilon-greedy policy.
+        policy = QTablePolicy(
+            env_params=self.env_params,
+            num_envs=num_envs,
+            decision_function=decision_function
+        )
+        super().__init__(env, policy)
+        self.q_table = policy.get_qtable()
 
-        Args:
-            state (int): current state of the environment
+    def update_policy(self, experience: TensorDict) -> None:
+        st = experience["observation"]
+        at = experience["action"]
+        st1 = experience['next', 'observation']
+        rt1 = experience['next', 'reward']
 
-        Returns:
-            int: action to take
-        """
-        actions = self.q_table[state]
-        action = epsilon_greedy(actions, epsilon=self.epsilon)
+        # Select action for next state
+        mdp1 = experience.clone()
+        mdp1['observation'] = st1
+        at1 = self.policy.get_action(mdp1)
+        at1 = at1['action']
 
-        return action
+        # Compute update
+        qval = self.q_table.get_state_action_value(st, at)
+        qval1 = self.q_table.get_state_action_value(st1, at1)
+        qval_update = qval + self.alpha * (rt1 + self.gamma*(qval1 - qval))
 
-    def learn(self, trajectory: tuple) -> int:
-        """
-        Updates the q_table values.
-
-        Args:
-            trajectory (tuple): (s_t, a_t, r_{t+1}, s_{t+1}) tuple
-
-        Returns:
-            int: A_{t+1}
-        """
-        # Choose A_{t+1} from policy based on S_{t+1}
-        st, at, rt1, st1 = trajectory
-        at1 = self.select_action(st1)
-        self.q_table[st][at] += self.alpha * (rt1 + self.gamma*self.q_table[st1][at1] - self.q_table[st][at])
-
-        return at1
-
-
-class ExpectedSARSA(SARSA):
-    """
-    Expected SARSA algorithm.
-
-    """
-    def __init__(self,
-                 num_states,
-                 num_actions,
-                 alpha=0.1,
-                 gamma=0.99,
-                 epsilon=0.1,
-                 ):
-        super(ExpectedSARSA, self).__init__(num_states, num_actions, alpha, gamma, epsilon)
-
-    def learn(self, trajectory: tuple) -> None:
-        """
-        Updates the q_table values.
-        Args:
-            trajectory:
-
-        Returns:
-
-        """
-        st, at, rt1, st1 = trajectory
-        actions = self.q_table[st1][:]
-        a_stars = np.where(actions == np.max(actions))[0]
-        a_star = a_stars[0]
-        expect_a = 0
-        for i in range(self.num_actions):
-            a_val = self.q_table[st1][i]
-            if i == a_star:
-                prob_a = (1 - self.epsilon) / len(a_stars) + self.epsilon / self.num_actions
-            else:
-                prob_a = self.epsilon / self.num_actions
-
-            expect_a += prob_a*a_val
-
-        self.q_table[st][at] += self.alpha * (rt1 + self.gamma*expect_a - self.q_table[st][at])
+        # Update q table
+        self.q_table.update_q_value(state=st, action=at, q_value=qval_update)
