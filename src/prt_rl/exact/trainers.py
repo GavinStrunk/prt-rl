@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from tensordict import tensordict
+from tensordict.tensordict import TensorDict
 
 from prt_rl.env.interface import EnvParams, EnvironmentInterface
 from prt_rl.utils.policies import Policy
@@ -18,7 +18,7 @@ class TDTrainer(ABC):
 
     @abstractmethod
     def update_policy(self,
-                      experience: tensordict,
+                      experience: TensorDict,
                       ) -> None:
         raise NotImplementedError
 
