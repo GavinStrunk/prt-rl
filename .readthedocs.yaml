@@ -21,6 +21,7 @@ python:
       path: .
       extra_requirements:
         - docs
+        - test
 
 # Add system dependencies
 apt_packages:
