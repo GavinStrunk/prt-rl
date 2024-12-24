@@ -21,3 +21,7 @@ python:
       path: .
       extra_requirements:
         - docs
+
+# Add system dependencies
+apt_packages:
+  - swig
