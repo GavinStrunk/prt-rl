@@ -20,6 +20,4 @@ python:
     - method: pip
       path: .
       extra_requirements:
-        - docs 
-    - method: poetry
-      version: "latest"  # Use the latest Poetry version
+        - docs
