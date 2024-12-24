@@ -22,7 +22,3 @@ python:
       extra_requirements:
         - docs
         - test
-
-# Add system dependencies
-apt_packages:
-  - swig
