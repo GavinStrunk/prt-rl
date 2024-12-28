@@ -2,6 +2,7 @@ from tensordict.tensordict import TensorDict
 import torch
 from typing import Optional
 from prt_rl.env.interface import EnvironmentInterface
+from prt_rl.utils.loggers import Logger
 from prt_rl.utils.trainers import TDTrainer
 from prt_rl.utils.decision_functions import DecisionFunction
 from prt_rl.utils.policies import QTablePolicy
@@ -23,6 +24,7 @@ class QLearning(TDTrainer):
                  gamma: float = 0.99,
                  alpha: float = 0.1,
                  deterministic: bool = False,
+                 logger: Optional[Logger] = None,
                  ) -> None:
         self.deterministic = deterministic
         self.gamma = gamma
@@ -34,8 +36,15 @@ class QLearning(TDTrainer):
             num_envs=num_envs,
             decision_function=decision_function
         )
-        super().__init__(env, policy)
+        super().__init__(env, policy, logger=logger)
         self.q_table = policy.get_qtable()
+
+        # Log parameters if a logger is provided
+        if logger is not None:
+            self.logger.log_parameters({
+                'gamma': self.gamma,
+                'alpha': self.alpha,
+            })
 
     def update_policy(self, experience: TensorDict) -> None:
         st = experience["observation"]

@@ -1,8 +1,7 @@
-from abc import ABC, abstractmethod
 import mlflow
 from typing import Optional
 
-class Logger(ABC):
+class Logger:
     """
     Based class for implementing loggers for RL algorithms.
 
@@ -10,7 +9,14 @@ class Logger(ABC):
     def __init__(self):
         self.iteration = 0
 
-    @abstractmethod
+    def close(self):
+        pass
+
+    def log_parameters(self,
+                       params: dict,
+                       ) -> None:
+        pass
+
     def log_scalar(self,
                    name: str,
                    value: float,
@@ -22,18 +28,36 @@ class MLFlowLogger(Logger):
     """
     MLFlow Logger
 
+    Notes:
+        psutil must be installed with pip to log system metrics.
+
     References:
         [1] https://mlflow.org/docs/latest/python_api/mlflow.html
     """
-    def __init__(self, experiment_id, run_name, run_id, run_dir):
+    def __init__(self,
+                 tracking_uri: str,
+                 experiment_name: str,
+                 run_name: Optional[str] = None,
+                 ) -> None:
         super().__init__()
-        self.experiment_id = experiment_id
-        self.run_id = run_id
-        self.run_dir = run_dir
+        self.tracking_uri = tracking_uri
+        self.experiment_name = experiment_name
+        self.run_name = run_name
 
-        mlflow.set_tracking_uri(f"{run_dir}")
-        mlflow.set_experiment(self.experiment_id)
-        mlflow.start_run()
+        mlflow.set_tracking_uri(self.tracking_uri)
+        mlflow.set_experiment(self.experiment_name)
+        mlflow.start_run(
+            run_name=self.run_name,
+            log_system_metrics=True,
+        )
+
+    def close(self):
+        mlflow.end_run()
+
+    def log_parameters(self,
+                       params: dict,
+                       ) -> None:
+        mlflow.log_params(params)
 
     def log_scalar(self,
                    name: str,
