@@ -8,12 +8,12 @@ from typing import Optional
 
 from tensordict import TensorDict
 from prt_rl.env.interface import EnvironmentInterface
-from prt_rl.exact.trainers import TDTrainer
+from prt_rl.utils.trainers import ANNTrainer
 from prt_rl.utils.buffers import ReplayBuffer
 from prt_rl.utils.decision_functions import DecisionFunction
 from prt_rl.utils.policies import QNetworkPolicy
 
-class DQN(TDTrainer):
+class DQN(ANNTrainer):
     def __init__(self,
                  env: EnvironmentInterface,
                  num_envs: int = 1,
@@ -28,6 +28,11 @@ class DQN(TDTrainer):
                  ) -> None:
         self.env_params = env.get_parameters()
         self.num_envs = num_envs
+        self.alpha = alpha
+        self.gamma = gamma
+        self.min_buffer_size = min_buffer_size
+        self.mini_batch_size = mini_batch_size
+        self.target_update_steps = target_update_steps
         self.device = device
         self.replay_buffer = ReplayBuffer(
             capacity=buffer_size,
@@ -42,12 +47,30 @@ class DQN(TDTrainer):
             decision_function=decision_function,
             device=device
         )
-        super(DQN, self).__init__(env, policy=policy)
+        super(DQN, self).__init__(env=env, policy=policy)
 
-        self.target_network = copy.deepcopy(self.policy)
+        self.target_network = copy.deepcopy(self.get_policy_network())
 
     def update_policy(self, experience: TensorDict) -> None:
-        pass
+        # Add experience to replay buffer
+        self.replay_buffer.add(experience)
+
+        # Collect more experience if there is not a minimum number
+        if len(self.replay_buffer) < self.min_buffer_size:
+            return
+
+        # Sample a batch of data
+        batch_data = self.replay_buffer.sample(self.mini_batch_size)
+
+        # Compute TD Target values
+
+        # Compute Policy values
+
+        # Compute Loss
+
+        # Optimize the policy model parameters
+
+        # Update target network parameters
 
 
 class DQN2:

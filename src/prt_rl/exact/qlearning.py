@@ -2,7 +2,7 @@ from tensordict.tensordict import TensorDict
 import torch
 from typing import Optional
 from prt_rl.env.interface import EnvironmentInterface
-from prt_rl.exact.trainers import TDTrainer
+from prt_rl.utils.trainers import TDTrainer
 from prt_rl.utils.decision_functions import DecisionFunction
 from prt_rl.utils.policies import QTablePolicy
 

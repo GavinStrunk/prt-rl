@@ -6,7 +6,7 @@ from prt_rl.utils.qtable import QTable
 from prt_rl.utils.decision_functions import EpsilonGreedy
 
 from tensordict import TensorDict
-from prt_rl.exact.trainers import TDTrainer
+from prt_rl.utils.trainers import TDTrainer
 
 class SampleAverage(TDTrainer):
     def __init__(self,
