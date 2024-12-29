@@ -12,7 +12,6 @@ mlflow = "^2.19.0"
 tensordict = "^0.6.2"
 tqdm = "^4.67.1"
 pynput = "^1.7.7"
-box2d = "^2.3.10"
 gymnasium = {extras = ["all"], version = "^1.0.0"}
 psutil = "^6.1.1"
 
