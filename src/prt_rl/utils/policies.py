@@ -4,6 +4,7 @@ import torch
 from tensordict.tensordict import TensorDict
 from prt_rl.env.interface import EnvParams
 from prt_rl.utils.qtable import QTable
+from prt_rl.utils.networks import MLP
 from prt_rl.utils.decision_functions import DecisionFunction, EpsilonGreedy
 
 
@@ -218,26 +219,43 @@ class QTablePolicy(Policy):
     def get_qtable(self) -> QTable:
         return self.q_table
 
-class QNetworkPolicy:
+class QNetworkPolicy(Policy):
+    """
+    QNetwork policy is an ANN based q value function approximation.
+
+    """
     def __init__(self,
-                 q_network: torch.nn.Module,
-                 decision_function: DecisionFunction,
+                 env_params: EnvParams,
+                 num_envs: int = 1,
+                 decision_function: Optional[DecisionFunction] = None,
+                 device: str = 'cpu'
                  ) -> None:
-        self.q_network = q_network
-        self.decision_function = decision_function
+        super(QNetworkPolicy, self).__init__(env_params=env_params, device=device)
+        self.num_envs = num_envs
+        self.q_network = MLP(
+            state_dim=self.env_params.observation_max+1,
+            action_dim=self.env_params.action_max+1,
+        )
+
+        if decision_function is None:
+            self.decision_function = EpsilonGreedy(epsilon=0.1)
+        else:
+            self.decision_function = decision_function
 
     def get_action(self,
-                   state: torch.Tensor) -> torch.Tensor:
+                   state: TensorDict
+                   ) -> TensorDict:
+        state = state['observation']
         q_values = self.q_network.get_action(state)
-        return self.decision_function.select_action(q_values)
+        action = self.decision_function.select_action(q_values)
+        state['action'] = action
+        return state
 
     def set_parameter(self,
                       name: str,
                       value: Any
                       ) -> None:
-        if hasattr(self.q_network, name):
-            setattr(self.q_network, name, value)
-        elif hasattr(self.decision_function, name):
+        if hasattr(self.decision_function, name):
             self.decision_function.set_parameter(name, value)
         else:
             raise ValueError(f"Parameter '{name}' not found in QNetworkPolicy.")
