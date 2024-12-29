@@ -1,13 +1,19 @@
 from prt_sim.jhu.robot_game import RobotGame
 from prt_rl.env.wrappers import JhuWrapper
 from prt_rl.exact.qlearning import QLearning
+from prt_rl.utils.loggers import MLFlowLogger
 
 env = JhuWrapper(environment=RobotGame())
 
 trainer = QLearning(
     env=env,
     gamma=0.9,
-    alpha=0.1
+    alpha=0.1,
+    logger=MLFlowLogger(
+        tracking_uri="http://home-server:5000",
+        experiment_name="Robot Game",
+        run_name="Q-Learning",
+    ),
 )
 trainer.train(num_episodes=1000)
 
