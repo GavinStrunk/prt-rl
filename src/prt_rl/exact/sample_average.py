@@ -1,72 +1,44 @@
-import numpy as np
-
-from prt_rl.env.interface import EnvParams
-from prt_rl.utils.policies import epsilon_greedy, QTablePolicy
-from prt_rl.utils.qtable import QTable
-from prt_rl.utils.decision_functions import EpsilonGreedy
-
 from tensordict import TensorDict
+from typing import Optional
+from prt_rl.env.interface import EnvironmentInterface
+from prt_rl.utils.decision_functions import DecisionFunction
+from prt_rl.utils.loggers import Logger
+from prt_rl.utils.policies import QTablePolicy
 from prt_rl.utils.trainers import TDTrainer
 
 class SampleAverage(TDTrainer):
-    def __init__(self,
-                 env_params: EnvParams,
-                 epsilon: float,
-                 ):
-        policy = QTablePolicy(
-            q_table=QTable(
-                state_dim=env_params.observation_shape,
-                action_dim=env_params.action_shape,
-                initial_value=0
-            ),
-            decision_function=EpsilonGreedy(
-                epsilon=epsilon,
-            ),
-        )
-        super().__init__(env_params, policy)
+    r"""
+    Sample average trainer.
 
-    def update_policy(self, trajectory: TensorDict) -> None:
-        action = trajectory.get('next', 'action')
-        reward = trajectory.get('next','reward')
-
-        pass
-
-
-class SampleAverage2:
-    """
-    Sample Average method estimates the value of action by estimating the average sample of relevant rewards.
-
+    Sample averaging is the same as every visit Monte Carlo with a gamma value of 0.
     """
     def __init__(self,
-                 num_actions: int,
-                 epsilon: float,
+                 env: EnvironmentInterface,
+                 decision_function: Optional[DecisionFunction] = None,
+                 logger: Optional[Logger] = None,
                  ) -> None:
-        self.num_actions = num_actions
-        self.epsilon = epsilon
-        self.q_values = np.zeros(self.num_actions)
-        self.selections = np.zeros(self.num_actions)
+        self.env_params = env.get_parameters()
 
-    def select_action(self) -> int:
-        """
-        Selects the best action.
+        policy = QTablePolicy(
+            env_params=self.env_params,
+            num_envs=1,
+            decision_function=decision_function,
+            track_visits=True
+        )
+        super(SampleAverage, self).__init__(env=env, policy=policy, logger=logger)
+        self.q_table = policy.get_qtable()
 
-        Returns:
+    def update_policy(self, experience: TensorDict) -> None:
+        state = experience['observation']
+        action = experience['action']
+        reward = experience['next', 'reward']
 
-        """
-        action = epsilon_greedy(self.q_values, self.epsilon)
-        return action
+        # Update the visit count
+        self.q_table.update_visits(state=state, action=action)
 
-    def learn(self, action: int, reward: float) -> None:
-        """
-        Updates the visit list and the average action value
+        # Update the sample average
+        n = self.q_table.get_visit_count(state=state, action=action)
+        qval = self.q_table.get_state_action_value(state=state, action=action)
+        qval += 1/n * (reward - qval)
+        self.q_table.update_q_value(state=state, action=action, q_value=qval)
 
-        Args:
-            action (int): Selected action that was taken
-            reward (float): Reward received
-
-        Returns:
-            None
-        """
-        self.selections[action] += 1
-        # Incremental average update
-        self.q_values[action] += 1/(self.selections[action]) * (reward - self.q_values[action])

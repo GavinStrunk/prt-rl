@@ -178,6 +178,7 @@ class QTablePolicy(Policy):
                  num_envs: int = 1,
                  decision_function: Optional[DecisionFunction] = None,
                  initial_qvalue: float = 0.0,
+                 track_visits: bool = False,
                  device: str = 'cpu'
                  ):
         super(QTablePolicy, self).__init__(env_params=env_params, device=device)
@@ -189,7 +190,8 @@ class QTablePolicy(Policy):
                 state_dim=self.env_params.observation_max+1,
                 action_dim=self.env_params.action_max+1,
                 batch_size=num_envs,
-                initial_value=initial_qvalue
+                initial_value=initial_qvalue,
+                track_visits=track_visits
             )
 
         if decision_function is None:
