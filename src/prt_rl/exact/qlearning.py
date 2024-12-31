@@ -1,11 +1,12 @@
 from tensordict.tensordict import TensorDict
 import torch
-from typing import Optional
+from typing import Optional, List, Any
 from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.utils.loggers import Logger
 from prt_rl.utils.trainers import TDTrainer
 from prt_rl.utils.decision_functions import DecisionFunction
 from prt_rl.utils.policies import QTablePolicy
+from prt_rl.utils.schedulers import ParameterScheduler
 
 class QLearning(TDTrainer):
     r"""
@@ -25,6 +26,7 @@ class QLearning(TDTrainer):
                  alpha: float = 0.1,
                  deterministic: bool = False,
                  logger: Optional[Logger] = None,
+                 schedulers: Optional[List[ParameterScheduler]] = None,
                  ) -> None:
         self.deterministic = deterministic
         self.gamma = gamma
@@ -36,7 +38,7 @@ class QLearning(TDTrainer):
             num_envs=num_envs,
             decision_function=decision_function
         )
-        super().__init__(env, policy, logger=logger)
+        super().__init__(env, policy, logger=logger, schedulers=schedulers)
         self.q_table = policy.get_qtable()
 
         # Log parameters if a logger is provided
@@ -45,6 +47,20 @@ class QLearning(TDTrainer):
                 'gamma': self.gamma,
                 'alpha': self.alpha,
             })
+
+    def set_parameter(self,
+                      name: str,
+                      value: Any
+                      ) -> None:
+        try:
+            if name == 'gamma':
+                self.gamma = value
+            elif name == 'alpha':
+                self.alpha = value
+            else:
+                super().set_parameter(name, value)
+        except ValueError:
+            raise ValueError(f"Parameter '{name}' not found in QLearning.")
 
     def update_policy(self, experience: TensorDict) -> None:
         st = experience["observation"]

@@ -2,8 +2,14 @@ from prt_sim.jhu.robot_game import RobotGame
 from prt_rl.env.wrappers import JhuWrapper
 from prt_rl.exact.qlearning import QLearning
 from prt_rl.utils.loggers import MLFlowLogger
+from prt_rl.utils.schedulers import LinearScheduler
 
 env = JhuWrapper(environment=RobotGame())
+
+schedulers = [
+    LinearScheduler(parameter_name='epsilon', start_value=0.8, end_value=0.05, num_episodes=100),
+    LinearScheduler(parameter_name='alpha', start_value=0.3, end_value=0.01, num_episodes=100),
+]
 
 trainer = QLearning(
     env=env,
@@ -14,6 +20,7 @@ trainer = QLearning(
         experiment_name="Robot Game",
         run_name="Q-Learning",
     ),
+    schedulers=schedulers
 )
 trainer.train(num_episodes=100)
 
