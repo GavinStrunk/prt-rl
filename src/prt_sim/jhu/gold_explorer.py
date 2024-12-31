@@ -59,8 +59,8 @@ class GoldExplorer(BaseEnvironment):
         self.mount = {1, 9, 49, 65, 73, 113}
 
         self.gridworld_render = GridworldRender(
-            grid_width=7,
-            grid_height=7,
+            grid_width=8,
+            grid_height=8,
             window_size=(800, 800),
             agent_icons={
                 'explorer': os.path.join(os.path.dirname(__file__), 'icons/explorer.png'),

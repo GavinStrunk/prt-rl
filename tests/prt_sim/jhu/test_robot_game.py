@@ -5,7 +5,7 @@ def test_reset_starting_state():
     env = RobotGame()
     state = env.reset()
     print(state)
-    assert state == 8
+    assert state == 7
 
 def test_get_number_of_states():
     env = RobotGame()
@@ -19,20 +19,20 @@ def test_up_action():
     env = RobotGame()
     state = env.reset()
     state, reward, done = env.execute_action(RobotGame.UP)
-    assert state == 5
+    assert state == 4
 
 def test_down_action():
     env = RobotGame()
     state = env.reset()
     state, reward, done = env.execute_action(RobotGame.UP)
     state, reward, done = env.execute_action(RobotGame.DOWN)
-    assert state == 8
+    assert state == 7
 
 def test_trying_to_leave_bottom():
     env = RobotGame()
     state = env.reset()
     state, reward, done = env.execute_action(RobotGame.DOWN)
-    assert state == 8
+    assert state == 7
 
 def test_trying_to_leave_top():
     env = RobotGame()
@@ -40,13 +40,13 @@ def test_trying_to_leave_top():
     state, reward, done = env.execute_action(RobotGame.UP)
     state, reward, done = env.execute_action(RobotGame.UP)
     state, reward, done = env.execute_action(RobotGame.UP)
-    assert state == 1
+    assert state == 0
 
 def test_trying_to_leave_left():
     env = RobotGame()
     state = env.reset()
     state, reward, done = env.execute_action(RobotGame.LEFT)
-    assert state == 8
+    assert state == 7
 
 def test_trying_to_leave_right():
     env = RobotGame()
@@ -55,39 +55,39 @@ def test_trying_to_leave_right():
     state, reward, done = env.execute_action(RobotGame.RIGHT)
     state, reward, done = env.execute_action(RobotGame.RIGHT)
     state, reward, done = env.execute_action(RobotGame.RIGHT)
-    assert state == 11
+    assert state == 10
 
 def test_trying_reach_empty_space():
     env = RobotGame()
     state = env.reset()
 
-    # Teleport robot to state 6
+    # Teleport robot to state 5
     env.current_position = np.array([1, 1])
-    assert env.get_state() == 6
+    assert env.get_state() == 5
     state, reward, done = env.execute_action(RobotGame.RIGHT)
-    assert state == 6
+    assert state == 5
 
     state = env.reset()
-    # Teleport robot to state 3
+    # Teleport robot to state 2
     env.current_position = np.array([2, 0])
-    assert env.get_state() == 3
+    assert env.get_state() == 2
     state, reward, done = env.execute_action(RobotGame.DOWN)
-    assert state == 3
+    assert state == 2
 
     state = env.reset()
-    # Teleport robot to state 10
+    # Teleport robot to state 9
     env.current_position = np.array([2, 2])
-    assert env.get_state() == 10
+    assert env.get_state() == 9
     state, reward, done = env.execute_action(RobotGame.UP)
-    assert state == 10
+    assert state == 9
 
     state = env.reset()
-    # Teleport robot to state 7
+    # Teleport robot to state 6
     env.current_position = np.array([3, 1])
-    assert env.get_state() == 7
+    assert env.get_state() == 6
     state, reward, done = env.execute_action(RobotGame.LEFT)
     assert done == True
-    assert state == 7
+    assert state == 6
 
 def test_reaches_goal():
     env = RobotGame()
@@ -97,7 +97,7 @@ def test_reaches_goal():
     state, reward, done = env.execute_action(RobotGame.RIGHT)
     state, reward, done = env.execute_action(RobotGame.RIGHT)
     state, reward, done = env.execute_action(RobotGame.RIGHT)
-    assert state == 4
+    assert state == 3
     assert reward == 25
     assert done == True
 
@@ -108,6 +108,6 @@ def test_reaches_pit():
     state, reward, done = env.execute_action(RobotGame.RIGHT)
     state, reward, done = env.execute_action(RobotGame.RIGHT)
     state, reward, done = env.execute_action(RobotGame.UP)
-    assert state == 7
+    assert state == 6
     assert reward == -25
     assert done == True

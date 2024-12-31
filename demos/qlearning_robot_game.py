@@ -15,7 +15,7 @@ trainer = QLearning(
         run_name="Q-Learning",
     ),
 )
-trainer.train(num_episodes=1000)
+trainer.train(num_episodes=100)
 
 eval_env = JhuWrapper(environment=RobotGame(), render_mode="human")
 policy = trainer.get_policy()

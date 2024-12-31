@@ -156,7 +156,7 @@ class EpsilonGreedy(Greedy):
         actions = torch.zeros((action_values.shape[0], 1), device=action_values.device, dtype=torch.int)
         for i, _ in enumerate(random_actions):
             if random_actions[i]:
-                actions[i] = torch.randint(len(action_values), (1,), device=action_values.device)
+                actions[i] = torch.randint(action_values.shape[-1], (1,), device=action_values.device)
             else:
                 actions[i] = greedy_actions[i]
 
