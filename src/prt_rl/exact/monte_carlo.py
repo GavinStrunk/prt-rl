@@ -1,133 +1,105 @@
-import numpy as np
-from prt_rl.utils.policies import epsilon_greedy
+from tensordict import TensorDict
+from typing import Optional
+from prt_rl.env.interface import EnvironmentInterface
+from prt_rl.utils.decision_functions import DecisionFunction
+from prt_rl.utils.loggers import Logger
+from prt_rl.utils.policies import QTablePolicy
+from prt_rl.utils.trainers import TDTrainer
 
-class MonteCarlo:
+class MonteCarlo(TDTrainer):
     r"""
-    On-policy First Visit Monte Carlo Algorithm
+        On-policy First Visit Monte Carlo Algorithm
 
     .. math::
         \begin{equation}
         Q(S_t,A_t) \leftarrow Q(S_t,A_t) + \frac{1}{N}[\sum_{k=0}^{\infty}\gamma^kR_{t+k+1} - Q(S_t,A_t)] \\
         q_s \leftarrow q_s + \frac{1}{n}[G_t - q_s]
         \end{equation}
-
-    Args:
-        num_states (int): number of environment states
-        num_actions (int): number of agent actions
-        epsilon (float): probability of choosing a random action
-        gamma (float): discount factor
     """
-    def __init__(
-            self,
-            num_states: int,
-            num_actions: int,
-            epsilon: float=0.1,
-            gamma: float=1.0,
-    ):
-        self.num_states = num_states
-        self.num_actions = num_actions
-        self.epsilon = epsilon
+    def __init__(self,
+                 env: EnvironmentInterface,
+                 decision_function: Optional[DecisionFunction] = None,
+                 gamma: float = 0.99,
+                 logger: Optional[Logger] = None,
+                 ) -> None:
         self.gamma = gamma
+        self.env_params = env.get_parameters()
 
-        # Initialize the Q-table and visit table
-        self.q_table = np.zeros((num_states, num_actions))
-        self.visit_table = np.zeros((num_states, num_actions))
+        policy = QTablePolicy(
+            env_params=self.env_params,
+            num_envs=1,
+            decision_function=decision_function,
+            track_visits=True
+        )
+        super(MonteCarlo, self).__init__(env=env, policy=policy, logger=logger)
+        self.q_table = policy.get_qtable()
 
-    def select_action(self, state) -> int:
-        """
-        Selects an action based on the epsilon greedy policy
+        # Log parameters if logger is provided
+        if logger is not None:
+            self.logger.log_parameters({
+                'gamma': self.gamma,
+            })
 
-        Args:
-            state (int): current state of the environment
+        # Initialize experience trajectory
+        self.trajectory = []
 
-        Returns:
-            int: action to take
-        """
-        actions = self.q_table[state]
-        action = epsilon_greedy(actions, epsilon=self.epsilon)
+    def update_policy(self, experience: TensorDict) -> None:
+        # Add experience to trajectory
+        self.trajectory.append(experience)
 
-        return action
+        # Return if a full episode has not completed
+        if not experience['next', 'done']:
+            return
 
-    def learn(self, trajectory: list[tuple]) -> None:
-        """
-
-        Args:
-            trajectory (list[tuple]): Episode trajectory as a list of tuples (reward, state, action)
-
-        Returns:
-            None
-        """
-        # Initialize the return to zero
+        # Initialize return to zero
         G = 0
 
-        # Learn by working through the trajectory backwards
-        for t in reversed(range(len(trajectory) - 1)):
-            _, state, action = trajectory[t]
-            reward, _, _ = trajectory[t+1]
-            # Update the Return
+        # Learn by working through trajectory backwards
+        for t in reversed(range(len(self.trajectory) - 1)):
+            state = self.trajectory[t]['observation']
+            action = self.trajectory[t]['action']
+            reward = self.trajectory[t]['next', 'reward']
+
+            # Update return
             G = self.gamma * G + reward
 
             # If this is a first visit update the visit and q tables
-            if self.is_first_visit(trajectory, t):
-                self.update_visit(state, action)
-                self.update_q(state, action, G)
+            if self._is_first_visit(t):
+                self.q_table.update_visits(state=state, action=action)
 
-    def is_first_visit(self, trajectory: list[tuple], t: int) -> bool:
+                # Compute new Q value
+                n = self.q_table.get_visit_count(state=state, action=action)
+                qval = self.q_table.get_state_action_value(state=state, action=action)
+                qval += 1/n * (G - qval)
+
+                self.q_table.update_q_value(state=state, action=action, q_value=qval)
+
+        # Reset the experience trajectory
+        self.trajectory = []
+
+    def _is_first_visit(self,
+                        t: int
+                        ) -> bool:
         """
         Checks if the state,action pair at timestep t in the trajectory is the first visit
 
         Args:
-            trajectory (list[tuple]): Episode trajectory as a list of tuples (r, s, a)
-            t (int): Current timestep
+            t (int): Current timestep in the trajectory
 
         Returns:
-            bool: True or False
+            bool: True if this is the first visit, False otherwise
         """
-        if t > len(trajectory) - 1:
-            raise IndexError("Index is outside the bounds of the trajectory")
-
-        sa_sets = []
-        pairs = set()
-
-        for r, s, a in trajectory:
-            # Create state,action sets
-            pairs.add((s, a))
-
-            # Append the set to the list of sets
-            sa_sets.append(pairs.copy())
-
-        _, state, action = trajectory[t]
-
-        # If t is 0 this has to be the first visit
-        if t > 0:
-            return (state, action) not in sa_sets[t-1]
-        else:
+        # If this is the first index then it is the first visit by default
+        if t <= 0:
             return True
 
-    def update_visit(self, state: int, action: int) -> None:
-        """
-        Updates the visit table by incrementing the value of the given state,action pair
+        # Get current state, action pair
+        state = self.trajectory[t]['observation']
+        action = self.trajectory[t]['action']
 
-        Args:
-            state (int): Current state
-            action (int): Selected action
+        # Check if this pair appears in any previous tensordicts
+        for td in self.trajectory[:t]:
+            if td.get('observation').equal(state) and td.get('action').equal(action):
+                return False
 
-        Returns:
-            None
-        """
-        self.visit_table[state][action] += 1
-
-    def update_q(self, state: int, action: int, G: float) -> None:
-        """
-        Updates the q table value by averaging the latest return with the previous returns at a given state,action pair
-
-        Args:
-            state (int): Current state
-            action (int): Selected action
-            G (int): Current return
-
-        Returns:
-            None
-        """
-        n = self.visit_table[state][action]
-        self.q_table[state][action] += 1/n*(G - self.q_table[state][action])
+        return True

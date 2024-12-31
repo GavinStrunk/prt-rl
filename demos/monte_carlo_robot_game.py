@@ -1,28 +1,20 @@
 from prt_sim.jhu.robot_game import RobotGame
 from prt_rl.env.wrappers import JhuWrapper
-from prt_rl.exact.qlearning import QLearning
+from prt_rl.exact.monte_carlo import MonteCarlo
 from prt_rl.utils.loggers import MLFlowLogger
-from prt_rl.utils.schedulers import LinearScheduler
 
 env = JhuWrapper(environment=RobotGame())
 
-schedulers = [
-    LinearScheduler(parameter_name='epsilon', start_value=0.8, end_value=0.05, num_episodes=100),
-    LinearScheduler(parameter_name='alpha', start_value=0.3, end_value=0.01, num_episodes=100),
-]
-
-trainer = QLearning(
+trainer = MonteCarlo(
     env=env,
     gamma=0.9,
-    alpha=0.1,
     logger=MLFlowLogger(
         tracking_uri="http://home-server:5000",
         experiment_name="Robot Game",
-        run_name="Q-Learning",
+        run_name="Monte Carlo Training",
     ),
-    schedulers=schedulers
 )
-trainer.train(num_episodes=100)
+trainer.train(num_episodes=1000)
 
 eval_env = JhuWrapper(environment=RobotGame(), render_mode="human")
 policy = trainer.get_policy()

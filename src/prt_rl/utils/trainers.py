@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
 from tensordict.tensordict import TensorDict
-from typing import Optional
+from typing import Optional, List, Any
 from prt_rl.env.interface import EnvParams, EnvironmentInterface
 from prt_rl.utils.policies import Policy, QNetworkPolicy
 from prt_rl.utils.loggers import Logger
+from prt_rl.utils.schedulers import ParameterScheduler
 
 
 class TDTrainer(ABC):
@@ -15,16 +16,37 @@ class TDTrainer(ABC):
                  env: EnvironmentInterface,
                  policy: Policy,
                  logger: Optional[Logger] = None,
+                 schedulers: Optional[List[ParameterScheduler]] = None,
                  ) -> None:
         self.env = env
         self.policy = policy
         self.logger = logger or Logger()
+        self.schedulers = schedulers or []
 
     @abstractmethod
     def update_policy(self,
                       experience: TensorDict,
                       ) -> None:
         raise NotImplementedError
+
+    def set_parameter(self,
+                      name: str,
+                      value: Any
+                      ) -> None:
+        """
+        Sets a name value parameter
+
+        Args:
+            name (str): The name of the parameter
+            value (Any): The value of the parameter
+
+        Raises:
+            ValueError: If the parameter is not found
+        """
+        try:
+            self.policy.set_parameter(name, value)
+        except ValueError:
+            raise ValueError(f"Parameter {name} not found in TDTrainer")
 
     def get_policy(self) -> Policy:
         """
@@ -41,6 +63,14 @@ class TDTrainer(ABC):
 
         cumulative_reward = 0
         for i in range(num_episodes):
+
+            # Step schedulers if there are any
+            for sch in self.schedulers:
+                name = sch.parameter_name
+                new_val = sch.update(i)
+                self.set_parameter(name, new_val)
+                self.logger.log_scalar(name, new_val, iteration=i)
+
             obs_td = self.env.reset()
             done = False
             episode_reward = 0

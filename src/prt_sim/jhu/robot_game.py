@@ -139,10 +139,10 @@ class RobotGame(BaseEnvironment):
             self.current_position = new_position
 
         # Done States
-        if self.get_state() == 4:
+        if self.get_state() == 3:
             reward = 25
             done = True
-        elif self.get_state() == 7:
+        elif self.get_state() == 6:
             reward = -25
             done = True
 
@@ -155,8 +155,8 @@ class RobotGame(BaseEnvironment):
         Returns:
             int: current location of the robot
         """
-        state = self.current_position[1] * self.grid_width + self.current_position[0] + 1
-        if state > 6:
+        state = self.current_position[1] * self.grid_width + self.current_position[0]
+        if state > 5:
             state -= 1
         return state
 

@@ -1,5 +1,4 @@
 from tensordict.tensordict import TensorDict
-import torch
 from typing import Optional
 from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.utils.trainers import TDTrainer
