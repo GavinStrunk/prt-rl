@@ -39,8 +39,6 @@ class Policy(ABC):
     def load_from_file(filename: str) -> 'Policy':
         raise NotImplementedError
 
-    def save(self, filename: str):
-        raise NotImplementedError
 
 class RandomPolicy(Policy):
     """

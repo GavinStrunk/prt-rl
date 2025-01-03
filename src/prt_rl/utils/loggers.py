@@ -1,5 +1,8 @@
 import mlflow
+import mlflow.pyfunc
 from typing import Optional
+from prt_rl.utils.policies import Policy
+
 
 class Logger:
     """
@@ -24,12 +27,18 @@ class Logger:
                    ) -> None:
         pass
 
+    def save_policy(self,
+                    policy: Policy,
+                    ) -> None:
+        pass
+
 class MLFlowLogger(Logger):
     """
     MLFlow Logger
 
     Notes:
         psutil must be installed with pip to log system metrics.
+        pynvml must be installed with pip to log gpu metrics.
 
     References:
         [1] https://mlflow.org/docs/latest/python_api/mlflow.html
@@ -46,7 +55,7 @@ class MLFlowLogger(Logger):
 
         mlflow.set_tracking_uri(self.tracking_uri)
         mlflow.set_experiment(self.experiment_name)
-        mlflow.start_run(
+        self.run = mlflow.start_run(
             run_name=self.run_name,
             log_system_metrics=True,
         )
@@ -71,4 +80,17 @@ class MLFlowLogger(Logger):
         else:
             self.iteration = iteration
 
+    def save_policy(self,
+                    policy: Policy
+                    ) -> None:
+
+        class PolicyWrapper(mlflow.pyfunc.PythonModel):
+            def __init__(self, policy: Policy):
+                self.policy = policy
+
+
+        mlflow.pyfunc.log_model(
+            artifact_path="policy",
+            python_model=PolicyWrapper(policy),
+        )
 

@@ -8,73 +8,17 @@
 
 import os
 import sys
-import re
-import toml
+
+sys.path.insert(0, os.path.abspath('.'))
+sys.path.insert(0, os.path.abspath('..'))
 sys.path.insert(0, os.path.abspath('../src'))  # Source code dir relative to this file
 
-# ---Project Functions----------------------------------------------------
-
-def get_project_info():
-    # Determine the directory where the conf.py file is located
-    conf_dir = os.path.dirname(__file__)
-    
-    # Construct the path to the pyproject.toml file located one level up
-    pyproject_path = os.path.join(os.path.dirname(conf_dir), 'pyproject.toml')
-    
-    try:
-        with open(pyproject_path, 'r', encoding='utf-8') as toml_file:
-            pyproject_data = toml.load(toml_file)
-            
-            # Get project name, authors, and version
-            project_name = pyproject_data.get('tool', {}).get('poetry', {}).get('name', '')
-            project_authors = pyproject_data.get('tool', {}).get('poetry', {}).get('authors', [])
-            project_version = pyproject_data.get('tool', {}).get('poetry', {}).get('version', '')
-            
-            # Ensure authors is a list and join multiple authors into a single string
-            if isinstance(project_authors, list):
-                project_author = ', '.join(project_authors)
-            else:
-                project_author = str(project_authors)
-            
-            return project_name, project_author, project_version
-    except FileNotFoundError:
-        return '', '', ''
-
-
-def add_math_directive(app, what, name, obj, options, lines):
-    # Regular expression pattern to match LaTeX math expressions enclosed in $$
-    math_pattern = re.compile(r'\$\$(.*?)\$\$', re.DOTALL)
-
-    # Iterate over lines in the docstring and modify LaTeX math expressions
-    new_lines = []
-    for line in lines:
-        new_line = math_pattern.sub(r'.. math:: \n\n   \1', line)
-        new_lines.append(new_line)
-        new_lines.append('\n')
-
-    lines[:] = new_lines
-    
-
-def modify_docstrings(app, what, name, obj, options, lines):
-    # Take care of 'Inline emphasis Warning by adding '\' character to single '*'
-    if lines:
-        # Process each line in the docstring
-        for i, line in enumerate(lines):
-            # Add a backslash before single '*' characters
-            modified_line = re.sub(r'(?<!\\)(\*)', r'\\\1', line)
-            lines[i] = modified_line
-
-def setup(app):
-    app.connect('autodoc-process-docstring', add_math_directive)
-    app.connect('autodoc-process-docstring', modify_docstrings)
-
-
 # -- Project information -----------------------------------------------------
-
-# Set the 'project' and 'author' variables
-project, author, version = get_project_info()
-
-needs_sphinx = '6.2.1'
+project = 'Python Research Toolkit - Reinforcement Learning'
+copyright = '2024, Gavin Strunk'
+author = 'Gavin Strunk'
+version = '0.1.0'
+release = version
 
 # -- General configuration ---------------------------------------------------
 
@@ -89,6 +33,7 @@ extensions = [
     'sphinx.ext.napoleon',      # Allows for Google-style docstrings
     'sphinx.ext.mathjax',       # Formats LaTex code using Jax
     'myst_parser',              # Allows parsing of README.md file
+    'sphinxcontrib.mermaid',     # Allows for Mermaid diagrams to be rendered
 ]
 
 # Mappings for sphinx.ext.intersphinx. Projects have to have Sphinx-generated doc! (.inv file)
@@ -116,6 +61,11 @@ napoleon_use_admonition_for_examples = False
 napoleon_use_ivar = True
 # For other napoleon options, see https://sphinxcontrib-napoleon.readthedocs.io/en/latest/sphinxcontrib.napoleon.html
 
+myst_enable_extensions = [
+    "colon_fence",  # Enables ::: directives
+    "html_admonition",
+    "html_image",
+]
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -134,8 +84,8 @@ html_theme = "sphinx_book_theme"
 
 # Furo Theme
 # html_theme = "furo"
-# html_logo = "_static/spectacles-logo.png"
-# html_favicon = "_static/spectacles-logo.png"
+html_logo = "_static/prt-rl-logo.jpg"
+html_favicon = "_static/prt-rl-logo.jpg"
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

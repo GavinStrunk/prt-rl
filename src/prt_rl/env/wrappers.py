@@ -1,8 +1,10 @@
 import gymnasium as gym
+import numpy as np
 from tensordict.tensordict import TensorDict
 import torch
 from typing import Optional, Tuple
 from prt_sim.jhu.base import BaseEnvironment
+from prt_sim.jhu.bandits import KArmBandits
 from prt_rl.env.interface import EnvironmentInterface, EnvParams
 
 class JhuWrapper(EnvironmentInterface):
@@ -40,6 +42,12 @@ class JhuWrapper(EnvironmentInterface):
             batch_size=torch.Size([1])
         )
 
+        # Add info for Bandit environment
+        if isinstance(self.env, KArmBandits):
+            state_td['info'] = {
+                'optimal_bandit': torch.tensor([[self.env.get_optimal_bandit()]], dtype=torch.int),
+            }
+
         if self.render_mode is not None:
             self.env.render()
 
@@ -63,14 +71,19 @@ class GymnasiumWrapper(EnvironmentInterface):
     """
     Wraps the Gymnasium environments in the Environment interface.
 
+    Args:
+        gym_name: Name of the Gymnasium environment.
+        render_mode: Sets the rendering mode. Defaults to None.
+
     """
     def __init__(self,
                  gym_name: str,
                  render_mode: Optional[str] = None,
+                 **kwargs
                  ) -> None:
         super().__init__(render_mode)
         self.gym_name = gym_name
-        self.env = gym.make(self.gym_name, render_mode=render_mode)
+        self.env = gym.make(self.gym_name, render_mode=render_mode, **kwargs)
 
     def get_parameters(self) -> EnvParams:
         if isinstance(self.env.action_space, gym.spaces.Discrete):
@@ -80,6 +93,8 @@ class GymnasiumWrapper(EnvironmentInterface):
 
         if isinstance(self.env.observation_space, gym.spaces.Discrete):
             obs_shape, obs_cont, obs_min, obs_max = self._get_params_from_discrete(self.env.observation_space)
+        elif isinstance(self.env.observation_space, gym.spaces.Box):
+            obs_shape, obs_cont, obs_min, obs_max = self._get_params_from_box(self.env.observation_space)
         else:
             raise NotImplementedError("Only discrete observation spaces are supported")
 
@@ -99,7 +114,7 @@ class GymnasiumWrapper(EnvironmentInterface):
 
         state_td = TensorDict(
             {
-                'observation': torch.tensor([[obs]], dtype=torch.int),
+                'observation': self._process_observation(obs),
             },
             batch_size=torch.Size([1])
         )
@@ -110,12 +125,22 @@ class GymnasiumWrapper(EnvironmentInterface):
         state, reward, terminated, trunc, info = self.env.step(action_val)
         done = terminated or trunc
         action['next'] = {
-            'observation': torch.tensor([[state]], dtype=torch.int),
+            'observation': self._process_observation(state),
             'reward': torch.tensor([[reward]], dtype=torch.float),
             'done': torch.tensor([[done]], dtype=torch.bool),
         }
 
         return action
+
+    def _process_observation(self, observation) -> torch.Tensor:
+        """
+        Process the observation to handle different output types like int, list[int] to standardize them into a tensor.
+
+        """
+        if isinstance(observation, int):
+            observation = [observation]
+
+        return torch.tensor([observation])
 
     @staticmethod
     def _get_params_from_discrete(space: gym.spaces.Discrete) -> Tuple[tuple, bool, int, int]:
@@ -129,3 +154,25 @@ class GymnasiumWrapper(EnvironmentInterface):
             Tuple[tuple, bool, int, int]: tuple containing (space_shape, space_continuous, space_min, space_max)
         """
         return (1,), False, space.start, space.n - 1
+
+    @staticmethod
+    def _get_params_from_box(space: gym.spaces.Box) -> Tuple[tuple, bool, int, int]:
+        """
+        Extracts the environment parameters from a box space.
+
+        Args:
+            space (gym.spaces.Box): The space to extract parameters from.
+
+        Returns:
+            Tuple[tuple, bool, int, int]: tuple containing (space_shape, space_continuous, space_min, space_max)
+        """
+        if len(np.unique(space.low)) == 1:
+            low = space.low[0]
+        else:
+            raise ValueError("Only Box spaces with the same low boundaries are supported")
+        if len(np.unique(space.high)) == 1:
+            high = space.high[0]
+        else:
+            raise ValueError("Only Box spaces with the same high boundaries are supported")
+
+        return space.shape, True, low, high

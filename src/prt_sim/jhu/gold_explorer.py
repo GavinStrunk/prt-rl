@@ -18,9 +18,9 @@ class GoldExplorer(BaseEnvironment):
     The Gold Explorer puzzle
 
     .. image:: /_static/gold-explorer.png
-        :alt: Gold Explorer puzzle
-        :width: 100%
-        :align: center
+       :alt: Gold Explorer puzzle
+       :width: 100%
+       :align: center
 
     **Action space**: integer representing a discrete action described in the table below
 

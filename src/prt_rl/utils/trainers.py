@@ -57,6 +57,13 @@ class TDTrainer(ABC):
         """
         return self.policy
 
+    def save_policy(self):
+        """
+        Saves the current policy.
+        """
+        if self.logger is not None:
+            self.logger.save_policy(self.policy)
+
     def train(self,
               num_episodes: int,
               ) -> None:
