@@ -138,7 +138,7 @@ class GymnasiumWrapper(EnvironmentInterface):
 
         """
         if isinstance(observation, int):
-            observation = [observation]
+            observation = np.array([observation])
 
         return torch.tensor([observation])
 

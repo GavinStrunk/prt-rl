@@ -10,7 +10,7 @@ def run_environment(env, policy, num_runs:int = 1):
             action_td = policy.get_action(obs_td)
             obs_td = env.step(action_td)
             done = obs_td['next','done']
-            obs_td = env.step_mpd(obs_td)
+            obs_td = env.step_mdp(obs_td)
 
 
 def human_play():
@@ -30,6 +30,14 @@ def human_play():
     )
 
     run_environment(env, policy)
+
+def train_dqn():
+    env = GymnasiumWrapper(
+        gym_name="FlappyBird-v0",
+        use_lidar=False,
+        normalize_obs=True
+    )
+
 
 if __name__ == '__main__':
     human_play()
