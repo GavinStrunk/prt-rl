@@ -2,6 +2,7 @@ from typing import Optional, List
 import torch
 import torch.nn as nn
 
+
 class MLP(nn.Sequential):
     """
     Multi-layer perceptron network
@@ -45,3 +46,18 @@ class MLP(nn.Sequential):
                 state: torch.Tensor
                 ) -> torch.Tensor:
         return super().forward(state)
+
+    def init_args(self) -> dict:
+        """
+        Returns a dictionary of arguments passed to __init__
+
+        Returns:
+            dict: Initialization arguments
+        """
+        return {
+            'state_dim': self.state_dim,
+            'action_dim': self.action_dim,
+            'network_arch': self.network_arch,
+            'hidden_activation': self.hidden_activation,
+            'final_activation': self.final_activation
+        }

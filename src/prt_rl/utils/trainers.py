@@ -57,6 +57,12 @@ class TDTrainer(ABC):
         """
         return self.policy
 
+    def save_policy(self):
+        """
+        Saves the current policy.
+        """
+        self.logger.save_policy(self.policy)
+
     def train(self,
               num_episodes: int,
               ) -> None:
@@ -86,8 +92,6 @@ class TDTrainer(ABC):
             print(f"Episode {i} Reward: {episode_reward}")
             self.logger.log_scalar('episode_reward', episode_reward, iteration=i)
             self.logger.log_scalar('cumulative_reward', cumulative_reward, iteration=i)
-
-        self.logger.close()
 
 
 class ANNTrainer(TDTrainer):

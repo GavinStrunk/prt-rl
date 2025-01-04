@@ -1,0 +1,1 @@
+This repository is for academic purposes only. This library is not intended to be the most efficient implementations of RL algorithms available.

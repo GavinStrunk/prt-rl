@@ -1,18 +1,17 @@
-from prt_sim.jhu.robot_game import RobotGame
+from prt_sim.jhu.gold_explorer import GoldExplorer
 from prt_rl.env.wrappers import JhuWrapper
 from prt_rl.exact.qlearning import QLearning
 from prt_rl.utils.loggers import MLFlowLogger
 from prt_rl.utils.schedulers import LinearScheduler
-from prt_rl.utils.policies import load_from_mlflow
 
 # Parameters
-tracking_uri = "http://127.0.0.1:5000"
+num_episodes = 10
 
-env = JhuWrapper(environment=RobotGame())
+env = JhuWrapper(environment=GoldExplorer())
 
 schedulers = [
-    LinearScheduler(parameter_name='epsilon', start_value=0.8, end_value=0.05, num_episodes=100),
-    LinearScheduler(parameter_name='alpha', start_value=0.3, end_value=0.01, num_episodes=100),
+    LinearScheduler(parameter_name='epsilon', start_value=0.8, end_value=0.05, num_episodes=num_episodes),
+    LinearScheduler(parameter_name='alpha', start_value=0.3, end_value=0.01, num_episodes=num_episodes),
 ]
 
 trainer = QLearning(
@@ -20,18 +19,19 @@ trainer = QLearning(
     gamma=0.9,
     alpha=0.1,
     logger=MLFlowLogger(
-        tracking_uri=tracking_uri,
+        tracking_uri="http://home-server:5000",
         experiment_name="Robot Game",
         run_name="Q-Learning",
     ),
     schedulers=schedulers
 )
-trainer.train(num_episodes=100)
-trainer.save_policy()
+trainer.train(num_episodes=num_episodes)
 
-eval_env = JhuWrapper(environment=RobotGame(), render_mode="human")
-# policy = trainer.get_policy()
-policy = load_from_mlflow(tracking_uri=tracking_uri, model_name="Robot Game", model_version="2")
+# Make environment that renders
+eval_env = JhuWrapper(environment=GoldExplorer(), render_mode="human")
+
+# Load a trained policy
+policy = trainer.get_policy()
 policy.set_parameter('epsilon', 1.0)
 
 # Make evaluator to run the environment
