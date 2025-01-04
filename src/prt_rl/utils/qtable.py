@@ -1,5 +1,6 @@
 import torch
 
+
 class QTable:
     r"""
     The Q table implements a matrix of state-action values.
@@ -49,6 +50,22 @@ class QTable:
         # Initialize the visit table if they are being kept
         if self.track_visits:
             self.visit_table = torch.zeros((self.batch_size, self.state_dim, self.action_dim), dtype=torch.float32, device=device)
+
+    def init_args(self) -> dict:
+        """
+        Returns the initialization arguments that are required to construct the QTable.
+
+        Returns:
+            dict: Initialization arguments
+        """
+        return {
+            'state_dim': self.state_dim,
+            'action_dim': self.action_dim,
+            'batch_size': self.batch_size,
+            'initial_value': self.initial_value,
+            'track_visits': self.track_visits,
+            'device': self.device
+        }
 
     def get_action_values(self,
                           state: torch.Tensor

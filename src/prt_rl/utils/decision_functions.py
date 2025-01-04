@@ -73,6 +73,32 @@ class DecisionFunction(ABC):
         else:
             raise ValueError(f"Parameter '{name}' not found.")
 
+    @classmethod
+    def from_dict(cls, data: dict) -> 'DecisionFunction':
+        """
+        Reconstruct the decision function from a dictionary.
+        Child classes should override this if they have custom parameters.
+
+        Args:
+            data (dict): dictionary containing parameter values
+
+        Returns:
+            DecisionFunction: Decision function object
+        """
+        if data["type"] != cls.__name__:
+            raise ValueError(f"Cannot load {data['type']} as {cls.__name__}")
+        return cls()
+
+    def to_dict(self) -> dict:
+        """
+        Serialize the decision function to a dictionary.
+        Child classes should override this if they have custom parameters.
+
+        Returns:
+            dict: dictionary containing class type and parameter values
+        """
+        return {"type": self.__class__.__name__}
+
 
 class Greedy(DecisionFunction):
     """
@@ -162,6 +188,35 @@ class EpsilonGreedy(Greedy):
 
         return actions
 
+    @classmethod
+    def from_dict(cls, data: dict) -> 'EpsilonGreedy':
+        """
+        Reconstruct the decision function from a dictionary.
+        Child classes should override this if they have custom parameters.
+
+        Args:
+            data (dict): dictionary containing parameter values
+
+        Returns:
+            DecisionFunction: Decision function object
+        """
+        if data["type"] != cls.__name__:
+            raise ValueError(f"Cannot load {data['type']} as {cls.__name__}")
+        return cls(epsilon=data["epsilon"])
+
+    def to_dict(self) -> dict:
+        """
+        Serialize the decision function to a dictionary.
+        Child classes should override this if they have custom parameters.
+
+        Returns:
+            dict: dictionary containing class type and parameter values
+        """
+        return {
+            "type": self.__class__.__name__,
+            "epsilon": self.epsilon
+        }
+
 
 class Softmax(DecisionFunction):
     """
@@ -196,6 +251,35 @@ class Softmax(DecisionFunction):
         action = stochastic_selection(action_pmf)
 
         return action
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'Softmax':
+        """
+        Reconstruct the decision function from a dictionary.
+        Child classes should override this if they have custom parameters.
+
+        Args:
+            data (dict): dictionary containing parameter values
+
+        Returns:
+            DecisionFunction: Decision function object
+        """
+        if data["type"] != cls.__name__:
+            raise ValueError(f"Cannot load {data['type']} as {cls.__name__}")
+        return cls(tau=data["tau"])
+
+    def to_dict(self) -> dict:
+        """
+        Serialize the decision function to a dictionary.
+        Child classes should override this if they have custom parameters.
+
+        Returns:
+            dict: dictionary containing class type and parameter values
+        """
+        return {
+            "type": self.__class__.__name__,
+            "tau": self.tau
+        }
 
 
 class UpperConfidenceBound(DecisionFunction):

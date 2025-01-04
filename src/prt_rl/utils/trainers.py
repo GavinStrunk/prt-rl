@@ -61,8 +61,7 @@ class TDTrainer(ABC):
         """
         Saves the current policy.
         """
-        if self.logger is not None:
-            self.logger.save_policy(self.policy)
+        self.logger.save_policy(self.policy)
 
     def train(self,
               num_episodes: int,
@@ -93,8 +92,6 @@ class TDTrainer(ABC):
             print(f"Episode {i} Reward: {episode_reward}")
             self.logger.log_scalar('episode_reward', episode_reward, iteration=i)
             self.logger.log_scalar('cumulative_reward', cumulative_reward, iteration=i)
-
-        self.logger.close()
 
 
 class ANNTrainer(TDTrainer):

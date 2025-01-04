@@ -3,6 +3,10 @@ from prt_rl.env.wrappers import JhuWrapper
 from prt_rl.exact.qlearning import QLearning
 from prt_rl.utils.loggers import MLFlowLogger
 from prt_rl.utils.schedulers import LinearScheduler
+from prt_rl.utils.policies import load_from_mlflow
+
+# Parameters
+tracking_uri = "http://127.0.0.1:5000"
 
 env = JhuWrapper(environment=RobotGame())
 
@@ -16,16 +20,18 @@ trainer = QLearning(
     gamma=0.9,
     alpha=0.1,
     logger=MLFlowLogger(
-        tracking_uri="http://home-server:5000",
+        tracking_uri=tracking_uri,
         experiment_name="Robot Game",
         run_name="Q-Learning",
     ),
     schedulers=schedulers
 )
 trainer.train(num_episodes=100)
+trainer.save_policy()
 
 eval_env = JhuWrapper(environment=RobotGame(), render_mode="human")
-policy = trainer.get_policy()
+# policy = trainer.get_policy()
+policy = load_from_mlflow(tracking_uri=tracking_uri, model_name="Robot Game", model_version="2")
 policy.set_parameter('epsilon', 1.0)
 
 # Make evaluator to run the environment

@@ -2,7 +2,7 @@ import pytest
 import torch
 from tensordict.tensordict import TensorDict
 from prt_rl.env.interface import EnvParams
-from prt_rl.utils.policies import RandomPolicy, KeyboardPolicy, QTablePolicy
+from prt_rl.utils.policies import RandomPolicy, KeyboardPolicy, QTablePolicy, load_from_mlflow
 from prt_rl.utils.qtable import QTable
 from prt_rl.utils.decision_functions import Greedy
 
@@ -149,3 +149,11 @@ def test_qtable_policy():
     action_td = policy.get_action(obs_td)
     assert action_td['action'].shape == (1, 1)
     assert action_td['action'].dtype == torch.int
+
+@pytest.mark.skip(reason="Requires MLFlow server")
+def test_mlflow_model_load():
+    tracking_uri = 'http://localhost:5000'
+    model_name = 'Robot Game'
+    version = '2'
+
+    policy = load_from_mlflow(tracking_uri=tracking_uri, model_name=model_name, model_version=version)
