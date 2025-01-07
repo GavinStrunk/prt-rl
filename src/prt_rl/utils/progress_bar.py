@@ -13,6 +13,6 @@ class ProgressBar:
     def __init__(self, total_frames, frames_per_batch):
         self.pbar = tqdm(total=total_frames // frames_per_batch, desc="episode_reward_mean = 0")
 
-    def update(self, reward_mean):
-        self.pbar.set_description(f"episode_reward_mean = {reward_mean}", refresh=False)
+    def update(self, epsiode_reward, cumulative_reward):
+        self.pbar.set_description(f"Episode Reward: {epsiode_reward}  Cumulative Reward: {cumulative_reward}", refresh=False)
         self.pbar.update()
