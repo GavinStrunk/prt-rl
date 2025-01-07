@@ -86,6 +86,7 @@ def test_keyboard_blocking_policy():
     td = policy.get_action(td)
     assert td['action'][0] == 1
 
+@pytest.mark.skip(reason="Requires a keyboard press")
 def test_keyboard_nonblocking_policy():
     # Create a fake environment that has 1 discrete action [0,...,3] and 1 discrete state with the same interval
     params = EnvParams(
