@@ -1,4 +1,4 @@
-from prt_rl.utils.policies import RandomPolicy
+from prt_rl.utils.policy import RandomPolicy
 from prt_rl.env.wrappers import GymnasiumWrapper
 
 env = GymnasiumWrapper(
