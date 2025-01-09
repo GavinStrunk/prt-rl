@@ -1,4 +1,4 @@
-from prt_rl.utils.policies import GameControllerPolicy
+from prt_rl.utils.policy import GameControllerPolicy
 from prt_rl.env.wrappers import GymnasiumWrapper
 
 env = GymnasiumWrapper(
@@ -9,9 +9,9 @@ env = GymnasiumWrapper(
 policy = GameControllerPolicy(
     env_params=env.get_parameters(),
     key_action_map={
-        'JOY_RIGHT_X': 0,
-        'JOY_LEFT_Y': 1,
-        'JOY_R2': 2,
+        GameControllerPolicy.Key.JOYSTICK_RIGHT_X: 0,
+        GameControllerPolicy.Key.JOYSTICK_LEFT_Y: [1, 'positive'],
+        GameControllerPolicy.Key.JOYSTICK_RT: 2,
     },
     blocking=False
 )

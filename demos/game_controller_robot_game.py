@@ -1,4 +1,4 @@
-from prt_rl.utils.policies import GameControllerPolicy
+from prt_rl.utils.policy import GameControllerPolicy
 from prt_rl.env.wrappers import JhuWrapper
 from prt_sim.jhu.robot_game import RobotGame
 
