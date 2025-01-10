@@ -2603,13 +2603,13 @@ xethub = ["mlflow-xethub"]
 
 [[package]]
 name = "moviepy"
-version = "2.1.1"
+version = "2.1.2"
 description = "Video editing with Python"
 optional = false
 python-versions = "*"
 files = [
-    {file = "moviepy-2.1.1-py3-none-any.whl", hash = "sha256:b236a794c1bc00162613f08b5b5a862531ac39666b6943161c1f46a4dc8d3064"},
-    {file = "moviepy-2.1.1.tar.gz", hash = "sha256:0210336944fcc88a1841fe7ca3701f8f449eead222f9d1665d11d3b8fa753454"},
+    {file = "moviepy-2.1.2-py3-none-any.whl", hash = "sha256:6cdc0d739110c8f347a224d72bd59eebaec010720d01eff290d37111bf545a73"},
+    {file = "moviepy-2.1.2.tar.gz", hash = "sha256:22c57a7472f607eaad9fe80791df67c05082e1060fb74817c4eaac68e138ee77"},
 ]
 
 [package.dependencies]

@@ -33,6 +33,7 @@ class Runner:
         # Start visualizer and show initial frame
         self.visualizer.start()
         rgb_frame = state_td['rgb_array'][0].numpy()
+        self.recorder.capture_frame(rgb_frame)
         self.visualizer.show(rgb_frame)
 
         # Loop until the episode is done

@@ -26,6 +26,7 @@ class GridworldRender:
                  grid_height: int,
                  window_size: Tuple[int, int],
                  agent_icons: Dict[str, str],
+                 render_mode: str = "human",
                  render_fps: int = 5,
                  window_title: str = "Gridworld",
                  background_color: Tuple[int, int, int] = (255, 255, 255),
@@ -34,6 +35,7 @@ class GridworldRender:
         self.grid_height = grid_height
         self.window_size = window_size
         self.agent_icons = self._load_icons(agent_icons)
+        self.render_mode = render_mode
         self.render_fps = render_fps
         self.window_title = window_title
         self.background_color = background_color
@@ -48,12 +50,11 @@ class GridworldRender:
 
         """
         if self.window_surface is not None:
-            pygame.display.quit()
             pygame.quit()
 
     def render(self,
               agent_positions: Dict[str, np.ndarray],
-               ) -> None:
+               ):
         """
         Renders the grid world and the agent icons from dictionary of agent names and positions.
 
@@ -62,10 +63,13 @@ class GridworldRender:
 
         """
         if self.window_surface is None:
-            pygame.init()
-            pygame.display.init()
-            pygame.display.set_caption(self.window_title)
-            self.window_surface = pygame.display.set_mode(self.window_size)
+            if self.render_mode == "human":
+                pygame.init()
+                pygame.display.init()
+                pygame.display.set_caption(self.window_title)
+                self.window_surface = pygame.display.set_mode(self.window_size)
+            elif self.render_mode == "rgb_array":
+                self.window_surface = pygame.Surface(self.window_size)
 
         if self.clock is None:
             self.clock = pygame.time.Clock()
@@ -73,9 +77,14 @@ class GridworldRender:
         self._draw_grid()
         self._draw_agent_icons(agent_positions)
 
-        pygame.event.pump()
-        pygame.display.update()
-        self.clock.tick(self.render_fps)
+        if self.render_mode == "human":
+            pygame.event.pump()
+            pygame.display.flip()
+            self.clock.tick(self.render_fps)
+        elif self.render_mode == "rgb_array":
+            return np.transpose(
+                np.array(pygame.surfarray.pixels3d(self.window_surface)), axes=(1, 0, 2)
+            )
 
     def _load_icons(self, agent_icons: Dict[str, str]) -> Dict[str, Any]:
         """
