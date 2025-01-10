@@ -1,6 +1,8 @@
 from prt_rl.utils.policy import RandomPolicy
 from prt_rl.env.wrappers import GymnasiumWrapper
 from prt_rl.utils.runners import Runner
+from prt_rl.utils.recorders import GifRecorder
+from prt_rl.utils.visualizers import PygameVisualizer
 
 env = GymnasiumWrapper(
     gym_name="CarRacing-v3",
@@ -9,8 +11,19 @@ env = GymnasiumWrapper(
 )
 policy = RandomPolicy(env_params=env.get_parameters())
 
-runner = Runner(env, policy)
-runner.run(gif_filename='car_race.gif')
+runner = Runner(
+    env=env,
+    policy=policy,
+    # recorder=GifRecorder(
+    #     filename="car_race.gif",
+    #     fps=50
+    # ),
+    visualizer=PygameVisualizer(
+        fps=50,
+        caption="Car Racing",
+    ),
+)
+runner.run()
 
 # state_td = env.reset()
 # done = False
