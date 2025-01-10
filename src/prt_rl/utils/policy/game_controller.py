@@ -2,7 +2,7 @@ from enum import Enum, auto
 from tensordict.tensordict import TensorDict
 import threading
 import torch
-from typing import Dict, List, Tuple, Union
+from typing import Dict, Tuple, Union
 from prt_rl.env.interface import EnvParams
 from prt_rl.utils.policy.policies import Policy
 
@@ -107,6 +107,12 @@ class GameControllerPolicy(Policy):
     def get_action(self, state: TensorDict) -> TensorDict:
         """
         Gets a game controller input and maps it to the action space.
+
+        Args:
+            state (TensorDict): A tensor representing the current state of the environment.
+
+        Returns:
+            A TensorDict with the "action" key added.
         """
         assert state.batch_size[0] == 1, "GameController only supports batch size 1 for now."
 
@@ -138,6 +144,9 @@ class GameControllerPolicy(Policy):
 
 
     def _start_listener(self):
+        """
+        Starts an event listening thread that captures game controller inputs and updates the latest action values.
+        """
         self.running = True
         def event_loop():
             while self.running:
@@ -147,16 +156,15 @@ class GameControllerPolicy(Policy):
                         case "Key":
                             pass
                         case "Absolute":
-                            print(f"Code: {event.code}  State: {event.state}")
                             joy_name = event.code
                             joy_value = event.state
 
                             # Convert the joystick name to a Key
-                            if joy_name in self.EVENT_TYPE_TO_KEY_MAP:
+                            if joy_name in self.EVENT_TYPE_TO_KEY_MAP.keys():
                                 joy_key = self.EVENT_TYPE_TO_KEY_MAP[joy_name]
 
                                 # Get the action map from the Key
-                                if joy_value in self.key_action_map:
+                                if joy_key in self.key_action_map.keys():
                                     action_map = self.key_action_map[joy_key]
 
                                     # Normalize joystick value to [-1, 1]
@@ -164,11 +172,10 @@ class GameControllerPolicy(Policy):
                                     if joy_name == 'ABS_X' or joy_name == 'ABS_Z':
                                         norm_joy_value = (joy_value - 127.0) / 127.0
                                     else:
-                                        norm_joy_value = -(joy_value + 128.0) / 128.0
+                                        norm_joy_value = -(joy_value - 128.0) / 128.0
 
                                     # Process action and value
                                     self._process_joystick(action_map, norm_joy_value)
-
                         case "Misc":
                             # Ignore MISC messages
                             pass
@@ -189,8 +196,8 @@ class GameControllerPolicy(Policy):
         Updates the latest action values using the normalized joystick value based on the action map parameters.
 
         Args:
-            action_map_values: Action map values.
-            norm_value: Normalized joystick value.
+            action_map_values (Union[int, Tuple[int, str]]): Action map values.
+            norm_value (float): Normalized joystick value between [-1, 1]
         """
         if isinstance(action_map_values, int):
             action_index = action_map_values
@@ -224,6 +231,12 @@ class GameControllerPolicy(Policy):
             self.latest_values[action_index] = action_value
 
     def _wait_for_inputs(self) -> str:
+        """
+        Blocking listener that captures a single event and returns the value.
+
+        Returns:
+            String value of the Key pressed.
+        """
         assert not self.continuous, "Blocking GameController only supports discrete actions."
         key_val = None
         while key_val is None:
@@ -259,14 +272,3 @@ class GameControllerPolicy(Policy):
                         print(f"Unknown key: {event.ev_type}")
 
         return key_val
-
-if __name__ == "__main__":
-    from inputs import get_gamepad
-
-    running = True
-    while running:
-        events = get_gamepad()
-        for event in events:
-            print(f"Code: {event.code}  State: {event.state}")
-            if event.code == 'BTN_BASE4' and event.state == 1:
-                running = False

@@ -10,8 +10,8 @@ policy = GameControllerPolicy(
     env_params=env.get_parameters(),
     key_action_map={
         GameControllerPolicy.Key.JOYSTICK_RIGHT_X: 0,
-        GameControllerPolicy.Key.JOYSTICK_LEFT_Y: [1, 'positive'],
-        GameControllerPolicy.Key.JOYSTICK_RT: 2,
+        GameControllerPolicy.Key.JOYSTICK_LEFT_Y: (1, 'positive'),
+        GameControllerPolicy.Key.JOYSTICK_RIGHT_Y: (2, 'negative'),
     },
     blocking=False
 )
