@@ -98,6 +98,10 @@ class GymnasiumWrapper(EnvironmentInterface):
             },
             batch_size=torch.Size([1])
         )
+
+        if self.render_mode == 'rgb_array':
+            rgb = self.env.render()
+            state_td['rgb_array'] = torch.tensor(rgb).unsqueeze(0)
         return state_td
 
     def step(self, action: TensorDict) -> TensorDict:
@@ -116,6 +120,10 @@ class GymnasiumWrapper(EnvironmentInterface):
             'reward': torch.tensor([[reward]], dtype=torch.float),
             'done': torch.tensor([[done]], dtype=torch.bool),
         }
+
+        if self.render_mode == 'rgb_array':
+            rgb = self.env.render()
+            action['next', 'rgb_array'] = torch.tensor(rgb).unsqueeze(0)
 
         return action
 

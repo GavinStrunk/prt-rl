@@ -59,7 +59,8 @@ class EnvironmentInterface(ABC):
             "reward": tensor,
             "done": tensor,
             "info": dict,
-        }
+        },
+        "rgb_array": tensor,
     }
     The shape of each tensor is (N, M) where N is the number of environments and M is the size of the value. For example, if an agent has two output actions and we are training with four environments then the "action" key will have shape (4,2).
 
@@ -108,8 +109,8 @@ class EnvironmentInterface(ABC):
         """
         raise NotImplementedError()
 
-    @staticmethod
-    def step_mdp(mdp: TensorDict) -> TensorDict:
+    @classmethod
+    def step_mdp(cls, mdp: TensorDict) -> TensorDict:
         """
         Steps the provided MDP TensorDict by moving the next state to the current state
 
@@ -121,6 +122,12 @@ class EnvironmentInterface(ABC):
         """
         # Update the current observation
         mdp['observation'] = mdp['next','observation']
+
+        # Check if 'next' contains 'rgb_array' and move it
+        if 'rgb_array' in mdp.get('next', TensorDict()).keys():
+            value = mdp['next'].get('rgb_array')  # Get the value
+            mdp.set('rgb_array', value)  # Move it to root
+            mdp['next'].del_('rgb_array')  # Delete it from 'next' if desired
 
         # Remove the action and next keys
         del mdp['action']
