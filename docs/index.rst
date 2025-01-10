@@ -8,6 +8,7 @@
    :parser: myst_parser.sphinx_
 
 .. toctree::
+    :hidden:
     :maxdepth: 2
 
     Demo Gallery <gallery>
