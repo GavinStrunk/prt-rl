@@ -1,9 +1,18 @@
-from prt_rl.utils.policy import RandomPolicy
+from prt_rl.utils.policy import GameControllerPolicy
 from prt_rl.env.wrappers import JhuWrapper
 from prt_sim.jhu.robot_game import RobotGame
 
 env = JhuWrapper(environment=RobotGame(), render_mode="human")
-policy = RandomPolicy(env_params=env.get_parameters())
+policy = GameControllerPolicy(
+    env_params=env.get_parameters(),
+    key_action_map={
+        GameControllerPolicy.Key.BUTTON_DPAD_UP: 0,
+        GameControllerPolicy.Key.BUTTON_DPAD_DOWN: 1,
+        GameControllerPolicy.Key.BUTTON_DPAD_LEFT: 2,
+        GameControllerPolicy.Key.BUTTON_DPAD_RIGHT: 3,
+    },
+    blocking=True
+)
 
 state_td = env.reset()
 done = False
