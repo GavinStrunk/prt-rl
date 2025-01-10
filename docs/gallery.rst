@@ -16,9 +16,9 @@ Explore our collection of demo notebooks showcasing various features and example
         A demo showcasing how to train a simple neural network.
 
     .. card::
-        :img-top: _static/robot_game.png
-        :link: demos/random_robot_game.ipynb
+        :img-top: demos/car_race.gif
+        :link: demos/random_car_racing.ipynb
         :text-align: center
 
-        **Random Policy Robot Game**
-        Shows how to use a random policy and run an environment.
+        **Random Policy**
+        A demo showing how to use a random policy.
