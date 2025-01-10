@@ -12,6 +12,7 @@ import sys
 sys.path.insert(0, os.path.abspath('.'))
 sys.path.insert(0, os.path.abspath('..'))
 sys.path.insert(0, os.path.abspath('../src'))  # Source code dir relative to this file
+sys.path.insert(0, os.path.abspath('../demos'))
 
 # -- Project information -----------------------------------------------------
 project = 'Python Research Toolkit - Reinforcement Learning'
@@ -34,6 +35,8 @@ extensions = [
     'sphinx.ext.mathjax',       # Formats LaTex code using Jax
     'myst_parser',              # Allows parsing of README.md file
     'sphinxcontrib.mermaid',     # Allows for Mermaid diagrams to be rendered
+    "sphinx_design",            # Enhanced layout design
+    "nbsphinx",                 # Rendering jupyter notebooks
 ]
 
 # Mappings for sphinx.ext.intersphinx. Projects have to have Sphinx-generated doc! (.inv file)
@@ -91,3 +94,6 @@ html_favicon = "_static/prt-rl-logo.jpg"
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
+
+# Copy demos to the build directory
+html_extra_path = ['../demos']

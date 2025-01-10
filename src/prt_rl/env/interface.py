@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Union, Optional
+from typing import Union, Optional, List
 
 from tensordict.tensordict import TensorDict
 
@@ -21,12 +21,12 @@ class EnvParams:
     """
     action_shape: tuple
     action_continuous: bool
-    action_min: Union[int, float]
-    action_max: Union[int, float]
+    action_min: Union[int, List[float]]
+    action_max: Union[int, List[float]]
     observation_shape: tuple
     observation_continuous: bool
-    observation_min: Union[int, float]
-    observation_max: Union[int, float]
+    observation_min: Union[int, List[float]]
+    observation_max: Union[int, List[float]]
 
 @dataclass
 class MultiAgentEnvParams:

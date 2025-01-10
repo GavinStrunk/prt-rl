@@ -2,7 +2,7 @@ import gymnasium as gym
 import numpy as np
 from tensordict.tensordict import TensorDict
 import torch
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from prt_sim.jhu.base import BaseEnvironment
 from prt_sim.jhu.bandits import KArmBandits
 from prt_rl.env.interface import EnvironmentInterface, EnvParams
@@ -84,30 +84,10 @@ class GymnasiumWrapper(EnvironmentInterface):
         super().__init__(render_mode)
         self.gym_name = gym_name
         self.env = gym.make(self.gym_name, render_mode=render_mode, **kwargs)
+        self.env_params = self._make_env_params()
 
     def get_parameters(self) -> EnvParams:
-        if isinstance(self.env.action_space, gym.spaces.Discrete):
-            act_shape, act_cont, act_min, act_max = self._get_params_from_discrete(self.env.action_space)
-        else:
-            raise NotImplementedError("Only discrete action spaces are supported")
-
-        if isinstance(self.env.observation_space, gym.spaces.Discrete):
-            obs_shape, obs_cont, obs_min, obs_max = self._get_params_from_discrete(self.env.observation_space)
-        elif isinstance(self.env.observation_space, gym.spaces.Box):
-            obs_shape, obs_cont, obs_min, obs_max = self._get_params_from_box(self.env.observation_space)
-        else:
-            raise NotImplementedError("Only discrete observation spaces are supported")
-
-        return EnvParams(
-            action_shape=act_shape,
-            action_continuous=act_cont,
-            action_min=act_min,
-            action_max=act_max,
-            observation_shape=obs_shape,
-            observation_continuous=obs_cont,
-            observation_min=obs_min,
-            observation_max=obs_max,
-        )
+        return self.env_params
 
     def reset(self) -> TensorDict:
         obs, info = self.env.reset()
@@ -121,7 +101,14 @@ class GymnasiumWrapper(EnvironmentInterface):
         return state_td
 
     def step(self, action: TensorDict) -> TensorDict:
-        action_val = action['action'][0].item()
+        action_val = action['action'][0]
+
+        # Discrete actions send the raw integer value to the step function
+        if not self.env_params.action_continuous:
+            action_val = action_val.item()
+        else:
+            action_val = action_val.cpu().numpy()
+
         state, reward, terminated, trunc, info = self.env.step(action_val)
         done = terminated or trunc
         action['next'] = {
@@ -140,7 +127,33 @@ class GymnasiumWrapper(EnvironmentInterface):
         if isinstance(observation, int):
             observation = np.array([observation])
 
-        return torch.tensor([observation])
+        return torch.tensor(observation).unsqueeze(0)
+
+    def _make_env_params(self):
+        if isinstance(self.env.action_space, gym.spaces.Discrete):
+            act_shape, act_cont, act_min, act_max = self._get_params_from_discrete(self.env.action_space)
+        elif isinstance(self.env.action_space, gym.spaces.Box):
+            act_shape, act_cont, act_min, act_max = self._get_params_from_box(self.env.action_space)
+        else:
+            raise NotImplementedError(f"{self.env.action_space} action space is not supported")
+
+        if isinstance(self.env.observation_space, gym.spaces.Discrete):
+            obs_shape, obs_cont, obs_min, obs_max = self._get_params_from_discrete(self.env.observation_space)
+        elif isinstance(self.env.observation_space, gym.spaces.Box):
+            obs_shape, obs_cont, obs_min, obs_max = self._get_params_from_box(self.env.observation_space)
+        else:
+            raise NotImplementedError(f"{self.env.observation_space} observation space is not supported")
+
+        return EnvParams(
+            action_shape=act_shape,
+            action_continuous=act_cont,
+            action_min=act_min,
+            action_max=act_max,
+            observation_shape=obs_shape,
+            observation_continuous=obs_cont,
+            observation_min=obs_min,
+            observation_max=obs_max,
+        )
 
     @staticmethod
     def _get_params_from_discrete(space: gym.spaces.Discrete) -> Tuple[tuple, bool, int, int]:
@@ -156,7 +169,7 @@ class GymnasiumWrapper(EnvironmentInterface):
         return (1,), False, space.start, space.n - 1
 
     @staticmethod
-    def _get_params_from_box(space: gym.spaces.Box) -> Tuple[tuple, bool, int, int]:
+    def _get_params_from_box(space: gym.spaces.Box) -> Tuple[tuple, bool, List[float], List[float]]:
         """
         Extracts the environment parameters from a box space.
 
@@ -166,13 +179,4 @@ class GymnasiumWrapper(EnvironmentInterface):
         Returns:
             Tuple[tuple, bool, int, int]: tuple containing (space_shape, space_continuous, space_min, space_max)
         """
-        if len(np.unique(space.low)) == 1:
-            low = space.low[0]
-        else:
-            raise ValueError("Only Box spaces with the same low boundaries are supported")
-        if len(np.unique(space.high)) == 1:
-            high = space.high[0]
-        else:
-            raise ValueError("Only Box spaces with the same high boundaries are supported")
-
-        return space.shape, True, low, high
+        return space.shape, True, space.low.tolist(), space.high.tolist()
