@@ -5,8 +5,9 @@ from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.utils.loggers import Logger
 from prt_rl.utils.trainers import TDTrainer
 from prt_rl.utils.decision_functions import DecisionFunction
-from prt_rl.utils.policies import QTablePolicy
+from prt_rl.utils.policy import QTablePolicy
 from prt_rl.utils.schedulers import ParameterScheduler
+from prt_rl.utils.metrics import MetricTracker
 
 class QLearning(TDTrainer):
     r"""
@@ -26,6 +27,7 @@ class QLearning(TDTrainer):
                  alpha: float = 0.1,
                  deterministic: bool = False,
                  logger: Optional[Logger] = None,
+                 metric_tracker: Optional[MetricTracker] = None,
                  schedulers: Optional[List[ParameterScheduler]] = None,
                  ) -> None:
         self.deterministic = deterministic
@@ -38,7 +40,7 @@ class QLearning(TDTrainer):
             num_envs=num_envs,
             decision_function=decision_function
         )
-        super().__init__(env, policy, logger=logger, schedulers=schedulers)
+        super().__init__(env, policy, logger=logger, schedulers=schedulers, metric_tracker=metric_tracker)
         self.q_table = policy.get_qtable()
 
         # Log parameters if a logger is provided

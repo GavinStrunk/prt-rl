@@ -48,8 +48,11 @@ class JhuWrapper(EnvironmentInterface):
                 'optimal_bandit': torch.tensor([[self.env.get_optimal_bandit()]], dtype=torch.int),
             }
 
-        if self.render_mode is not None:
+        if self.render_mode == 'human':
             self.env.render()
+        elif self.render_mode == 'rgb_array':
+            rgb = self.env.render()
+            state_td['rgb_array'] = torch.tensor(rgb).unsqueeze(0)
 
         return state_td
 
@@ -62,8 +65,11 @@ class JhuWrapper(EnvironmentInterface):
             'done': torch.tensor([[done]], dtype=torch.bool),
         }
 
-        if self.render_mode is not None:
+        if self.render_mode == 'human':
             self.env.render()
+        elif self.render_mode == 'rgb_array':
+            rgb = self.env.render()
+            action['next', 'rgb_array'] = torch.tensor(rgb).unsqueeze(0)
 
         return action
 

@@ -45,9 +45,15 @@ class GoldExplorer(BaseEnvironment):
 
     **Reward**: +15 for obtaining gold coins, +30 for obtaining the motherlode, -30 for entering a mine field, -1 for every other location
     """
+    metadata = {
+        "render_modes": ["human", "rgb_array"],
+        "render_fps": 5
+    }
 
-    def __init__(self):
-
+    def __init__(self,
+                 render_mode: Optional[str] = "rgb_array"
+                 ) -> None:
+        self.render_mode = render_mode
         self.num_states = 128
         self.num_actions = 4
         self.expl_x = 0  # explorer's x position from 0 to 7
@@ -62,6 +68,8 @@ class GoldExplorer(BaseEnvironment):
             grid_width=8,
             grid_height=8,
             window_size=(800, 800),
+            render_mode=self.render_mode,
+            render_fps=self.metadata['render_fps'],
             agent_icons={
                 'explorer': os.path.join(os.path.dirname(__file__), 'icons/explorer.png'),
                 'mountain1': os.path.join(os.path.dirname(__file__), 'icons/mountain.png'),
@@ -246,7 +254,11 @@ class GoldExplorer(BaseEnvironment):
     def render(self):
         self.agent_positions['explorer'] = np.array([self.expl_x, self.expl_y])
         self.agent_positions['coins'] = None if self.expl_z == 1 else self.agent_positions['coins']
-        self.gridworld_render.render(self.agent_positions)
+        
+        if self.render_mode == 'human':
+            self.gridworld_render.render(self.agent_positions)
+        elif self.render_mode == 'rgb_array':
+            return self.gridworld_render.render(self.agent_positions)
 
 
 if __name__ == '__main__':

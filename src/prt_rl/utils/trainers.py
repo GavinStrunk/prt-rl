@@ -1,12 +1,14 @@
+import torch
 from abc import ABC, abstractmethod
 import copy
 from tensordict.tensordict import TensorDict
 from typing import Optional, List, Any
 from prt_rl.env.interface import EnvParams, EnvironmentInterface
-from prt_rl.utils.policies import Policy, QNetworkPolicy
+from prt_rl.utils.policy import Policy, QNetworkPolicy
 from prt_rl.utils.loggers import Logger
 from prt_rl.utils.schedulers import ParameterScheduler
 from prt_rl.utils.progress_bar import ProgressBar
+from prt_rl.utils.metrics import MetricTracker
 
 
 class TDTrainer(ABC):
@@ -18,12 +20,14 @@ class TDTrainer(ABC):
                  env: EnvironmentInterface,
                  policy: Policy,
                  logger: Optional[Logger] = None,
+                 metric_tracker: Optional[MetricTracker] = None,
                  schedulers: Optional[List[ParameterScheduler]] = None,
                  progress_bar: Optional[ProgressBar] = ProgressBar,
                  ) -> None:
         self.env = env
         self.policy = policy
         self.logger = logger or Logger()
+        self.metric_tracker = metric_tracker or MetricTracker()
         self.schedulers = schedulers or []
         self.progress_bar = progress_bar
 
@@ -112,7 +116,6 @@ class TDTrainer(ABC):
             self.progress_bar.update(episode_reward, cumulative_reward)
             self.logger.log_scalar('episode_reward', episode_reward, iteration=i)
             self.logger.log_scalar('cumulative_reward', cumulative_reward, iteration=i)
-
 
 class ANNTrainer(TDTrainer):
     def __init__(self,

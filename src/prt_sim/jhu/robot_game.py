@@ -36,12 +36,19 @@ class RobotGame(BaseEnvironment):
 
 
     """
+    metadata = {
+        "render_modes": ["human", "rgb_array"],
+        "render_fps": 5
+    }
     UP = 0
     DOWN = 1
     LEFT = 2
     RIGHT = 3
 
-    def __init__(self):
+    def __init__(self,
+                 render_mode: Optional[str] = "rgb_array",
+                 ) -> None:
+        self.render_mode = render_mode
         self.grid_width = 4
         self.grid_height = 3
         self.world = np.zeros((self.grid_width, self.grid_height))
@@ -53,6 +60,8 @@ class RobotGame(BaseEnvironment):
             grid_width=self.grid_width,
             grid_height=self.grid_height,
             window_size=(800, 800),
+            render_mode=self.render_mode,
+            render_fps=self.metadata['render_fps'],
             agent_icons={
                 'fred': os.path.join(os.path.dirname(__file__), 'icons/fred.png'),
                 'outlet': os.path.join(os.path.dirname(__file__), 'icons/outlet.png'),
@@ -186,7 +195,11 @@ class RobotGame(BaseEnvironment):
 
     def render(self):
         self.agent_positions['fred'] = self.current_position
-        self.gridworld_render.render(self.agent_positions)
+
+        if self.render_mode == 'human':
+            self.gridworld_render.render(self.agent_positions)
+        elif self.render_mode == 'rgb_array':
+            return self.gridworld_render.render(self.agent_positions)
 
 
 if __name__ == '__main__':
