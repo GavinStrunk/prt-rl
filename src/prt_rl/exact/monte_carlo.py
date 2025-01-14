@@ -3,8 +3,9 @@ from typing import Optional
 from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.utils.decision_functions import DecisionFunction
 from prt_rl.utils.loggers import Logger
-from prt_rl.utils.policies import QTablePolicy
+from prt_rl.utils.policy import QTablePolicy
 from prt_rl.utils.trainers import TDTrainer
+from prt_rl.utils.metrics import MetricTracker
 
 class MonteCarlo(TDTrainer):
     r"""
@@ -21,6 +22,7 @@ class MonteCarlo(TDTrainer):
                  decision_function: Optional[DecisionFunction] = None,
                  gamma: float = 0.99,
                  logger: Optional[Logger] = None,
+                 metric_tracker: Optional[MetricTracker] = None,
                  ) -> None:
         self.gamma = gamma
         self.env_params = env.get_parameters()
@@ -29,9 +31,8 @@ class MonteCarlo(TDTrainer):
             env_params=self.env_params,
             num_envs=1,
             decision_function=decision_function,
-            track_visits=True
         )
-        super(MonteCarlo, self).__init__(env=env, policy=policy, logger=logger)
+        super(MonteCarlo, self).__init__(env=env, policy=policy, logger=logger, metric_tracker=metric_tracker)
         self.q_table = policy.get_qtable()
 
         # Log parameters if logger is provided

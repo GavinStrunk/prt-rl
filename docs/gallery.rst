@@ -57,3 +57,18 @@ Explore our collection of demo notebooks showcasing various features and example
 
             A demo showing how to use the game controller policy.
 
+    **Algorithm Demos**
+
+    Demos that show how to use RL algorithms.
+
+    .. grid:: 1 1 2 4
+        :gutter: 2
+
+        .. card::
+            :img-top: demos/sample_averaging_thumbnail.png
+            :link: demos/sample_averaging.ipynb
+            :text-align: center
+
+            **Sample Averaging**
+
+            This demo shows how to use the Sample Averaging algorithm.

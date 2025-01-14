@@ -11,8 +11,8 @@ from prt_sim.jhu.bandits import KArmBandits
 import prt_sim.jhu.plot as pplt
 
 # Set the number of runs and episodes per run
-num_runs = 2000
-num_episodes = 1000
+num_episodes = 2000
+num_steps = 1000
 
 # Initialize Environment
 env = JhuWrapper(environment=KArmBandits())
@@ -22,7 +22,7 @@ trainer = SampleAverage(
     env=env,
 )
 
-trainer.train(num_episodes=num_episodes)
+trainer.train(num_episodes=num_episodes, num_steps=num_steps)
 
 # plt.figure()
 # pplt.plot_bandit_rewards(rewards)

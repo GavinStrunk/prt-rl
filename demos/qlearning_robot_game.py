@@ -3,12 +3,12 @@ from prt_rl.env.wrappers import JhuWrapper
 from prt_rl.exact.qlearning import QLearning
 from prt_rl.utils.loggers import MLFlowLogger
 from prt_rl.utils.schedulers import LinearScheduler
-from prt_rl.utils.policies import load_from_mlflow
+from prt_rl.utils.policy import load_from_mlflow
 
-
-
-# Parameters
-tracking_uri = "http://127.0.0.1:5000"
+import os
+import rootutils
+rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
+tracking_uri = os.getenv('MLFLOW_TRACKING_URI')
 
 env = JhuWrapper(environment=RobotGame())
 
@@ -33,7 +33,7 @@ trainer.save_policy()
 
 eval_env = JhuWrapper(environment=RobotGame(), render_mode="human")
 # policy = trainer.get_policy()
-policy = load_from_mlflow(tracking_uri=tracking_uri, model_name="Robot Game", model_version="2")
+policy = load_from_mlflow(tracking_uri=tracking_uri, model_name="Robot Game", model_version="1")
 policy.set_parameter('epsilon', 1.0)
 
 # Make evaluator to run the environment
