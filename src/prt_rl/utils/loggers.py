@@ -1,5 +1,3 @@
-import os
-
 import mlflow
 import mlflow.pyfunc
 from typing import Optional

@@ -45,7 +45,7 @@ class QNetworkPolicy(Policy):
                    state: TensorDict
                    ) -> TensorDict:
         state = state['observation']
-        q_values = self.q_network.get_action(state)
+        q_values = self.q_network.forward(state)
         action = self.decision_function.select_action(q_values)
         state['action'] = action
         return state

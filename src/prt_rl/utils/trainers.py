@@ -121,9 +121,12 @@ class ANNTrainer(TDTrainer):
     def __init__(self,
                  env: EnvironmentInterface,
                  policy: QNetworkPolicy,
+                 logger: Optional[Logger] = None,
+                 metric_tracker: Optional[MetricTracker] = None,
+                 schedulers: Optional[List[ParameterScheduler]] = None,
+                 progress_bar: Optional[ProgressBar] = ProgressBar,
                  ) -> None:
-        super().__init__(env, None)
-        self.policy = policy
+        super().__init__(env, policy=policy, logger=logger, metric_tracker=metric_tracker, schedulers=schedulers, progress_bar=progress_bar)
 
     def get_policy_network(self):
         return self.policy.q_network
