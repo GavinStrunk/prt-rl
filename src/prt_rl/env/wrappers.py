@@ -216,9 +216,11 @@ class VmasWrapper(EnvironmentInterface):
     def reset(self) -> TensorDict:
         obs = self.env.reset()
 
+        # Stack the observation so it has shape (# env, # agents, obs shape)
+        obs = torch.stack(obs, dim=1)
         state_td = TensorDict(
             {
-                'observation': self._process_observation(obs),
+                'observation': obs,
             },
             batch_size=torch.Size([self.env.batch_dim])
         )
@@ -230,7 +232,43 @@ class VmasWrapper(EnvironmentInterface):
 
 
     def step(self, action: TensorDict) -> TensorDict:
-        pass
+        # VMAS expects actions to have shape (# agents, # env, action shape)
+        action_val = action['action'].permute(1, 0, 2)
+
+        state, reward, done, info = self.env.step(action_val)
+        state = torch.stack(state, dim=1)
+        reward = torch.stack(reward, dim=1)
+        action['next'] = {
+            'observation': state,
+            'reward': reward,
+            'done': done.unsqueeze(-1),
+        }
+
+        if self.render_mode == 'rgb_array':
+            rgb = self.env.render()
+            action['next', 'rgb_array'] = torch.tensor(rgb).unsqueeze(0)
+
+        return action
 
     def _make_env_params(self):
-        return MultiAgentEnvParams()
+        action_space = self.env.action_space[0]
+        # It appears the gymnasium and gym spaces do not pass isinstance
+        act_shape, act_cont, act_min, act_max = GymnasiumWrapper._get_params_from_box(action_space)
+
+        observe_space = self.env.observation_space[0]
+        obs_shape, obs_cont, obs_min, obs_max = GymnasiumWrapper._get_params_from_box(observe_space)
+
+        single_agent_params = EnvParams(
+            action_shape=act_shape,
+            action_min=act_min,
+            action_max=act_max,
+            action_continuous=self.env.continuous_actions,
+            observation_shape=obs_shape,
+            observation_continuous=obs_cont,
+            observation_min=obs_min,
+            observation_max=obs_max,
+        )
+        return MultiAgentEnvParams(
+            num_agents=self.env.n_agents,
+            agent=single_agent_params
+        )
