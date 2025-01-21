@@ -2,10 +2,12 @@ import gymnasium as gym
 import numpy as np
 from tensordict.tensordict import TensorDict
 import torch
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Union
+import vmas
 from prt_sim.jhu.base import BaseEnvironment
 from prt_sim.jhu.bandits import KArmBandits
-from prt_rl.env.interface import EnvironmentInterface, EnvParams
+from prt_rl.env.interface import EnvironmentInterface, EnvParams, MultiAgentEnvParams, MultiGroupEnvParams
+
 
 class JhuWrapper(EnvironmentInterface):
     """
@@ -194,3 +196,85 @@ class GymnasiumWrapper(EnvironmentInterface):
             Tuple[tuple, bool, int, int]: tuple containing (space_shape, space_continuous, space_min, space_max)
         """
         return space.shape, True, space.low.tolist(), space.high.tolist()
+
+class VmasWrapper(EnvironmentInterface):
+    def __init__(self,
+                 scenario: str,
+                 render_mode: Optional[str] = None,
+                 **kwargs
+                 ) -> None:
+        super().__init__(render_mode)
+        self.env = vmas.make_env(
+            scenario,
+            **kwargs,
+        )
+        self.env_params = self._make_env_params()
+
+    def get_parameters(self) -> Union[EnvParams | MultiAgentEnvParams | MultiGroupEnvParams]:
+        return self.env_params
+
+    def reset(self) -> TensorDict:
+        obs = self.env.reset()
+
+        # Stack the observation so it has shape (# env, # agents, obs shape)
+        obs = torch.stack(obs, dim=1)
+        state_td = TensorDict(
+            {
+                'observation': obs,
+            },
+            batch_size=torch.Size([self.env.batch_dim])
+        )
+
+        if self.render_mode == 'rgb_array':
+            rgb = self.env.render(mode=self.render_mode)
+
+            # Fix the negative stride in the numpy array
+            img = rgb.copy()
+            state_td['rgb_array'] = torch.from_numpy(img).unsqueeze(0)
+        return state_td
+
+
+    def step(self, action: TensorDict) -> TensorDict:
+        # VMAS expects actions to have shape (# agents, # env, action shape)
+        action_val = action['action'].permute(1, 0, 2)
+
+        state, reward, done, info = self.env.step(action_val)
+        state = torch.stack(state, dim=1)
+        reward = torch.stack(reward, dim=1)
+        action['next'] = {
+            'observation': state,
+            'reward': reward,
+            'done': done.unsqueeze(-1),
+        }
+
+        if self.render_mode == 'rgb_array':
+            rgb = self.env.render(mode=self.render_mode)
+
+            # Fix the negative stride in the numpy array
+            img = rgb.copy()
+            action['next', 'rgb_array'] = torch.from_numpy(img).unsqueeze(0)
+
+        return action
+
+    def _make_env_params(self):
+        action_space = self.env.action_space[0]
+        # It appears the gymnasium and gym spaces do not pass isinstance
+        act_shape, act_cont, act_min, act_max = GymnasiumWrapper._get_params_from_box(action_space)
+
+        observe_space = self.env.observation_space[0]
+        obs_shape, obs_cont, obs_min, obs_max = GymnasiumWrapper._get_params_from_box(observe_space)
+
+        single_agent_params = EnvParams(
+            action_shape=act_shape,
+            action_min=act_min,
+            action_max=act_max,
+            action_continuous=self.env.continuous_actions,
+            observation_shape=obs_shape,
+            observation_continuous=obs_cont,
+            observation_min=obs_min,
+            observation_max=obs_max,
+        )
+        return MultiAgentEnvParams(
+            num_agents=self.env.n_agents,
+            agent=single_agent_params
+        )

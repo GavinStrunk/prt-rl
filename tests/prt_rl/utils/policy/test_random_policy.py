@@ -1,6 +1,6 @@
 import torch
 from tensordict.tensordict import TensorDict
-from prt_rl.env.interface import EnvParams
+from prt_rl.env.interface import EnvParams, MultiAgentEnvParams
 from prt_rl.utils.policy import RandomPolicy
 
 def test_random_discrete_action_selection():
@@ -76,3 +76,29 @@ def test_random_multiple_continuous_action_selection():
 
     assert td['action'].shape == (1, 3)
     assert torch.allclose(td['action'], torch.tensor([[0.50, 0.77, 0.09]]), atol=1e-2)
+
+def test_multi_agent_action_selection():
+    params = EnvParams(
+        action_shape=(3,),
+        action_continuous=True,
+        action_min=[0.0, 0.0, 0.0],
+        action_max=[1.0, 1.0, 1.0],
+        observation_shape=(1,),
+        observation_continuous=False,
+        observation_min=0,
+        observation_max=3,
+    )
+    ma_params = MultiAgentEnvParams(
+        num_agents=2,
+        agent=params
+    )
+    policy = RandomPolicy(env_params=ma_params)
+
+    # Set seed for consistent unit tests
+    torch.manual_seed(0)
+
+    td = TensorDict({}, batch_size=[1])
+    td = policy.get_action(td)
+
+    assert td['action'].shape == (1, 2, 3)
+    assert torch.allclose(td['action'], torch.tensor([[[0.4963, 0.7682, 0.0885], [0.1320, 0.3074, 0.6341]]]), atol=1e-2)

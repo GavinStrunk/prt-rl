@@ -237,7 +237,7 @@ class Softmax(DecisionFunction):
         Returns:
             torch.Tensor: Selected action index.
         """
-        if action_values.ndim != 1:
+        if action_values.ndim != 2:
             raise ValueError(
                 "Expected a 1D tensor for actions, but got a tensor with shape: {}".format(action_values.shape))
 

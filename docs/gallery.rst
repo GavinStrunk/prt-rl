@@ -23,6 +23,15 @@ Explore our collection of demo notebooks showcasing various features and example
 
             This demo shows how to use JHU environments.
 
+        .. card::
+            :img-top: demos/vmas_wrapper_thumbnail.png
+            :link: demos/vmas_wrapper.ipynb
+            :text-align: center
+
+            **VMAS Wrapper**
+
+            This demo shows how to use VMAS environments.
+
     **Policy Execution Demos**
 
     The policy execution demos show different types of policies that can be used to control an agent in an environment.

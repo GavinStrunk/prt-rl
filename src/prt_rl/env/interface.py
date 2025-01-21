@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Union, Optional, List
+from typing import Union, Optional, List, Dict
 
 from tensordict.tensordict import TensorDict
 
@@ -40,7 +40,17 @@ class MultiAgentEnvParams:
     name: (num_agents, EnvParams)
     }
     """
-    group: dict
+    num_agents: int
+    agent: EnvParams
+
+
+@dataclass
+class MultiGroupEnvParams:
+    """
+    Multi-group environment parameters extends the Multi-agent parameters to group agents of the same type together. This allows heterogenous multi-agent teams to be trained together.
+
+    """
+    group: Dict[str, MultiAgentEnvParams]
 
 class EnvironmentInterface(ABC):
     """
@@ -77,7 +87,7 @@ class EnvironmentInterface(ABC):
             assert self.render_mode in EnvironmentInterface.metadata["render_modes"], f"Valid render_modes are: {EnvironmentInterface.metadata['render_modes']}"
 
     @abstractmethod
-    def get_parameters(self) -> EnvParams:
+    def get_parameters(self) -> Union[EnvParams | MultiAgentEnvParams | MultiGroupEnvParams]:
         """
         Returns the EnvParams object which contains information about the sizes of observations and actions needed for setting up RL agents.
 

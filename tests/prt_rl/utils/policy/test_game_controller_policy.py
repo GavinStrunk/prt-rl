@@ -150,7 +150,7 @@ def test_game_controller_blocking_policy_with_discrete_actions():
     assert out_td['action'][0] == 3
 
 
-# @pytest.mark.skip(reason="Requires a game controller input")
+@pytest.mark.skip(reason="Requires a game controller input")
 def test_game_controller_nonblocking_policy_with_continuous_actions():
     params = EnvParams(
         action_shape=(2,),
