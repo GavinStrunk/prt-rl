@@ -227,7 +227,10 @@ class VmasWrapper(EnvironmentInterface):
 
         if self.render_mode == 'rgb_array':
             rgb = self.env.render(mode=self.render_mode)
-            state_td['rgb_array'] = torch.tensor(rgb).unsqueeze(0)
+
+            # Fix the negative stride in the numpy array
+            img = rgb.copy()
+            state_td['rgb_array'] = torch.from_numpy(img).unsqueeze(0)
         return state_td
 
 
@@ -245,8 +248,11 @@ class VmasWrapper(EnvironmentInterface):
         }
 
         if self.render_mode == 'rgb_array':
-            rgb = self.env.render()
-            action['next', 'rgb_array'] = torch.tensor(rgb).unsqueeze(0)
+            rgb = self.env.render(mode=self.render_mode)
+
+            # Fix the negative stride in the numpy array
+            img = rgb.copy()
+            action['next', 'rgb_array'] = torch.from_numpy(img).unsqueeze(0)
 
         return action
 

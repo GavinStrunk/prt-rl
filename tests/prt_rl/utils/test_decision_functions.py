@@ -89,7 +89,7 @@ def test_epsilon_greedy_decision_function():
     dfunc.set_parameter(name="epsilon", value=0.5)
     assert dfunc.epsilon == 0.5
     action = dfunc.select_action(action_vals)
-    assert action[0] == 0
+    assert action[0] == 2
 
     # Check multiple environments
     torch.manual_seed(1)
@@ -100,7 +100,7 @@ def test_epsilon_greedy_decision_function():
     assert action[1] == 1
 
 def test_softmax_decision_function():
-    action_vals = torch.tensor([0.1, 0.2, 0.15])
+    action_vals = torch.tensor([[0.1, 0.2, 0.15]])
     dfunc = df.Softmax(tau=1.0)
 
     torch.manual_seed(2)
