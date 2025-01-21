@@ -14,9 +14,9 @@ class Actor(nn.Module):
         # self.log_std = torch.nn.Parameter(log_std)
         self.policy = nn.Sequential(
             nn.Linear(state_dim, 64),
-            nn.Tanh(),
-            # nn.Linear(64, 64),
-            # nn.Tanh(),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
             nn.Linear(64, action_dim),
             nn.Softmax(dim=-1)
         )
@@ -39,9 +39,9 @@ class Critic(nn.Module):
         super(Critic, self).__init__()
         self.critic = nn.Sequential(
             nn.Linear(state_dim, 64),
-            nn.Tanh(),
-            # nn.Linear(64, 64),
-            # nn.Tanh(),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
             nn.Linear(64, 1)
         )
 
