@@ -1,3 +1,9 @@
+"""
+Proximal Policy Optimization (PPO)
+
+Reference:
+[1] https://arxiv.org/abs/1707.06347
+"""
 import torch
 import torch.nn.functional as F
 from tensordict.tensordict import TensorDict
@@ -11,6 +17,10 @@ from prt_rl.utils.metrics import MetricTracker
 from prt_rl.utils.trainers import ActorCriticTrainer
 
 class PPO(ActorCriticTrainer):
+    """
+    Proximal Policy Optimization (PPO)
+
+    """
     def __init__(self,
                  env: EnvironmentInterface,
                  policy: Optional[ActorCriticPolicy] = None,

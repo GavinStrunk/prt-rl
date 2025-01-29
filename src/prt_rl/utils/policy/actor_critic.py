@@ -34,9 +34,11 @@ class ActorCriticPolicy(Policy):
             final_act = torch.nn.Softmax(dim=-1)
 
         # Initialize Actor and Critic Networks
+        self.action_dim = action_dim
+        self.num_dist_params = self.distribution.parameters_per_action()
         self.actor_network = MLP(
             state_dim=self.env_params.observation_shape[0],
-            action_dim=action_dim * self.distribution.parameters_per_action(),
+            action_dim=self.action_dim * self.num_dist_params,
             final_activation=final_act,
         )
         self.critic_network = MLP(
@@ -58,14 +60,19 @@ class ActorCriticPolicy(Policy):
     def get_action(self, state: TensorDict) -> TensorDict:
         obs = state['observation']
         action_probs = self.actor_network(obs)
+        action_probs = action_probs.view(-1, self.action_dim, self.num_dist_params)
         dist = self.distribution(action_probs)
         action = dist.sample()
+
+        # @todo clean this up in the distribution interface
+        if len(action.shape) == 1:
+            action = action.unsqueeze(-1)
 
         self.current_dist = dist
         self.value_estimates = self.critic_network(obs)
         self.entropy = dist.entropy()
 
-        state['action'] = action.unsqueeze(-1)
+        state['action'] = action
         return state
 
     def get_value_estimates(self) -> torch.Tensor:
