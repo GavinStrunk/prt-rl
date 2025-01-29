@@ -1,3 +1,6 @@
+"""Deep Q Network Algorithm
+
+"""
 import copy
 import torch
 from typing import Optional, List
@@ -12,6 +15,11 @@ from prt_rl.utils.schedulers import ParameterScheduler
 from prt_rl.utils.metrics import MetricTracker
 
 class DQN(ANNTrainer):
+    """
+    Deep Q Network Algorithm
+
+
+    """
     def __init__(self,
                  env: EnvironmentInterface,
                  num_envs: int = 1,
