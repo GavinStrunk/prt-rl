@@ -1,6 +1,3 @@
-"""Deep Q Network Algorithm
-
-"""
 import copy
 import torch
 from typing import Optional, List
@@ -18,7 +15,21 @@ class DQN(ANNTrainer):
     """
     Deep Q Network Algorithm
 
+    Algorithm Steps:
+        - Initialize replay memory D to capacity N
+        - Initialize action-value function Q with random weights
+        - for episode = 1, M do
+            - Initialize sequence s = {x} and preprocessed sequenced phi = phi(s)
+            - for t = 1,T do
+                - Select action with epsilon greedy decision function
+                - Collect experience from environment
+                - Store experience in replay buffer
+                - Sample random minibatch of transitions from D
+                - Set y for terminal or non-terminal states
+                - Perform gradient descent step
 
+    References:
+        [1] https://www.cs.toronto.edu/~vmnih/docs/dqn.pdf
     """
     def __init__(self,
                  env: EnvironmentInterface,

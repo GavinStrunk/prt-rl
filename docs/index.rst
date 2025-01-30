@@ -16,9 +16,11 @@
 .. toctree::
     :maxdepth: 1
     :hidden:
-    :caption: Notes
+    :caption: Algorithm Notes
 
     source/dynamic-programming.md
+    source/dqn.md
+    source/ppo.md
 
 .. toctree::
    :hidden:
