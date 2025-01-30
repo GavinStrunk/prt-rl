@@ -1,3 +1,4 @@
+from collections import Counter
 import gymnasium as gym
 import numpy as np
 from tensordict.tensordict import TensorDict
@@ -15,6 +16,7 @@ class JhuWrapper(EnvironmentInterface):
 
     The JHU environments are games and puzzles that were used in the JHU 705.741 RL course.
     """
+
     def __init__(self,
                  environment: BaseEnvironment,
                  render_mode: Optional[str] = None,
@@ -27,11 +29,11 @@ class JhuWrapper(EnvironmentInterface):
             action_shape=(1,),
             action_continuous=False,
             action_min=0,
-            action_max=self.env.get_number_of_actions()-1,
+            action_max=self.env.get_number_of_actions() - 1,
             observation_shape=(1,),
             observation_continuous=False,
             observation_min=0,
-            observation_max=max(self.env.get_number_of_states()-1, 0),
+            observation_max=max(self.env.get_number_of_states() - 1, 0),
         )
         return params
 
@@ -75,6 +77,7 @@ class JhuWrapper(EnvironmentInterface):
 
         return action
 
+
 class GymnasiumWrapper(EnvironmentInterface):
     """
     Wraps the Gymnasium environments in the Environment interface.
@@ -84,6 +87,7 @@ class GymnasiumWrapper(EnvironmentInterface):
         render_mode: Sets the rendering mode. Defaults to None.
 
     """
+
     def __init__(self,
                  gym_name: str,
                  render_mode: Optional[str] = None,
@@ -197,7 +201,15 @@ class GymnasiumWrapper(EnvironmentInterface):
         """
         return space.shape, True, space.low.tolist(), space.high.tolist()
 
+
 class VmasWrapper(EnvironmentInterface):
+    """
+    Vectorized Multi-Agent Simulator (VMAS)
+
+    References:
+        [1] https://github.com/proroklab/VectorizedMultiAgentSimulator
+    """
+
     def __init__(self,
                  scenario: str,
                  render_mode: Optional[str] = None,
@@ -233,7 +245,6 @@ class VmasWrapper(EnvironmentInterface):
             state_td['rgb_array'] = torch.from_numpy(img).unsqueeze(0)
         return state_td
 
-
     def step(self, action: TensorDict) -> TensorDict:
         # VMAS expects actions to have shape (# agents, # env, action shape)
         action_val = action['action'].permute(1, 0, 2)
@@ -257,24 +268,52 @@ class VmasWrapper(EnvironmentInterface):
         return action
 
     def _make_env_params(self):
-        action_space = self.env.action_space[0]
-        # It appears the gymnasium and gym spaces do not pass isinstance
-        act_shape, act_cont, act_min, act_max = GymnasiumWrapper._get_params_from_box(action_space)
+        # Get the agent names
+        agent_names = [a.name for a in self.env.agents]
 
-        observe_space = self.env.observation_space[0]
-        obs_shape, obs_cont, obs_min, obs_max = GymnasiumWrapper._get_params_from_box(observe_space)
+        # Extract group names by matching prefixes with the pattern 'agent_0', 'agent_1' and count the agents with the same prefix
+        name_prefixes = Counter(item.rsplit('_', 1)[0] for item in agent_names)
 
-        single_agent_params = EnvParams(
-            action_shape=act_shape,
-            action_min=act_min,
-            action_max=act_max,
-            action_continuous=self.env.continuous_actions,
-            observation_shape=obs_shape,
-            observation_continuous=obs_cont,
-            observation_min=obs_min,
-            observation_max=obs_max,
-        )
-        return MultiAgentEnvParams(
-            num_agents=self.env.n_agents,
-            agent=single_agent_params
-        )
+        # Convert to a list of lists containing [[group_name, agent_count],[...]]
+        group_list = [[key, count] for key, count in name_prefixes.items()]
+
+        # For each group create a MultiAgentEnvParams object
+        group = {}
+        agent_index = 0
+        for name, count in group_list:
+            # Construct the EnvParams for an agent in the group
+            action_space = self.env.action_space[agent_index]
+            # It appears the gymnasium and gym spaces do not pass isinstance
+            act_shape, act_cont, act_min, act_max = GymnasiumWrapper._get_params_from_box(action_space)
+
+            observe_space = self.env.observation_space[agent_index]
+            obs_shape, obs_cont, obs_min, obs_max = GymnasiumWrapper._get_params_from_box(observe_space)
+
+            agent_params = EnvParams(
+                action_shape=act_shape,
+                action_min=act_min,
+                action_max=act_max,
+                action_continuous=self.env.continuous_actions,
+                observation_shape=obs_shape,
+                observation_continuous=obs_cont,
+                observation_min=obs_min,
+                observation_max=obs_max,
+            )
+
+            # Construct a MultiAgentEnvParams consisting of the number of agents in this group
+            ma_params = MultiAgentEnvParams(
+                num_agents=count,
+                agent=agent_params
+            )
+            group[name] = ma_params
+
+            # The action and observation space are a flat list with values for each agent so we need to index the next group of agents
+            agent_index += count
+
+        # Return a MultiAgentEnvParams object if there is only one agent group, otherwise return a MultiGroupEnvParams
+        if len(group.keys()) == 1:
+            return group[list(group.keys())[0]]
+        else:
+            return MultiGroupEnvParams(
+                group=group,
+            )
