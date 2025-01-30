@@ -4,7 +4,7 @@ import pytest
 import torch
 import vmas
 from prt_rl.env import wrappers
-from prt_rl.env.interface import MultiAgentEnvParams
+from prt_rl.env.interface import MultiAgentEnvParams, MultiGroupEnvParams
 from prt_sim.jhu.bandits import KArmBandits
 from prt_sim.jhu.robot_game import RobotGame
 
@@ -174,3 +174,38 @@ def test_vmas_wrapper():
     assert trajectory_td.shape == (num_envs,)
     assert trajectory_td['next', 'reward'].shape == (num_envs, params.num_agents)
     assert trajectory_td['next', 'done'].shape == (num_envs, 1)
+
+def test_multigroup_vmas_wrapper():
+    num_envs = 1
+    env = wrappers.VmasWrapper(
+        scenario="kinematic_bicycle",
+        num_envs=num_envs,
+    )
+
+    assert isinstance(env.env, vmas.simulator.environment.environment.Environment)
+
+    params = env.get_parameters()
+    assert isinstance(params, MultiGroupEnvParams)
+    assert list(params.group.keys()) == ['bicycle', 'holo_rot']
+
+    ma_bike = params.group['bicycle']
+    assert ma_bike.num_agents == 1
+    assert ma_bike.agent.action_shape == (2,)
+    assert ma_bike.agent.action_continuous == True
+    assert ma_bike.agent.action_min == [-1.0, -0.5235987901687622]
+    assert ma_bike.agent.action_max == [1.0, 0.5235987901687622]
+    assert ma_bike.agent.observation_shape == (4,)
+    assert ma_bike.agent.observation_continuous == True
+    assert ma_bike.agent.observation_min == [-np.inf]*4
+    assert ma_bike.agent.observation_max == [np.inf]*4
+
+    ma_holo = params.group['holo_rot']
+    assert ma_holo.num_agents == 1
+    assert ma_holo.agent.action_shape == (3,)
+    assert ma_holo.agent.action_continuous == True
+    assert ma_holo.agent.action_min == [-1.0, -1.0, -1.0]
+    assert ma_holo.agent.action_max == [1.0, 1.0, 1.0]
+    assert ma_holo.agent.observation_shape == (4,)
+    assert ma_holo.agent.observation_continuous == True
+    assert ma_holo.agent.observation_min == [-np.inf]*4
+    assert ma_holo.agent.observation_max == [np.inf]*4
