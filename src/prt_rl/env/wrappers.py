@@ -26,7 +26,7 @@ class JhuWrapper(EnvironmentInterface):
 
     def get_parameters(self) -> EnvParams:
         params = EnvParams(
-            action_shape=(1,),
+            action_len=1,
             action_continuous=False,
             action_min=0,
             action_max=self.env.get_number_of_actions() - 1,
@@ -186,8 +186,13 @@ class GymnasiumWrapper(EnvironmentInterface):
 
         if isinstance(action_space, gym.spaces.Discrete):
             act_shape, act_cont, act_min, act_max = self._get_params_from_discrete(action_space)
+            action_len = act_shape[0]
         elif isinstance(action_space, gym.spaces.Box):
             act_shape, act_cont, act_min, act_max = self._get_params_from_box(action_space)
+            if len(act_shape) == 1:
+                action_len = act_shape[0]
+            else:
+                raise ValueError(f"Action space does not have 1D shape: {act_shape}")
         else:
             raise NotImplementedError(f"{action_space} action space is not supported")
 
@@ -199,7 +204,7 @@ class GymnasiumWrapper(EnvironmentInterface):
             raise NotImplementedError(f"{observation_space} observation space is not supported")
 
         return EnvParams(
-            action_shape=act_shape,
+            action_len=action_len,
             action_continuous=act_cont,
             action_min=act_min,
             action_max=act_max,
@@ -319,12 +324,16 @@ class VmasWrapper(EnvironmentInterface):
             action_space = self.env.action_space[agent_index]
             # It appears the gymnasium and gym spaces do not pass isinstance
             act_shape, act_cont, act_min, act_max = GymnasiumWrapper._get_params_from_box(action_space)
+            if len(act_shape) == 1:
+                action_len = act_shape[0]
+            else:
+                raise ValueError(f"Action space does not have 1D shape: {act_shape}")
 
             observe_space = self.env.observation_space[agent_index]
             obs_shape, obs_cont, obs_min, obs_max = GymnasiumWrapper._get_params_from_box(observe_space)
 
             agent_params = EnvParams(
-                action_shape=act_shape,
+                action_len=action_len,
                 action_min=act_min,
                 action_max=act_max,
                 action_continuous=self.env.continuous_actions,

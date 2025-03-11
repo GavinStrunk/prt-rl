@@ -10,7 +10,7 @@ class EnvParams:
     Environment parameters contains information about the action and observation spaces to configure RL algorithms.
 
     Parameters:
-        action_shape (tuple): shape of the action space
+        action_len (int): Number of actions in action space
         action_continuous (bool): True if the actions are continuous or False if they are discrete
         action_min: Minimum action value. If this is a scalar it is applied to all actions otherwise it must match the action shape
         action_max: Maximum action values. If this is a scalar it is applied to all actions otherwise it must match the action shape
@@ -19,7 +19,7 @@ class EnvParams:
         observation_min: Minimum observation value. If this is a scalar it is applied to all observations otherwise it must match the observation shape
         observation_max: Maximum observation value. If this is a scalar it is applied to all observations otherwise it must match the observation shape
     """
-    action_shape: tuple
+    action_len: int
     action_continuous: bool
     action_min: Union[int, List[float]]
     action_max: Union[int, List[float]]

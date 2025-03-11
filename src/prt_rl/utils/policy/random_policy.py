@@ -26,10 +26,10 @@ class RandomPolicy(Policy):
             TensorDict: Tensordict with the "action" key added
         """
         if isinstance(self.env_params, EnvParams):
-            ashape = (*state.batch_size, *self.env_params.action_shape)
+            ashape = (*state.batch_size, self.env_params.action_len)
             params = self.env_params
         elif isinstance(self.env_params, MultiAgentEnvParams):
-            ashape = (*state.batch_size, self.env_params.num_agents, *self.env_params.agent.action_shape)
+            ashape = (*state.batch_size, self.env_params.num_agents, self.env_params.agent.action_len)
             params = self.env_params.agent
         else:
             raise ValueError("env_params must be a EnvParams or MultiAgentEnvParams")

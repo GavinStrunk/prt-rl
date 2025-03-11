@@ -6,7 +6,7 @@ from prt_rl.utils.policy import RandomPolicy
 def test_random_discrete_action_selection():
     # Create a fake environment that has 1 discrete action [0,...,3] and 1 discrete state with the same interval
     params = EnvParams(
-        action_shape=(1,),
+        action_len=1,
         action_continuous=False,
         action_min=0,
         action_max=3,
@@ -31,7 +31,7 @@ def test_random_discrete_action_selection():
 
 def test_random_continuous_action_selection():
     params = EnvParams(
-        action_shape=(1,),
+        action_len=1,
         action_continuous=True,
         action_min=[1.0],
         action_max=[1.1],
@@ -55,7 +55,7 @@ def test_random_continuous_action_selection():
 
 def test_random_multiple_continuous_action_selection():
     params = EnvParams(
-        action_shape=(3,),
+        action_len=3,
         action_continuous=True,
         action_min=[0.0, 0.0, 0.0],
         action_max=[1.0, 1.0, 1.0],
@@ -79,7 +79,7 @@ def test_random_multiple_continuous_action_selection():
 
 def test_multi_agent_action_selection():
     params = EnvParams(
-        action_shape=(3,),
+        action_len=3,
         action_continuous=True,
         action_min=[0.0, 0.0, 0.0],
         action_max=[1.0, 1.0, 1.0],

@@ -1098,7 +1098,7 @@ files = [
 fsspec = {version = "*", optional = true, markers = "extra == \"epath\""}
 importlib_resources = {version = "*", optional = true, markers = "extra == \"epath\""}
 typing_extensions = [
-    {version = "*", optional = true, markers = "extra == \"epath\" or extra == \"epy\""},
+    {version = "*", optional = true, markers = "extra == \"epath\""},
     {version = "*", optional = true, markers = "extra == \"epath\" or extra == \"epy\""},
     {version = "*", optional = true, markers = "extra == \"epy\""},
 ]

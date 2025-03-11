@@ -13,7 +13,7 @@ def test_jhu_wrapper_for_bandits():
 
     # Check the EnvParams are filled out correctly
     params = env.get_parameters()
-    assert params.action_shape == (1,)
+    assert params.action_len == 1
     assert params.action_continuous == False
     assert params.action_min == 0
     assert params.action_max == 9
@@ -30,14 +30,13 @@ def test_jhu_wrapper_for_bandits():
     action = state_td
     action['action'] = torch.tensor([[0]])
     trajectory_td = env.step(action)
-    print(trajectory_td)
 
 def test_jhu_wrapper_for_robot_game():
     env = wrappers.JhuWrapper(environment=RobotGame())
 
     # Check the EnvParams are filled out correctly
     params = env.get_parameters()
-    assert params.action_shape == (1,)
+    assert params.action_len == 1
     assert params.action_continuous == False
     assert params.action_min == 0
     assert params.action_max == 3
@@ -54,7 +53,6 @@ def test_jhu_wrapper_for_robot_game():
     action = state_td
     action['action'] = torch.tensor([[0]])
     trajectory_td = env.step(action)
-    print(trajectory_td)
 
 def test_gymnasium_wrapper_for_cliff_walking():
     # Reference: https://gymnasium.farama.org/environments/toy_text/cliff_walking/
@@ -63,7 +61,7 @@ def test_gymnasium_wrapper_for_cliff_walking():
     )
 
     params = env.get_parameters()
-    assert params.action_shape == (1,)
+    assert params.action_len == 1
     assert params.action_continuous == False
     assert params.action_min == 0
     assert params.action_max == 3
@@ -80,7 +78,6 @@ def test_gymnasium_wrapper_for_cliff_walking():
     action = state_td
     action['action'] = torch.tensor([[0]])
     trajectory_td = env.step(action)
-    print(trajectory_td)
 
 def test_gymnasium_wrapper_continuous_observations():
     env = wrappers.GymnasiumWrapper(
@@ -91,7 +88,7 @@ def test_gymnasium_wrapper_continuous_observations():
     )
 
     params = env.get_parameters()
-    assert params.action_shape == (1,)
+    assert params.action_len == 1
     assert params.action_continuous == False
     assert params.action_min == 0
     assert params.action_max == 1
@@ -108,7 +105,7 @@ def test_gymnasium_wrapper_continuous_observations():
     assert state_td['observation'].dtype == torch.float64
 
     action = state_td
-    action['action'] = torch.zeros(1, *params.action_shape)
+    action['action'] = torch.zeros(1, params.action_len)
     trajectory_td = env.step(action)
     assert trajectory_td.shape == (1,)
     assert trajectory_td['next', 'reward'].shape == (1, 1)
@@ -121,7 +118,7 @@ def test_gymnasium_wrapper_continuous_actions():
     )
 
     params = env.get_parameters()
-    assert params.action_shape == (1,)
+    assert params.action_len == 1
     assert params.action_continuous == True
     assert params.action_min == [-1]
     assert params.action_max == [1.0]
@@ -136,7 +133,7 @@ def test_gymnasium_wrapper_continuous_actions():
     assert state_td['observation'].dtype == torch.float32
 
     action = state_td
-    action['action'] = torch.zeros(1, *params.action_shape)
+    action['action'] = torch.zeros(1, params.action_len)
     trajectory_td = env.step(action)
     assert trajectory_td.shape == (1,)
     assert trajectory_td['next', 'reward'].shape == (1, 1)
@@ -150,7 +147,7 @@ def test_gymnasium_multienv():
         render_mode=None,
     )
     params = env.get_parameters()
-    assert params.action_shape == (1,)
+    assert params.action_len == 1
     assert params.action_continuous == True
     assert params.action_min == [-1]
     assert params.action_max == [1.0]
@@ -165,7 +162,7 @@ def test_gymnasium_multienv():
     assert state_td['observation'].dtype == torch.float32
 
     action = state_td
-    action['action'] = torch.zeros(num_envs, *params.action_shape)
+    action['action'] = torch.zeros(num_envs, params.action_len)
     trajectory_td = env.step(action)
     assert trajectory_td.shape == (num_envs,)
     assert trajectory_td['next', 'reward'].shape == (num_envs, 1)
@@ -183,7 +180,7 @@ def test_vmas_wrapper():
     params = env.get_parameters()
     assert isinstance(params, MultiAgentEnvParams)
     assert params.num_agents == 5
-    assert params.agent.action_shape == (2,)
+    assert params.agent.action_len == 2
     assert params.agent.action_continuous == True
     assert params.agent.action_min == [-1.0, -1.0]
     assert params.agent.action_max == [1.0, 1.0]
@@ -198,7 +195,7 @@ def test_vmas_wrapper():
     assert state_td['observation'].dtype == torch.float32
 
     action = state_td
-    action['action'] = torch.zeros(num_envs, params.num_agents, *params.agent.action_shape)
+    action['action'] = torch.zeros(num_envs, params.num_agents, params.agent.action_len)
     trajectory_td = env.step(action)
     assert trajectory_td.shape == (num_envs,)
     assert trajectory_td['next', 'reward'].shape == (num_envs, params.num_agents)
@@ -219,7 +216,7 @@ def test_multigroup_vmas_wrapper():
 
     ma_bike = params.group['bicycle']
     assert ma_bike.num_agents == 1
-    assert ma_bike.agent.action_shape == (2,)
+    assert ma_bike.agent.action_len == 2
     assert ma_bike.agent.action_continuous == True
     assert ma_bike.agent.action_min == [-1.0, -0.5235987901687622]
     assert ma_bike.agent.action_max == [1.0, 0.5235987901687622]
@@ -230,7 +227,7 @@ def test_multigroup_vmas_wrapper():
 
     ma_holo = params.group['holo_rot']
     assert ma_holo.num_agents == 1
-    assert ma_holo.agent.action_shape == (3,)
+    assert ma_holo.agent.action_len == 3
     assert ma_holo.agent.action_continuous == True
     assert ma_holo.agent.action_min == [-1.0, -1.0, -1.0]
     assert ma_holo.agent.action_max == [1.0, 1.0, 1.0]

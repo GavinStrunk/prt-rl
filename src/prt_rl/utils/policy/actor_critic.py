@@ -27,14 +27,12 @@ class ActorCriticPolicy(Policy):
 
         # Set the correct action dimension for the network
         if env_params.action_continuous:
-            action_dim = self.env_params.action_shape[0]
             final_act = None
         else:
-            action_dim = self.env_params.action_max - self.env_params.action_min + 1
             final_act = torch.nn.Softmax(dim=-1)
 
         # Initialize Actor and Critic Networks
-        self.action_dim = action_dim
+        self.action_dim = self.env_params.action_len
         self.num_dist_params = self.distribution.parameters_per_action()
         self.actor_network = MLP(
             state_dim=self.env_params.observation_shape[0],

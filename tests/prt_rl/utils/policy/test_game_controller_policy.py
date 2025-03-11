@@ -4,6 +4,7 @@ import torch
 from prt_rl.env.interface import EnvParams
 from prt_rl.utils.policy import GameControllerPolicy
 
+@pytest.mark.skip(reason="Requires a game controller input")
 def test_processing_joystick():
     params = EnvParams(
         action_shape=(3,),
@@ -41,6 +42,7 @@ def test_processing_joystick():
     policy._process_joystick(action_map, norm_joy_value)
     assert torch.allclose(policy.latest_values, torch.tensor([-1.0, 2.0, 0.0]))
 
+@pytest.mark.skip(reason="Requires a game controller input")
 def test_processing_positive_clipped_joystick():
     params = EnvParams(
         action_shape=(3,),
@@ -73,6 +75,7 @@ def test_processing_positive_clipped_joystick():
     policy._process_joystick(action_map, norm_joy_value)
     assert torch.allclose(policy.latest_values, torch.tensor([0.0, 0.0, 0.0]))
 
+@pytest.mark.skip(reason="Requires a game controller input")
 def test_processing_negative_clipped_joystick():
     params = EnvParams(
         action_shape=(3,),
