@@ -10,6 +10,7 @@ gym_name = 'CartPole-v1'
 
 env = GymnasiumWrapper(
     gym_name=gym_name,
+    num_envs=10,
 )
 
 torch.manual_seed(0)
