@@ -142,6 +142,35 @@ def test_gymnasium_wrapper_continuous_actions():
     assert trajectory_td['next', 'reward'].shape == (1, 1)
     assert trajectory_td['next', 'done'].shape == (1, 1)
 
+def test_gymnasium_multienv():
+    num_envs = 5
+    env = wrappers.GymnasiumWrapper(
+        gym_name="MountainCarContinuous-v0",
+        num_envs=num_envs,
+        render_mode=None,
+    )
+    params = env.get_parameters()
+    assert params.action_shape == (1,)
+    assert params.action_continuous == True
+    assert params.action_min == [-1]
+    assert params.action_max == [1.0]
+    assert params.observation_shape == (2,)
+    assert params.observation_continuous == True
+    assert params.observation_min == pytest.approx([-1.2, -0.07])
+    assert params.observation_max == pytest.approx([0.6, 0.07])
+
+    state_td = env.reset()
+    assert state_td.shape == (num_envs,)
+    assert state_td['observation'].shape == (num_envs, *params.observation_shape)
+    assert state_td['observation'].dtype == torch.float32
+
+    action = state_td
+    action['action'] = torch.zeros(num_envs, *params.action_shape)
+    trajectory_td = env.step(action)
+    assert trajectory_td.shape == (num_envs,)
+    assert trajectory_td['next', 'reward'].shape == (num_envs, 1)
+    assert trajectory_td['next', 'done'].shape == (num_envs, 1)
+
 def test_vmas_wrapper():
     num_envs = 2
     env = wrappers.VmasWrapper(

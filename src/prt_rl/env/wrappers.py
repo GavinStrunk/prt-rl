@@ -84,19 +84,29 @@ class GymnasiumWrapper(EnvironmentInterface):
 
     Args:
         gym_name: Name of the Gymnasium environment.
+        num_envs: Number of parallel environments to create.
         render_mode: Sets the rendering mode. Defaults to None.
 
     """
 
     def __init__(self,
                  gym_name: str,
+                 num_envs: int = 1,
                  render_mode: Optional[str] = None,
                  **kwargs
                  ) -> None:
         super().__init__(render_mode)
         self.gym_name = gym_name
-        self.env = gym.make(self.gym_name, render_mode=render_mode, **kwargs)
-        self.env_params = self._make_env_params()
+        self.num_envs = num_envs
+
+        if num_envs == 1:
+            self.env = gym.make(self.gym_name, render_mode=render_mode, **kwargs)
+            vectorized = False
+        else:
+            self.env = gym.make_vec(self.gym_name, num_envs=self.num_envs, render_mode=render_mode, **kwargs)
+            vectorized = True
+
+        self.env_params = self._make_env_params(vectorized=vectorized)
 
     def get_parameters(self) -> EnvParams:
         return self.env_params
@@ -108,7 +118,7 @@ class GymnasiumWrapper(EnvironmentInterface):
             {
                 'observation': self._process_observation(obs),
             },
-            batch_size=torch.Size([1])
+            batch_size=torch.Size([self.num_envs])
         )
 
         if self.render_mode == 'rgb_array':
@@ -117,7 +127,7 @@ class GymnasiumWrapper(EnvironmentInterface):
         return state_td
 
     def step(self, action: TensorDict) -> TensorDict:
-        action_val = action['action'][0]
+        action_val = action['action']
 
         # Discrete actions send the raw integer value to the step function
         if not self.env_params.action_continuous:
@@ -126,11 +136,20 @@ class GymnasiumWrapper(EnvironmentInterface):
             action_val = action_val.cpu().numpy()
 
         state, reward, terminated, trunc, info = self.env.step(action_val)
-        done = terminated or trunc
+        done = np.logical_or(terminated, trunc)
+
+        # Reshape the reward and done to be (# envs, 1)
+        if self.num_envs == 1:
+            reward = torch.tensor([[reward]], dtype=torch.float)
+            done = torch.tensor([[done]], dtype=torch.bool)
+        else:
+            reward = torch.tensor(reward, dtype=torch.float).unsqueeze(-1)
+            done = torch.tensor(done, dtype=torch.bool).unsqueeze(-1)
+
         action['next'] = {
             'observation': self._process_observation(state),
-            'reward': torch.tensor([[reward]], dtype=torch.float),
-            'done': torch.tensor([[done]], dtype=torch.bool),
+            'reward': reward,
+            'done': done,
         }
 
         if self.render_mode == 'rgb_array':
@@ -147,22 +166,37 @@ class GymnasiumWrapper(EnvironmentInterface):
         if isinstance(observation, int):
             observation = np.array([observation])
 
-        return torch.tensor(observation).unsqueeze(0)
-
-    def _make_env_params(self):
-        if isinstance(self.env.action_space, gym.spaces.Discrete):
-            act_shape, act_cont, act_min, act_max = self._get_params_from_discrete(self.env.action_space)
-        elif isinstance(self.env.action_space, gym.spaces.Box):
-            act_shape, act_cont, act_min, act_max = self._get_params_from_box(self.env.action_space)
+        # Add a dimension if there is only 1 environment
+        if self.num_envs == 1:
+            observation = torch.tensor(observation).unsqueeze(0)
         else:
-            raise NotImplementedError(f"{self.env.action_space} action space is not supported")
+            observation = torch.tensor(observation)
 
-        if isinstance(self.env.observation_space, gym.spaces.Discrete):
-            obs_shape, obs_cont, obs_min, obs_max = self._get_params_from_discrete(self.env.observation_space)
-        elif isinstance(self.env.observation_space, gym.spaces.Box):
-            obs_shape, obs_cont, obs_min, obs_max = self._get_params_from_box(self.env.observation_space)
+        return observation
+
+    def _make_env_params(self,
+                         vectorized: bool = False,
+                         ):
+        if not vectorized:
+            action_space = self.env.action_space
+            observation_space = self.env.observation_space
         else:
-            raise NotImplementedError(f"{self.env.observation_space} observation space is not supported")
+            action_space = self.env.single_action_space
+            observation_space = self.env.single_observation_space
+
+        if isinstance(action_space, gym.spaces.Discrete):
+            act_shape, act_cont, act_min, act_max = self._get_params_from_discrete(action_space)
+        elif isinstance(action_space, gym.spaces.Box):
+            act_shape, act_cont, act_min, act_max = self._get_params_from_box(action_space)
+        else:
+            raise NotImplementedError(f"{action_space} action space is not supported")
+
+        if isinstance(observation_space, gym.spaces.Discrete):
+            obs_shape, obs_cont, obs_min, obs_max = self._get_params_from_discrete(observation_space)
+        elif isinstance(observation_space, gym.spaces.Box):
+            obs_shape, obs_cont, obs_min, obs_max = self._get_params_from_box(observation_space)
+        else:
+            raise NotImplementedError(f"{observation_space} observation space is not supported")
 
         return EnvParams(
             action_shape=act_shape,
