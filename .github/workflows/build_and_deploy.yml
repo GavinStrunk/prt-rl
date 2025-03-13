@@ -1,0 +1,83 @@
+name: Build and Deploy PRT-RL Repo
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:  # Allows manual runs
+
+permissions:
+  contents: write  # Required for committing version bump
+  id-token: write  # Required for trusted publishing
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv and dependencies
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          uv sync --all-groups
+
+      - name: Run pytest
+        run: uv run pytest
+          
+  bump-version:
+    name: Bump Version
+    needs: test  # Runs only if tests pass
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install uv and bumpversion
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          uv pip install bumpversion
+
+      - name: Bump version (patch)
+        run: |
+          bumpversion patch
+          git push origin main --tags
+
+  # publish-docs:
+  #   name: Build ReadTheDocs
+  #   needs: bump-version
+  #   runs-on: ubuntu-latest
+
+  #   steps:
+  #     - name: Trigger ReadTheDocs Build
+  #       run: |
+  #         curl -X POST -d "token=${{ secrets.RTD_API_TOKEN }}" https://readthedocs.org/api/v2/webhook/<your-project>/
+
+  # publish-package:
+  #   name: Build and Publish to PyPI
+  #   needs: bump-version
+  #   runs-on: ubuntu-latest
+
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+
+  #     - name: Install uv
+  #       run: |
+  #         curl -LsSf https://astral.sh/uv/install.sh | sh
+
+  #     - name: Build Package with uv
+  #       run: uv build
+
+  #     - name: Publish to PyPI with uv
+  #       env:
+  #         UV_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+  #       run: uv publish --token "$UV_PYPI_TOKEN"
