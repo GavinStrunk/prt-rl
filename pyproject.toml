@@ -1,38 +1,22 @@
-[tool.poetry]
+[project]
 name = "prt-rl"
 version = "0.1.0"
-description = ""
-authors = ["Gavin Strunk <gavin.strunk@gmail.com>"]
+description = "Add your description here"
 readme = "README.md"
-
-[tool.poetry.dependencies]
-python = ">=3.11,<3.13"
-torch = "^2.4.1"
-mlflow = "^2.19.0"
-tensordict = "^0.6.2"
-tqdm = "^4.67.1"
-pynput = "^1.7.7"
-gymnasium = {extras = ["all"], version = "^1.1.1"}
-psutil = "^6.1.1"
-sphinx = "^8.1.3"
-myst-parser = "^4.0.0"
-sphinx-book-theme = "^1.1.3"
-toml = "^0.10.2"
-pytest = "^8.3.4"
-pynvml = "^12.0.0"
-sphinxcontrib-mermaid = "^1.0.0"
-flappy-bird-gymnasium = "^0.4.0"
-inputs = "^0.5"
-sphinx-design = "^0.6.1"
-nbsphinx = "^0.9.6"
-notebook = "^7.3.2"
-nbconvert = "^7.16.5"
-boto3 = "^1.35.98"
-rootutils = "^1.0.7"
-vmas = {extras = ["all"], version = "^1.4.3"}
-dm-control = "^1.0.28"
-jinja2 = "^3.1.6"
+authors = [
+    { name = "Gavin Strunk", email = "gavin.strunk@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.10.1",
+    "numpy>=2.2.3",
+    "pygame>=2.6.1",
+    "pytest>=8.3.5",
+    "scipy>=1.15.2",
+    "tensordict>=0.7.2",
+    "torch>=2.6.0",
+]
 
 [build-system]
-requires = ["poetry-core", "swig"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
