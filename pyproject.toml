@@ -8,13 +8,15 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
+    "gymnasium>=1.1.1",
     "matplotlib>=3.10.1",
     "numpy>=2.2.3",
     "pygame>=2.6.1",
     "pytest>=8.3.5",
     "scipy>=1.15.2",
-    "tensordict>=0.7.2",
+    "tensordict==0.6.2",
     "torch>=2.6.0",
+    "vmas>=1.5.0",
 ]
 
 [build-system]
