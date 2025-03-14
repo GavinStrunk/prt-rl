@@ -1,7 +1,7 @@
 [project]
 name = "prt-rl"
 version = "0.1.0"
-description = "Add your description here"
+description = "Python Research Toolkit - Reinforcement Learning"
 readme = "README.md"
 authors = [
     { name = "Gavin Strunk", email = "gavin.strunk@gmail.com" }
