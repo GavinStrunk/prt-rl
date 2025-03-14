@@ -95,5 +95,3 @@ html_favicon = "_static/prt-rl-logo.jpg"
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
 
-# Copy demos to the build directory
-html_extra_path = ['../demos']

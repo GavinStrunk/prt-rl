@@ -6,7 +6,7 @@ from prt_rl.utils.policy import QTablePolicy
 def test_qtable_policy():
     # Create a fake environment that has 1 discrete action [0,...,3] and 1 discrete state with the same interval
     params = EnvParams(
-        action_shape=(1,),
+        action_len=1,
         action_continuous=False,
         action_min=0,
         action_max=3,
