@@ -23,9 +23,6 @@ jobs:
         with:
           version: "latest"
 
-      - name: Install dependencies
-        run: uv sync
-
       - name: Bump version
         id: bumpversion
         uses: jasonamyers/github-bumpversion-action@v1.0.5
@@ -38,6 +35,9 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           tags: true
 
+      - name: Install dependencies
+        run: uv sync
+        
       - name: Build Package with uv
         run: uv build
   
