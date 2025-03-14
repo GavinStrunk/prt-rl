@@ -36,24 +36,27 @@ jobs:
         run: |
           curl -X POST -d "token=${{ secrets.RTD_API_TOKEN }}" https://readthedocs.org/api/v2/webhook/reinforcement-learning/286318/
 
-  # publish-package:
-  #   name: Build and Publish to PyPI
-  #   needs: bump-version
-  #   runs-on: ubuntu-latest
+  publish-package:
+    name: Build and Publish to PyPI
+    needs: bump-version
+    runs-on: ubuntu-latest
 
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v4
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-  #     - name: Install uv
-  #       run: |
-  #         curl -LsSf https://astral.sh/uv/install.sh | sh
-  #         uv sync
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
 
-  #     - name: Build Package with uv
-  #       run: uv build
+      - name: Install dependencies
+        run: uv sync
 
-  #     - name: Publish to PyPI with uv
-  #       env:
-  #         UV_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-  #       run: uv publish --token "$UV_PYPI_TOKEN"
+      - name: Build Package with uv
+        run: uv build
+
+      - name: Publish to PyPI with uv
+        env:
+          UV_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: uv publish --token "$UV_PYPI_TOKEN"
