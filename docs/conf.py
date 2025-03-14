@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.abspath('../demos'))
 project = 'Python Research Toolkit - Reinforcement Learning'
 copyright = '2024, Gavin Strunk'
 author = 'Gavin Strunk'
-version = "0.1.0"
+version = "0.1.1"
 release = version
 
 # -- General configuration ---------------------------------------------------
