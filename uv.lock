@@ -1562,7 +1562,7 @@ wheels = [
 
 [[package]]
 name = "prt-rl"
-version = "0.1.0"
+version = "0.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "gymnasium" },
@@ -1571,6 +1571,7 @@ dependencies = [
     { name = "matplotlib" },
     { name = "mlflow" },
     { name = "numpy" },
+    { name = "prt-sim" },
     { name = "psutil" },
     { name = "pygame" },
     { name = "pynput" },
@@ -1601,6 +1602,7 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.10.1" },
     { name = "mlflow", specifier = ">=2.20.4" },
     { name = "numpy", specifier = ">=2.2.3" },
+    { name = "prt-sim", specifier = ">=0.1.0" },
     { name = "psutil", specifier = ">=7.0.0" },
     { name = "pygame", specifier = ">=2.6.1" },
     { name = "pynput", specifier = ">=1.8.0" },
@@ -1621,6 +1623,20 @@ dev = [
     { name = "sphinx-book-theme", specifier = ">=1.1.4" },
     { name = "sphinx-design", specifier = ">=0.6.1" },
     { name = "sphinxcontrib-mermaid", specifier = ">=1.0.0" },
+]
+
+[[package]]
+name = "prt-sim"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "pygame" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/14/74/5d0addee72e3350d042ca0b9455b820470ea223d15d0e4cb1f8648a477ce/prt_sim-0.1.0.tar.gz", hash = "sha256:ceb91f01577068b7c2d4b94c4704bc5f22a9f4aba0b78bbb4b80f4611bca9971", size = 664359 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/87/6d/bf880f6ac4470957eccbacb612122b0aace80a98f19c6eab29e466b0ca0d/prt_sim-0.1.0-py3-none-any.whl", hash = "sha256:47c80a3a5a0549051cc9fdf60b6f0e9515b8619fb49b411f122160ee94598733", size = 67436 },
 ]
 
 [[package]]

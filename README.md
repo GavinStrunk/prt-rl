@@ -9,8 +9,10 @@ My code related to learning and using RL outside of a specific project
 The documentation website is at [https://reinforcement-learning.readthedocs.io/](https://reinforcement-learning.readthedocs.io/)
 
 # Installation
-PRT-RL uses pyenv to manage the python version and poetry for package management. This library can be setup using other tools for these purposes.
-
+Installing prt-rl from pypi as:
+```shell
+pip install prt-rl
+```
 
 # Getting Started
 
@@ -21,3 +23,7 @@ PRT-RL uses pyenv to manage the python version and poetry for package management
 * RLlib
 * Tianshou
 * CleanRL
+
+# Contributing
+Contributions are welcome, but please submit an issue prior to submitting a PR so the feature or bug can be discussed. 
+This repository follows semantic versioning with the format major.minor.patch. The patch version bumping is automatically handled by the action workflow, and major/minor bumps can be performed by adding #major or #minor to the commit message.

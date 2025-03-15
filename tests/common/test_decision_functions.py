@@ -1,6 +1,6 @@
 import torch
 import pytest
-import prt_rl.utils.decision_functions as df
+import prt_rl.common.decision_functions as df
 
 def check_input_dimensions(test_func):
     # No batch dimension

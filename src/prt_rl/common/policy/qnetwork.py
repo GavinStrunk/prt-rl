@@ -3,9 +3,9 @@ from typing import Any, Optional
 import torch
 from tensordict.tensordict import TensorDict
 from prt_rl.env.interface import EnvParams
-from prt_rl.utils.policy.policies import Policy
-import prt_rl.utils.networks as qnets
-import prt_rl.utils.decision_functions as dfuncs
+from prt_rl.common.policy.policies import Policy
+import prt_rl.common.networks as qnets
+import prt_rl.common.decision_functions as dfuncs
 
 class QNetworkPolicy(Policy):
     """

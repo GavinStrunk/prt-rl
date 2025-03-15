@@ -1,6 +1,6 @@
 import pytest
 import torch
-from prt_rl.utils.activation import TeLU
+from prt_rl.common.activation import TeLU
 
 def test_telu_activation_at_zero():
     input = torch.zeros(1, 1)

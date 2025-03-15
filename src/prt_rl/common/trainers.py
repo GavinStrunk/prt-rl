@@ -4,11 +4,11 @@ import copy
 from tensordict.tensordict import TensorDict
 from typing import Optional, List, Any
 from prt_rl.env.interface import EnvParams, EnvironmentInterface
-from prt_rl.utils.policy import Policy, QNetworkPolicy, ActorCriticPolicy
-from prt_rl.utils.loggers import Logger
-from prt_rl.utils.schedulers import ParameterScheduler
-from prt_rl.utils.progress_bar import ProgressBar
-from prt_rl.utils.metrics import MetricTracker
+from prt_rl.common.policy import Policy, QNetworkPolicy, ActorCriticPolicy
+from prt_rl.common.loggers import Logger
+from prt_rl.common.schedulers import ParameterScheduler
+from prt_rl.common.progress_bar import ProgressBar
+from prt_rl.common.metrics import MetricTracker
 
 
 class Trainer(ABC):

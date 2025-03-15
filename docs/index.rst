@@ -18,7 +18,6 @@
     :hidden:
     :caption: Algorithm Notes
 
-    source/dynamic-programming.md
     source/dqn.md
     source/ppo.md
 

@@ -4,7 +4,7 @@ import threading
 import torch
 from typing import Dict, Tuple, Union
 from prt_rl.env.interface import EnvParams
-from prt_rl.utils.policy.policies import Policy
+from prt_rl.common.policy.policies import Policy
 
 class GameControllerPolicy(Policy):
     """

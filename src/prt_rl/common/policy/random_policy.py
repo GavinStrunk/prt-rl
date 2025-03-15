@@ -2,7 +2,7 @@ from tensordict.tensordict import TensorDict
 import torch
 from typing import Union
 from prt_rl.env.interface import EnvParams, MultiAgentEnvParams
-from prt_rl.utils.policy.policies import Policy
+from prt_rl.common.policy.policies import Policy
 
 class RandomPolicy(Policy):
     """

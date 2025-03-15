@@ -1,4 +1,4 @@
-from prt_rl.utils.networks import *
+from prt_rl.common.networks import *
 
 def test_mlp_construction():
     # Default architecture is:

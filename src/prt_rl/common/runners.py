@@ -1,8 +1,8 @@
 from typing import Optional
 from prt_rl.env.interface import EnvironmentInterface
-from prt_rl.utils.policy import Policy
-from prt_rl.utils.recorders import Recorder
-from prt_rl.utils.visualizers import Visualizer
+from prt_rl.common.policy import Policy
+from prt_rl.common.recorders import Recorder
+from prt_rl.common.visualizers import Visualizer
 
 
 class Runner:
