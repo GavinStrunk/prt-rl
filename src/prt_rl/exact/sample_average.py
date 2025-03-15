@@ -1,12 +1,12 @@
 from tensordict import TensorDict
 from typing import Optional
 from prt_rl.env.interface import EnvironmentInterface
-from prt_rl.utils.decision_functions import DecisionFunction
-from prt_rl.utils.loggers import Logger
-from prt_rl.utils.policy import QTablePolicy
-from prt_rl.utils.qtable import QTable
-from prt_rl.utils.trainers import TDTrainer
-from prt_rl.utils.metrics import MetricTracker
+from prt_rl.common.decision_functions import DecisionFunction
+from prt_rl.common.loggers import Logger
+from prt_rl.common.policy import QTablePolicy
+from prt_rl.common.qtable import QTable
+from prt_rl.common.trainers import TDTrainer
+from prt_rl.common.metrics import MetricTracker
 
 class SampleAverage(TDTrainer):
     r"""

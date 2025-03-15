@@ -1,5 +1,5 @@
 import pytest
-from prt_rl.utils.policy import load_from_mlflow
+from prt_rl.common.policy import load_from_mlflow
 
 
 @pytest.mark.skip(reason="Requires MLFlow server")

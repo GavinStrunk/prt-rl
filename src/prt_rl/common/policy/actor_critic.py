@@ -2,9 +2,9 @@ from tensordict import TensorDict
 import torch
 from typing import Optional
 from prt_rl.env.interface import EnvParams
-from prt_rl.utils.policy.policies import Policy
-from prt_rl.utils.networks import MLP
-import prt_rl.utils.distributions as dist
+from prt_rl.common.policy.policies import Policy
+from prt_rl.common.networks import MLP
+import prt_rl.common.distributions as dist
 
 class ActorCriticPolicy(Policy):
     """

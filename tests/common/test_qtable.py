@@ -1,5 +1,5 @@
 import torch
-from prt_rl.utils.qtable import QTable
+from prt_rl.common.qtable import QTable
 
 def test_qtable_initialization():
     qtable = QTable(

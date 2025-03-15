@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from prt_rl.utils.plot import plot_scalar_metric
+from prt_rl.common.plot import plot_scalar_metric
 
 @pytest.mark.skip(reason="Generates a plot")
 def test_plotting_single_scalar_metric():

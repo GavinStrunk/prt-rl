@@ -3,13 +3,13 @@ import torch
 from typing import Optional, List
 from tensordict import TensorDict
 from prt_rl.env.interface import EnvironmentInterface
-from prt_rl.utils.trainers import ANNTrainer
-from prt_rl.utils.buffers import ReplayBuffer
-from prt_rl.utils.decision_functions import DecisionFunction
-from prt_rl.utils.policy import QNetworkPolicy
-from prt_rl.utils.loggers import Logger
-from prt_rl.utils.schedulers import ParameterScheduler
-from prt_rl.utils.metrics import MetricTracker
+from prt_rl.common.trainers import ANNTrainer
+from prt_rl.common.buffers import ReplayBuffer
+from prt_rl.common.decision_functions import DecisionFunction
+from prt_rl.common.policy import QNetworkPolicy
+from prt_rl.common.loggers import Logger
+from prt_rl.common.schedulers import ParameterScheduler
+from prt_rl.common.metrics import MetricTracker
 
 class DQN(ANNTrainer):
     """

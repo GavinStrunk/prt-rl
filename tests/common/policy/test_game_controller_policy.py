@@ -2,7 +2,7 @@ import pytest
 from tensordict.tensordict import TensorDict
 import torch
 from prt_rl.env.interface import EnvParams
-from prt_rl.utils.policy import GameControllerPolicy
+from prt_rl.common.policy import GameControllerPolicy
 
 @pytest.mark.skip(reason="Requires a game controller input")
 def test_processing_joystick():

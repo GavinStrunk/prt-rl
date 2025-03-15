@@ -1,5 +1,5 @@
 import pytest
-import prt_rl.utils.schedulers as sch
+import prt_rl.common.schedulers as sch
 
 def test_linear_schedule():
     # Schedules parameter down

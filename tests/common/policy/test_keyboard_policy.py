@@ -1,7 +1,7 @@
 import pytest
 from tensordict.tensordict import TensorDict
 from prt_rl.env.interface import EnvParams
-from prt_rl.utils.policy import KeyboardPolicy
+from prt_rl.common.policy import KeyboardPolicy
 
 @pytest.mark.skip(reason="Requires a keyboard press")
 def test_keyboard_blocking_policy():

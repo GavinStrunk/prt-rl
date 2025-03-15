@@ -1,7 +1,7 @@
 import mlflow
 import mlflow.pyfunc
 from typing import Optional
-from prt_rl.utils.policy import Policy
+from prt_rl.common.policy import Policy
 
 
 class Logger:

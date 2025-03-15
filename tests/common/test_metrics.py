@@ -1,5 +1,5 @@
 import torch
-from prt_rl.utils.metrics import MetricTracker, TensorDeque
+from prt_rl.common.metrics import MetricTracker, TensorDeque
 
 def test_initializing_metric_callbacks():
     def post_episode_callback(self, reward, info) -> None:

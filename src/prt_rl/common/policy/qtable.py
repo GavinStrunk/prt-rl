@@ -4,9 +4,9 @@ from tensordict.tensordict import TensorDict
 import torch
 from typing import Any, Optional
 from prt_rl.env.interface import EnvParams
-from prt_rl.utils.policy.policies import Policy
-import prt_rl.utils.qtable as qtabs
-import prt_rl.utils.decision_functions as dfuncs
+from prt_rl.common.policy.policies import Policy
+import prt_rl.common.qtable as qtabs
+import prt_rl.common.decision_functions as dfuncs
 
 class QTablePolicy(Policy):
     """
