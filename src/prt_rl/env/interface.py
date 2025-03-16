@@ -97,9 +97,12 @@ class EnvironmentInterface(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def reset(self) -> TensorDict:
+    def reset(self, seed: int | None = None) -> TensorDict:
         """
         Resets the environment to the initial state and returns the initial observation.
+
+        Args:
+            seed (int | None): Sets the random seed.
 
         Returns:
             TensorDict: initial observation
