@@ -34,6 +34,7 @@ build-backend = "hatchling.build"
 dev = [
     "myst-parser>=4.0.1",
     "nbsphinx>=0.9.6",
+    "notebook>=7.3.3",
     "pytest>=8.3.5",
     "sphinx>=8.2.3",
     "sphinx-book-theme>=1.1.4",

@@ -22,9 +22,16 @@ def test_jhu_wrapper_for_bandits():
     assert params.observation_max == 0
 
     # Check interface
-    state_td = env.reset()
+    state_td = env.reset(seed=0)
     assert state_td.shape == (1,)
     assert state_td['observation'].shape == (1, *params.observation_shape)
+
+    # Check info
+    print(state_td['info', 'bandits'][0])
+    assert state_td['info', 'optimal_bandit'].shape == (1, 1)
+    assert state_td['info', 'optimal_bandit'] == torch.tensor([[3]])
+    assert state_td['info', 'bandits'].shape == (1, 10)
+    assert torch.allclose(state_td['info', 'bandits'], torch.tensor([[1.7641,  0.4002,  0.9787,  2.2409,  1.8676, -0.9773,  0.9501, -0.1514, -0.1032,  0.4106]], dtype=torch.float64), atol=1e-4)
 
     action = state_td
     action['action'] = torch.tensor([[0]])

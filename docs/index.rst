@@ -26,5 +26,4 @@
    :caption: API Reference
 
 	prt_rl <_autosummary/prt_rl>
-    prt_sim <_autosummary/prt_sim>
 

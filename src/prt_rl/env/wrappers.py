@@ -17,6 +17,31 @@ class JhuWrapper(EnvironmentInterface):
     Wraps the JHU environments in the Environment interface.
 
     The JHU environments are games and puzzles that were used in the JHU 705.741 RL course.
+
+    Args:
+        environment (BaseEnvironment): JHU Environment object
+        render_mode (str, optional): Sets the render mode ['human', 'rgb_array']. Default: None.
+
+    Examples:
+        ```python
+        from prt_sim.jhu.bandits import KArmBandits
+        from prt_rl.env.wrappers import JhuWrapper
+        from prt_rl.common.policy import RandomPolicy
+
+        env = JhuWrapper(environment=KArmBandits())
+        policy = RandomPolicy(env_params=env.get_parameters())
+
+        state_td = env.reset(seed=0)
+        done = False
+
+        while not done:
+            action = policy.get_action(state_td)
+            state_td = env.step(action)
+            done = state_td['next', 'done']
+
+            # Update the MDP
+            state_td = env.step_mdp(state_td)
+        ```
     """
 
     def __init__(self,
@@ -39,8 +64,8 @@ class JhuWrapper(EnvironmentInterface):
         )
         return params
 
-    def reset(self) -> TensorDict:
-        state = self.env.reset()
+    def reset(self, seed: int | None = None) -> TensorDict:
+        state = self.env.reset(seed=seed)
         state_td = TensorDict(
             {
                 'observation': torch.tensor([[state]], dtype=torch.int),
@@ -52,6 +77,7 @@ class JhuWrapper(EnvironmentInterface):
         if isinstance(self.env, prt_sim.jhu.bandits.KArmBandits):
             state_td['info'] = {
                 'optimal_bandit': torch.tensor([[self.env.get_optimal_bandit()]], dtype=torch.int),
+                'bandits': torch.tensor(self.env.bandit_probs).unsqueeze(0)
             }
 
         if self.render_mode == 'human':
@@ -89,6 +115,30 @@ class GymnasiumWrapper(EnvironmentInterface):
         num_envs: Number of parallel environments to create.
         render_mode: Sets the rendering mode. Defaults to None.
 
+    Examples:
+        ```python
+        from prt_rl.env.wrappers import GymnasiumWrapper
+        from prt_rl.common.policy import RandomPolicy
+
+        env = GymnasiumWrapper(
+            gym_name="CarRacing-v3",
+            render_mode="rgb_array",
+            continuous=True
+        )
+
+        policy = RandomPolicy(env_params=env.get_parameters())
+
+        state_td = env.reset()
+        done = False
+
+        while not done:
+            action = policy.get_action(state_td)
+            state_td = env.step(action)
+            done = state_td['next', 'done']
+
+            # Update the MDP
+            state_td = env.step_mdp(state_td)
+
     """
 
     def __init__(self,
@@ -113,8 +163,8 @@ class GymnasiumWrapper(EnvironmentInterface):
     def get_parameters(self) -> EnvParams:
         return self.env_params
 
-    def reset(self) -> TensorDict:
-        obs, info = self.env.reset()
+    def reset(self, seed: int | None = None) -> TensorDict:
+        obs, info = self.env.reset(seed=seed)
 
         state_td = TensorDict(
             {
@@ -266,8 +316,8 @@ class VmasWrapper(EnvironmentInterface):
     def get_parameters(self) -> Union[EnvParams | MultiAgentEnvParams | MultiGroupEnvParams]:
         return self.env_params
 
-    def reset(self) -> TensorDict:
-        obs = self.env.reset()
+    def reset(self, seed: int | None = None) -> TensorDict:
+        obs = self.env.reset(seed=seed)
 
         # Stack the observation so it has shape (# env, # agents, obs shape)
         obs = torch.stack(obs, dim=1)
