@@ -24,6 +24,10 @@ pip install prt-rl
 * Tianshou
 * CleanRL
 
+# Reference RL Repositories
+[1] https://github.com/Toni-SM/skrl/tree/main
+
+
 # Contributing
 Contributions are welcome, but please submit an issue prior to submitting a PR so the feature or bug can be discussed. 
 This repository follows semantic versioning with the format major.minor.patch. The patch version bumping is automatically handled by the action workflow, and major/minor bumps can be performed by adding #major or #minor to the commit message. The tag must be in the commit short message for the action to correctly pick it up.
