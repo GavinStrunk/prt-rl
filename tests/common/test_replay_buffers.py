@@ -1,7 +1,7 @@
 import torch
 import pytest
 from typing import Dict
-from prt_rl.common.replay_buffers import ReplayBuffer as ReplayBufferImpl, BaseReplayBuffer
+from prt_rl.common.replay_buffers import ReplayBuffer, BaseReplayBuffer
 
 
 @pytest.fixture
@@ -16,14 +16,14 @@ def example_transition():
     }
 
 
-def test_init(example_transition):
-    buffer = ReplayBufferImpl(capacity=100, device=torch.device("cpu"))
+def test_init():
+    buffer = ReplayBuffer(capacity=100, device=torch.device("cpu"))
     assert isinstance(buffer, BaseReplayBuffer)
     assert len(buffer) == 0
 
 
 def test_add_and_sample(example_transition):
-    buffer = ReplayBufferImpl(capacity=100, device=torch.device("cpu"))
+    buffer = ReplayBuffer(capacity=100, device=torch.device("cpu"))
 
     for _ in range(5):
         buffer.add(example_transition)
@@ -38,7 +38,7 @@ def test_add_and_sample(example_transition):
 
 
 def test_capacity_limit():
-    buffer = ReplayBufferImpl(capacity=16, device=torch.device("cpu"))
+    buffer = ReplayBuffer(capacity=16, device=torch.device("cpu"))
 
     # Insert more than capacity to test overwrite
     for _ in range(5):
@@ -60,7 +60,7 @@ def test_capacity_limit():
 
 
 def test_sample_too_early(example_transition):
-    buffer = ReplayBufferImpl(capacity=100, device=torch.device("cpu"))
+    buffer = ReplayBuffer(capacity=100, device=torch.device("cpu"))
 
     buffer.add(example_transition)  # 4 samples
     with pytest.raises(ValueError):
@@ -69,11 +69,11 @@ def test_sample_too_early(example_transition):
 
 def test_device_consistency(example_transition):
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    buffer = ReplayBufferImpl(capacity=100, device=device)
+    buffer = ReplayBuffer(capacity=100, device=device)
 
     transition = {k: v.to(device) for k, v in example_transition.items()}
     buffer.add(transition)
     batch = buffer.sample(batch_size=2)
 
     for v in batch.values():
-        assert v.device == device
+        assert v.device.type == torch.device(device).type
