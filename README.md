@@ -17,15 +17,16 @@ pip install prt-rl
 # Getting Started
 
 # Related Libraries
-* stable baselines
+* [Stable Baselines 3](https://stable-baselines3.readthedocs.io/en/master/index.html)
 * openai spinup
 * TorchRL
 * RLlib
 * Tianshou
-* CleanRL
+* [CleanRL](https://docs.cleanrl.dev/)
+* [SKRL](https://github.com/Toni-SM/skrl/tree/main)
 
 # Reference RL Repositories
-[1] https://github.com/Toni-SM/skrl/tree/main
+
 
 
 # Contributing

@@ -35,3 +35,27 @@ def test_mlp_forward():
     assert state.shape == (1, 1)
     qval = mlp(state)
     assert qval.shape == (1, 2)
+
+def test_naturecnn_construction():
+    cnn = NatureCNN(state_shape=(4, 84, 84), action_len=4)
+    print(cnn)
+
+    # Default architecture has 9 layers
+    assert len(cnn) == 10
+
+    # Dummy input
+    state = torch.rand(size=(1, 4, 84, 84), dtype=torch.float32)
+    action = cnn(state)
+    assert action.shape == (1, 4)
+
+    # Batch dummy input
+    state = torch.rand(size=(10, 4, 84, 84), dtype=torch.float32)
+    action = cnn(state)
+    assert action.shape == (10, 4)
+
+def test_naturecnn_with_uint8():
+    # Test with uint8 input
+    cnn = NatureCNN(state_shape=(4, 84, 84), action_len=4)
+    state = torch.randint(low=0, high=255, size=(1, 4, 84, 84), dtype=torch.uint8)
+    action = cnn(state)
+    assert action.shape == (1, 4)

@@ -13,12 +13,20 @@ class BaseReplayBuffer(ABC):
         self.size = 0
         self.pos = 0
 
+    def get_size(self) -> int:
+        """
+        Returns the current number of elements in the replay buffer.
+        Returns:
+            int: The current size of the replay buffer.
+        """
+        return self.size
+
     @abstractmethod
     def add(self, experience: Dict[str, torch.Tensor]) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def sample(self, batch_size: int):
+    def sample(self, batch_size: int) -> Dict[str, torch.Tensor]:
         raise NotImplementedError
     
     def __len__(self) -> int:

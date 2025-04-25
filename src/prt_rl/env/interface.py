@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Union, Optional, List, Dict
+import numpy as np
+import torch
+from typing import Union, Optional, List, Dict, Tuple, Any
 
-from tensordict.tensordict import TensorDict
 
 @dataclass
 class EnvParams:
@@ -56,22 +57,12 @@ class EnvironmentInterface(ABC):
     """
     The environment interface wraps other simulation environments to provide a consistent interface for the RL library.
 
-    The interface for agents is based around tensordicts. Dictionaries are used in many of the common RL libraries such as: RLlib, TorchRL, and Tianshou. I believe they have all converged to the same type of interface because it provides the most flexibility. However, care needs to be taken to ensure keys are consistent otherwise dictionaries are a free for all.
+    The interface for agents is based around tensors and a Gymnasium like API. The main extension to the gym API is the addition of the environment parameters and the ability to put the rgb_array in the info dictionary for rendering. 
 
     Single Agent Interface
-    For a single agent the tensordict trajectory has the following structure:
-    {
-        "observation": tensor,
-        "action": tensor,
-        "next":
-        {
-            "observation": tensor,
-            "reward": tensor,
-            "done": tensor,
-            "info": dict,
-        },
-        "rgb_array": tensor,
-    }
+    For a single agent step function returns the following structure:
+    next_state, reward, done, info = env.step(action)
+
     The shape of each tensor is (N, M) where N is the number of environments and M is the size of the value. For example, if an agent has two output actions and we are training with four environments then the "action" key will have shape (4,2).
 
     """
@@ -87,7 +78,7 @@ class EnvironmentInterface(ABC):
             assert self.render_mode in EnvironmentInterface.metadata["render_modes"], f"Valid render_modes are: {EnvironmentInterface.metadata['render_modes']}"
 
     @abstractmethod
-    def get_parameters(self) -> Union[EnvParams | MultiAgentEnvParams | MultiGroupEnvParams]:
+    def get_parameters(self) -> Union[EnvParams]:
         """
         Returns the EnvParams object which contains information about the sizes of observations and actions needed for setting up RL agents.
 
@@ -97,7 +88,7 @@ class EnvironmentInterface(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def reset(self, seed: int | None = None) -> TensorDict:
+    def reset(self, seed: int | None = None) -> Tuple[torch.Tensor, Dict[str, Any]]:
         """
         Resets the environment to the initial state and returns the initial observation.
 
@@ -105,44 +96,78 @@ class EnvironmentInterface(ABC):
             seed (int | None): Sets the random seed.
 
         Returns:
-            TensorDict: initial observation
+            Tuple: Tuple of tensors containing the initial observation and info dictionary
         """
         raise NotImplementedError()
 
     @abstractmethod
-    def step(self, action: TensorDict) -> TensorDict:
+    def step(self, action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """
-        Steps the simulation using the "action" key in the TensorDict and returns the new trajectory.
+        Steps the simulation using the action tensor and returns the new trajectory.
 
         Args:
-            action (TensorDict): TensorDict with "action" key that is a tensor with shape (# env, # actions)
+            action (torch.Tensor): Tensor with "action" key that is a tensor with shape (# env, # actions)
 
         Returns:
-            TensorDict: TensorDict trajectory with the "next" key
+            Tuple: Tuple of tensors containing the next state, reward, done, and info dictionary
         """
         raise NotImplementedError()
 
-    @classmethod
-    def step_mdp(cls, mdp: TensorDict) -> TensorDict:
-        """
-        Steps the provided MDP TensorDict by moving the next state to the current state
 
-        Args:
-            mdp (TensorDict): MDP TensorDict
+class NumpyEnvironmentInterface(ABC):
+    """
+    The NumpyEnvironmentInterface is a wrapper for environments that use numpy arrays for observations and actions. This is useful for environments that are not based on PyTorch or TensorFlow.
+
+    The interface for agents is based around tensors and a Gymnasium like API. The main extension to the gym API is the addition of the environment parameters and the ability to put the rgb_array in the info dictionary for rendering. 
+
+    Single Agent Interface
+    For a single agent step function returns the following structure:
+    next_state, reward, done, info = env.step(action)
+
+    The shape of each tensor is (N, M) where N is the number of environments and M is the size of the value. For example, if an agent has two output actions and we are training with four environments then the "action" key will have shape (4,2).
+
+    """
+    metadata = {
+        "render_modes": ["human", "rgb_array"],
+    }
+    def __init__(self,
+                 render_mode: Optional[str] = None,
+                 ) -> None:
+        self.render_mode = render_mode
+
+        if self.render_mode is not None:
+            assert self.render_mode in EnvironmentInterface.metadata["render_modes"], f"Valid render_modes are: {EnvironmentInterface.metadata['render_modes']}"
+
+    @abstractmethod
+    def get_parameters(self) -> Union[EnvParams]:
+        """
+        Returns the EnvParams object which contains information about the sizes of observations and actions needed for setting up RL agents.
 
         Returns:
-            TensorDict: updated MDP TensorDict
+            EnvParams: environment parameters object
         """
-        # Update the current observation
-        mdp['observation'] = mdp['next','observation']
+        raise NotImplementedError()
 
-        # Check if 'next' contains 'rgb_array' and move it
-        if 'rgb_array' in mdp.get('next', TensorDict()).keys():
-            value = mdp['next'].get('rgb_array')  # Get the value
-            mdp.set('rgb_array', value)  # Move it to root
-            mdp['next'].del_('rgb_array')  # Delete it from 'next' if desired
+    @abstractmethod
+    def reset(self, seed = None) -> Tuple[np.ndarray, Dict[str, Any]]:
+        """
+        Resets the environment to the initial state and returns the initial observation.
+        Args:
+            seed (int | None): Sets the random seed.
+        Returns:
+            Tuple: Tuple of numpy array containing the initial observation and info dictionary
+        """
+        raise NotImplementedError()
+    
+    @abstractmethod
+    def step(self, action: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, Any]]:
+        """
+        Steps the simulation using the action tensor and returns the new trajectory.
 
-        # Remove the action and next keys
-        del mdp['action']
-        del mdp['next']
-        return mdp
+        Args:
+            action (np.ndarray): Numpy array with "action" key that is a tensor with shape (# env, # actions)
+
+        Returns:
+            Tuple: Tuple of tensors containing the next state, reward, done, and info dictionary
+        """
+        raise NotImplementedError()

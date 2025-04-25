@@ -6,13 +6,13 @@ import prt_sim.jhu.bandits
 import prt_sim.jhu.base
 from tensordict.tensordict import TensorDict
 import torch
-from typing import Optional, Tuple, List, Union
+from typing import Optional, Tuple, List, Union, Dict, Any, Callable
 import vmas
 import prt_sim
-from prt_rl.env.interface import EnvironmentInterface, EnvParams, MultiAgentEnvParams, MultiGroupEnvParams
+from prt_rl.env.interface import EnvironmentInterface, EnvParams, MultiAgentEnvParams, MultiGroupEnvParams, NumpyEnvironmentInterface
 
 
-class JhuWrapper(EnvironmentInterface):
+class JhuWrapper(NumpyEnvironmentInterface):
     """
     Wraps the JHU environments in the Environment interface.
 
@@ -31,16 +31,13 @@ class JhuWrapper(EnvironmentInterface):
         env = JhuWrapper(environment=KArmBandits())
         policy = RandomPolicy(env_params=env.get_parameters())
 
-        state_td = env.reset(seed=0)
+        state = env.reset(seed=0)
         done = False
 
         while not done:
-            action = policy.get_action(state_td)
-            state_td = env.step(action)
-            done = state_td['next', 'done']
+            action = policy.get_action(state)
+            next_state, reward, done, info = env.step(action)
 
-            # Update the MDP
-            state_td = env.step_mdp(state_td)
         ```
     """
 
@@ -52,6 +49,11 @@ class JhuWrapper(EnvironmentInterface):
         self.env = environment
 
     def get_parameters(self) -> EnvParams:
+        """
+        Returns the EnvParams object which contains information about the sizes of observations and actions needed for setting up RL agents.
+        Returns:
+            EnvParams: environment parameters object
+        """
         params = EnvParams(
             action_len=1,
             action_continuous=False,
@@ -64,46 +66,56 @@ class JhuWrapper(EnvironmentInterface):
         )
         return params
 
-    def reset(self, seed: int | None = None) -> TensorDict:
+    def reset(self, seed: int | None = None) -> np.ndarray:
+        """
+        Resets the environment to the initial state and returns the initial observation.
+        Args:
+            seed (int | None): Sets the random seed.
+        Returns:
+            Tuple: Tuple of numpy arrays containing the initial observation and info dictionary
+        """
+        info = {}
         state = self.env.reset(seed=seed)
-        state_td = TensorDict(
-            {
-                'observation': torch.tensor([[state]], dtype=torch.int),
-            },
-            batch_size=torch.Size([1])
-        )
+        state = np.array([[state]], dtype=np.int64)
 
         # Add info for Bandit environment
         if isinstance(self.env, prt_sim.jhu.bandits.KArmBandits):
-            state_td['info'] = {
-                'optimal_bandit': torch.tensor([[self.env.get_optimal_bandit()]], dtype=torch.int),
-                'bandits': torch.tensor(self.env.bandit_probs).unsqueeze(0)
+            info = {
+                'optimal_bandit': np.array([[self.env.get_optimal_bandit()]], dtype=np.int64),
+                'bandits': np.array([self.env.bandit_probs])
             }
 
         if self.render_mode == 'human':
             self.env.render()
         elif self.render_mode == 'rgb_array':
             rgb = self.env.render()
-            state_td['rgb_array'] = torch.tensor(rgb).unsqueeze(0)
+            info['rgb_array'] = rgb[np.newaxis, ...]
 
-        return state_td
+        return state, info
 
-    def step(self, action: TensorDict) -> TensorDict:
-        action_val = action['action'][0].item()
-        state, reward, done = self.env.execute_action(action_val)
-        action['next'] = {
-            'observation': torch.tensor([[state]], dtype=torch.int),
-            'reward': torch.tensor([[reward]], dtype=torch.float),
-            'done': torch.tensor([[done]], dtype=torch.bool),
-        }
+    def step(self, action: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, Any]]:
+        """
+        Steps the simulation using the action tensor and returns the new trajectory.
+        Args:
+            action (np.ndarray): Numpy array with shape (# env, # actions)
+        Returns:
+            Tuple: Tuple of numpy arrays containing the next state, reward, done, and info dictionary
+        """
+        info = {}
+        state, reward, done = self.env.execute_action(action[0][0])
+
+        # Convert integers to numpy arrays
+        state = np.array([[state]], dtype=np.int64)
+        reward = np.array([[reward]], dtype=np.float32)
+        done = np.array([[done]], dtype=np.bool)
 
         if self.render_mode == 'human':
             self.env.render()
         elif self.render_mode == 'rgb_array':
             rgb = self.env.render()
-            action['next', 'rgb_array'] = torch.tensor(rgb).unsqueeze(0)
+            info['rgb_array'] = rgb[np.newaxis, ...]
 
-        return action
+        return state, reward, done, info
 
 
 class GymnasiumWrapper(EnvironmentInterface):
@@ -128,16 +140,12 @@ class GymnasiumWrapper(EnvironmentInterface):
 
         policy = RandomPolicy(env_params=env.get_parameters())
 
-        state_td = env.reset()
+        state, info = env.reset()
         done = False
 
         while not done:
-            action = policy.get_action(state_td)
-            state_td = env.step(action)
-            done = state_td['next', 'done']
-
-            # Update the MDP
-            state_td = env.step_mdp(state_td)
+            action = policy.get_action(state)
+            next_state, reward, done, info = env.step(action)
 
     """
 
@@ -161,33 +169,49 @@ class GymnasiumWrapper(EnvironmentInterface):
         self.env_params = self._make_env_params(vectorized=vectorized)
 
     def get_parameters(self) -> EnvParams:
+        """
+        Returns the EnvParams object which contains information about the sizes of observations and actions needed for setting up RL agents.
+        Returns:
+            EnvParams: environment parameters object
+        """
         return self.env_params
 
-    def reset(self, seed: int | None = None) -> TensorDict:
-        obs, info = self.env.reset(seed=seed)
-
-        state_td = TensorDict(
-            {
-                'observation': self._process_observation(obs),
-            },
-            batch_size=torch.Size([self.num_envs])
-        )
+    def reset(self, seed: int | None = None) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        """
+        Resets the environment to the initial state and returns the initial observation.
+        Args:
+            seed (int | None): Sets the random seed.
+        Returns:
+            Tuple: Tuple of tensors containing the initial observation and info dictionary
+        """
+        state, info = self.env.reset(seed=seed)
+        state = self._process_observation(state)
 
         if self.render_mode == 'rgb_array':
             rgb = self.env.render()
-            state_td['rgb_array'] = torch.tensor(rgb).unsqueeze(0)
-        return state_td
+            info['rgb_array'] = rgb[np.newaxis, ...]
+            
+        return state, info
 
-    def step(self, action: TensorDict) -> TensorDict:
-        action_val = action['action']
-
+    def step(self, action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
+        """
+        Steps the simulation using the action tensor and returns the new trajectory.
+        Args:
+            action (torch.Tensor): Tensor with "action" key that is a tensor with shape (# env, # actions)
+        Returns:
+            Tuple: Tuple of tensors containing the next state, reward, done, and info dictionary
+        """
         # Discrete actions send the raw integer value to the step function
         if not self.env_params.action_continuous:
-            action_val = action_val.item()
+            action = action.item()
         else:
-            action_val = action_val.cpu().numpy()
+            action = action.cpu().numpy()
 
-        state, reward, terminated, trunc, info = self.env.step(action_val)
+        # If there is only one environment remove the first dimension
+        if action.shape[0] == 1:
+            action = action[0]
+
+        next_state, reward, terminated, trunc, info = self.env.step(action)
         done = np.logical_or(terminated, trunc)
 
         # Reshape the reward and done to be (# envs, 1)
@@ -198,22 +222,21 @@ class GymnasiumWrapper(EnvironmentInterface):
             reward = torch.tensor(reward, dtype=torch.float).unsqueeze(-1)
             done = torch.tensor(done, dtype=torch.bool).unsqueeze(-1)
 
-        action['next'] = {
-            'observation': self._process_observation(state),
-            'reward': reward,
-            'done': done,
-        }
+        next_state = self._process_observation(next_state)
 
         if self.render_mode == 'rgb_array':
             rgb = self.env.render()
-            action['next', 'rgb_array'] = torch.tensor(rgb).unsqueeze(0)
+            info['rgb_array'] = rgb[np.newaxis, ...]
 
-        return action
+        return next_state, reward, done, info
 
-    def _process_observation(self, observation) -> torch.Tensor:
+    def _process_observation(self, observation: Union[torch.Tensor | int]) -> torch.Tensor:
         """
-        Process the observation to handle different output types like int, list[int] to standardize them into a tensor.
-
+        Processes the observation to ensure it is in the correct format.
+        Args:
+            observation (Union[torch.Tensor | int]): The observation to process.
+        Returns:
+            torch.Tensor: The processed observation.
         """
         if isinstance(observation, int):
             observation = np.array([observation])
@@ -228,7 +251,14 @@ class GymnasiumWrapper(EnvironmentInterface):
 
     def _make_env_params(self,
                          vectorized: bool = False,
-                         ):
+                         ) -> EnvParams:
+        """
+        Creates the environment parameters based on the action and observation space of the environment.
+        Args:
+            vectorized (bool): If True, the environment is vectorized.
+        Returns:
+            EnvParams: The environment parameters object.
+        """
         if not vectorized:
             action_space = self.env.action_space
             observation_space = self.env.observation_space
