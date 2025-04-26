@@ -77,3 +77,31 @@ def test_device_consistency(example_transition):
 
     for v in batch.values():
         assert v.device.type == torch.device(device).type
+
+def test_replay_buffer_clear():
+    buffer = ReplayBuffer(capacity=100)
+
+    # Add dummy transition
+    transition = {
+        "state": torch.randn(5, 4),
+        "action": torch.randint(0, 2, (5, 1)),
+        "reward": torch.randn(5, 1),
+        "next_state": torch.randn(5, 4),
+        "done": torch.randint(0, 2, (5, 1), dtype=torch.bool),
+    }
+    buffer.add(transition)
+
+    assert len(buffer) == 5
+    assert buffer.initialized
+    assert buffer.buffer  # buffer dict should be populated
+
+    # Clear the buffer
+    buffer.clear()
+
+    assert len(buffer) == 0
+    assert not buffer.initialized
+    assert buffer.buffer == {}
+
+    # After clearing, adding should reinitialize
+    buffer.add(transition)
+    assert len(buffer) == 5

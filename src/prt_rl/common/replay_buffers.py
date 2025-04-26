@@ -20,17 +20,41 @@ class BaseReplayBuffer(ABC):
             int: The current size of the replay buffer.
         """
         return self.size
+    
+    def __len__(self) -> int:
+        """
+        Returns the current number of elements in the replay buffer.
+        Returns:
+            int: The current size of the replay buffer.
+        """
+        return self.size
 
     @abstractmethod
     def add(self, experience: Dict[str, torch.Tensor]) -> None:
+        """
+        Adds a new experience to the replay buffer.
+        Args:
+            experience (Dict[str, torch.Tensor]): A dictionary containing the experience data.
+        """
         raise NotImplementedError
 
     @abstractmethod
     def sample(self, batch_size: int) -> Dict[str, torch.Tensor]:
+        """
+        Samples a batch of experiences from the replay buffer.
+        Args:
+            batch_size (int): The number of samples to draw from the buffer.
+        Returns:
+            Dict[str, torch.Tensor]: A dictionary containing the sampled experiences.
+        """
         raise NotImplementedError
     
-    def __len__(self) -> int:
-        return self.size
+    @abstractmethod
+    def clear(self) -> None:
+        """
+        Clears the replay buffer, resetting its size and position.
+        """
+        raise NotImplementedError
 
 
 class ReplayBuffer(BaseReplayBuffer):
@@ -102,3 +126,12 @@ class ReplayBuffer(BaseReplayBuffer):
 
         indices = torch.randint(0, self.size, (batch_size,), device=self.device)
         return {k: v[indices] for k, v in self.buffer.items()}
+    
+    def clear(self) -> None:
+        """
+        Clears the replay buffer, resetting its state.
+        """
+        self.size = 0
+        self.pos = 0
+        self.buffer = {}
+        self.initialized = False
