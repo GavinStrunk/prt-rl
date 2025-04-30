@@ -207,9 +207,9 @@ class GymnasiumWrapper(EnvironmentInterface):
         else:
             action = action.cpu().numpy()
 
-        # If there is only one environment remove the first dimension
-        if action.shape[0] == 1:
-            action = action[0]
+            # If there is only one environment remove the first dimension
+            if action.shape[0] == 1:
+                action = action[0]
 
         next_state, reward, terminated, trunc, info = self.env.step(action)
         done = np.logical_or(terminated, trunc)

@@ -85,6 +85,7 @@ def test_gymnasium_wrapper_for_cliff_walking():
     assert state.dtype == torch.int64
 
     action = torch.tensor([[0]])
+    assert action.shape == (1, 1)
     next_state, reward, done, info = env.step(action)
     assert next_state.shape == (1, 1)
     assert reward.shape == (1, 1)
@@ -164,17 +165,15 @@ def test_gymnasium_multienv():
     assert params.observation_min == pytest.approx([-1.2, -0.07])
     assert params.observation_max == pytest.approx([0.6, 0.07])
 
-    state_td = env.reset()
-    assert state_td.shape == (num_envs,)
-    assert state_td['observation'].shape == (num_envs, *params.observation_shape)
-    assert state_td['observation'].dtype == torch.float32
+    state, info = env.reset()
+    assert state.shape == (num_envs, *params.observation_shape)
+    assert state.dtype == torch.float32
 
-    action = state_td
-    action['action'] = torch.zeros(num_envs, params.action_len)
-    trajectory_td = env.step(action)
-    assert trajectory_td.shape == (num_envs,)
-    assert trajectory_td['next', 'reward'].shape == (num_envs, 1)
-    assert trajectory_td['next', 'done'].shape == (num_envs, 1)
+    action = torch.zeros(num_envs, params.action_len)
+    next_state, reward, done, info = env.step(action)
+    assert next_state.shape == (num_envs, *params.observation_shape)
+    assert reward.shape == (num_envs, 1)
+    assert done.shape == (num_envs, 1)
 
 def test_vmas_wrapper():
     num_envs = 2
