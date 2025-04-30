@@ -39,6 +39,10 @@ class PygameVisualizer(Visualizer):
             self.window_size = (width, height)
             self.screen = pygame.display.set_mode(self.window_size)
 
+        # If the frame is grayscale (H, W, 1), convert it to (H, W)
+        if frame.shape[-1] == 1:
+            frame = frame[:, :, 0]
+
         # Make a surface from the RGB array
         surface = pygame.surfarray.make_surface(frame.swapaxes(0, 1))
 

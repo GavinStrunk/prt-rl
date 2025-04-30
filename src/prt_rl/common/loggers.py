@@ -1,5 +1,10 @@
+import json
 import mlflow
 import mlflow.pyfunc
+import os
+import shutil
+import tempfile
+import torch
 from typing import Optional
 from prt_rl.common.policy import Policy
 
@@ -55,6 +60,79 @@ class Logger:
         """
         pass
 
+class FileLogger(Logger):
+    def __init__(self,
+                 output_dir: str
+                 ) -> None:
+        super().__init__()
+        self.output_dir = output_dir
+        os.makedirs(self.output_dir, exist_ok=True)  # Ensure the output directory exists
+        self.parameters = {}
+        self.scalars = {}
+
+
+    def close(self):
+        """
+        Writes the saved parameters and scalar metrics to a file.
+        """
+        param_file_path = os.path.join(self.output_dir, "parameters.json")
+        with open(param_file_path, "w") as f:
+            json.dump(self.parameters, f, indent=4)
+
+        scalar_file_path = os.path.join(self.output_dir, "scalars.json")
+        with open(scalar_file_path, "w") as f:
+            json.dump(self.scalars, f, indent=4)
+
+    def log_parameters(self,
+                       params: dict,
+                       ) -> None:
+        """
+        Logs a dictionary of parameters.
+        """
+        self.parameters.update(params)
+
+
+    def log_scalar(self,
+                   name: str,
+                   value: float,
+                   iteration: Optional[int] = None,
+                   ) -> None:
+        """
+        Logs scalar values, storing them sequentially or with a provided iteration number.
+        """
+        if name not in self.scalars:
+            self.scalars[name] = []
+
+        if iteration is None:
+            iteration = len(self.scalars[name])
+
+        self.scalars[name].append((iteration, value))
+
+    def log_file(self,
+                 path: str,
+                 name: str,
+                 move: bool = False
+                 ) -> None:
+        """
+        Saves the given file to the output_dir/name folder.
+        Creates the folder if it does not exist.
+        """
+        target_dir = os.path.join(self.output_dir, name)
+        os.makedirs(target_dir, exist_ok=True)
+        target_path = os.path.join(target_dir, os.path.basename(path))
+        if move:
+            shutil.move(path, target_path)
+        else:
+            shutil.copy(path, target_path)
+
+    def save_policy(self,
+                    policy,
+                    name: str = "policy"
+                    ) -> None:
+        policy_path = os.path.join(self.output_dir, name)
+        os.makedirs(policy_path, exist_ok=True)
+        torch.save(policy, os.path.join(policy_path, "model.pth"))
+
 class MLFlowLogger(Logger):
     """
     MLFlow Logger
@@ -78,6 +156,7 @@ class MLFlowLogger(Logger):
         self.run_name = run_name
 
         mlflow.set_tracking_uri(self.tracking_uri)
+        mlflow.set_registry_uri(self.tracking_uri)
         mlflow.set_experiment(self.experiment_name)
         self.run = mlflow.start_run(
             run_name=self.run_name,
@@ -93,7 +172,11 @@ class MLFlowLogger(Logger):
     def log_parameters(self,
                        params: dict,
                        ) -> None:
-
+        """
+        Logs a dictionary of parameters. Parameters are values used to initialize but do not change throughout training.
+        Args:
+            params (dict): Dictionary of parameters.
+        """
         mlflow.log_params(params)
 
     def log_scalar(self,
@@ -101,12 +184,33 @@ class MLFlowLogger(Logger):
                    value: float,
                    iteration: Optional[int] = None
                    ) -> None:
+        """
+        Logs a scalar value to MLFlow.
+        Args:
+            name (str): Name of the scalar value.
+            value (float): Value of the scalar value.
+            iteration (int, optional): Iteration number.
+        """
         mlflow.log_metric(name, value, step=iteration)
 
         if iteration is None:
             self.iteration += 1
         else:
             self.iteration = iteration
+
+    def save_agent(self,
+                   agent: object
+                   ) -> None:
+        """
+        Saves the agent to the MLFlow run.
+        Args:
+            agent (object): The agent object to save
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = os.path.join(tmpdir, "agent.pt")
+            torch.save(agent, save_path)
+            mlflow.log_artifact(save_path, artifact_path="agent")
+        
 
     def save_policy(self,
                     policy: Policy

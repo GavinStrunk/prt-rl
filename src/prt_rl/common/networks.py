@@ -61,3 +61,58 @@ class MLP(nn.Sequential):
             'hidden_activation': self.hidden_activation,
             'final_activation': self.final_activation
         }
+
+class NatureCNN(nn.Sequential):
+    """
+    Convolutional Neural Network as described in the Nature paper
+
+    The Nature CNN expects a 3D input image tensor with shape (channels, height, width) and values scaled to [0, 1]. The output is a tensor with shape (batch_size, action_len).
+    The CNN architecture is as follows:
+        - Conv2d(32, kernel_size=8, stride=4)
+        - ReLU
+        - Conv2d(64, kernel_size=4, stride=2)
+        - ReLU
+        - Conv2d(64, kernel_size=3, stride=1)
+        - ReLU
+        - Flatten
+        - Linear(64*7*7, feature_dim)
+        - ReLU
+        - Linear(feature_dim, action_len)
+
+    Args:
+        state_shape (tuple): Shape of the input state tensor (channels, height, width)
+        action_len (int): Number of output actions
+        feature_dim (int): Number of features in the hidden layer
+    """
+    def __init__(self,
+                 state_shape: tuple,
+                 action_len: int = 4,
+                 feature_dim: int = 512
+                 ) -> None:
+        if len(state_shape) != 3:
+            raise ValueError("state_shape must be a tuple of (channels, height, width)")
+        
+        # Get the number of channels from the state shape
+        num_channels = state_shape[0]
+        layers = [
+            nn.Conv2d(num_channels, 32, kernel_size=8, stride=4, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(64*7*7, feature_dim),
+            nn.ReLU(),
+            nn.Linear(feature_dim, action_len),
+        ]
+        super(NatureCNN, self).__init__(*layers)
+
+    def forward(self,
+                state: torch.Tensor
+                ) -> torch.Tensor:
+        if state.dtype == torch.uint8:
+            # Convert uint8 to float32 and scale to [0, 1]
+            state = state.float() / 255.0
+            
+        return super().forward(state)

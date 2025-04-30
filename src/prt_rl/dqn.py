@@ -4,7 +4,7 @@ from typing import Optional, List
 from tensordict import TensorDict
 from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.common.trainers import ANNTrainer
-from prt_rl.common.buffers import ReplayBuffer
+from prt_rl.common.replay_buffers import ReplayBuffer
 from prt_rl.common.decision_functions import DecisionFunction
 from prt_rl.common.policy import QNetworkPolicy
 from prt_rl.common.loggers import Logger

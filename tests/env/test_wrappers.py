@@ -22,23 +22,23 @@ def test_jhu_wrapper_for_bandits():
     assert params.observation_max == 0
 
     # Check interface
-    state_td = env.reset(seed=0)
-    assert state_td.shape == (1,)
-    assert state_td['observation'].shape == (1, *params.observation_shape)
+    state, info = env.reset(seed=0)
+    assert state.shape == (1, *params.observation_shape)
 
     # Check info
-    print(state_td['info', 'bandits'][0])
-    assert state_td['info', 'optimal_bandit'].shape == (1, 1)
-    assert state_td['info', 'optimal_bandit'] == torch.tensor([[3]])
-    assert state_td['info', 'bandits'].shape == (1, 10)
-    assert torch.allclose(state_td['info', 'bandits'], torch.tensor([[1.7641,  0.4002,  0.9787,  2.2409,  1.8676, -0.9773,  0.9501, -0.1514, -0.1032,  0.4106]], dtype=torch.float64), atol=1e-4)
+    assert info['optimal_bandit'].shape == (1, 1)
+    assert info['optimal_bandit'] == np.array([[3]])
+    assert info['bandits'].shape == (1, 10)
+    np.testing.assert_allclose(info['bandits'], np.array([[1.7641,  0.4002,  0.9787,  2.2409,  1.8676, -0.9773,  0.9501, -0.1514, -0.1032,  0.4106]], dtype=np.float64), atol=1e-4)
 
-    action = state_td
-    action['action'] = torch.tensor([[0]])
-    trajectory_td = env.step(action)
+    action = np.array([[0]])
+    next_state, reward, done, info = env.step(action)
+    assert next_state.shape == (1, 1)
+    assert reward.shape == (1, 1)
+    assert done.shape == (1, 1)
 
 def test_jhu_wrapper_for_robot_game():
-    env = wrappers.JhuWrapper(environment=RobotGame())
+    env = wrappers.JhuWrapper(environment=RobotGame(), render_mode="rgb_array")
 
     # Check the EnvParams are filled out correctly
     params = env.get_parameters()
@@ -52,13 +52,17 @@ def test_jhu_wrapper_for_robot_game():
     assert params.observation_max == 10
 
     # Check interface
-    state_td = env.reset()
-    assert state_td.shape == (1,)
-    assert state_td['observation'].shape == (1, *params.observation_shape)
+    state, info = env.reset()
+    assert state.shape == (1, *params.observation_shape)
+    
 
-    action = state_td
-    action['action'] = torch.tensor([[0]])
-    trajectory_td = env.step(action)
+    action = np.array([[0]])
+    next_state, reward, done, info = env.step(action)
+    assert next_state.shape == (1, 1)
+    assert reward.shape == (1, 1)
+    assert done.shape == (1, 1)
+    assert info['rgb_array'].shape == (1, 800, 800, 3)
+    assert info['rgb_array'].dtype == np.uint8
 
 def test_gymnasium_wrapper_for_cliff_walking():
     # Reference: https://gymnasium.farama.org/environments/toy_text/cliff_walking/
@@ -76,14 +80,17 @@ def test_gymnasium_wrapper_for_cliff_walking():
     assert params.observation_min == 0
     assert params.observation_max == 47
 
-    state_td = env.reset()
-    assert state_td.shape == (1,)
-    assert state_td['observation'].shape == (1, *params.observation_shape)
-    assert state_td['observation'].dtype == torch.int64
+    state, info = env.reset()
+    assert state.shape == (1, *params.observation_shape)
+    assert state.dtype == torch.int64
 
-    action = state_td
-    action['action'] = torch.tensor([[0]])
-    trajectory_td = env.step(action)
+    action = torch.tensor([[0]])
+    assert action.shape == (1, 1)
+    next_state, reward, done, info = env.step(action)
+    assert next_state.shape == (1, 1)
+    assert reward.shape == (1, 1)
+    assert done.shape == (1, 1)
+    assert info == {'prob': 1.0}
 
 def test_gymnasium_wrapper_continuous_observations():
     env = wrappers.GymnasiumWrapper(
@@ -105,17 +112,15 @@ def test_gymnasium_wrapper_continuous_observations():
     assert params.observation_max[0] == pytest.approx(0.6)
     assert params.observation_max[1] == pytest.approx(0.07)
 
-    state_td = env.reset()
-    assert state_td.shape == (1,)
-    assert state_td['observation'].shape == (1, *params.observation_shape)
-    assert state_td['observation'].dtype == torch.float32
+    state, info = env.reset()
+    assert state.shape == (1, *params.observation_shape)
+    assert state.dtype == torch.float32
 
-    action = state_td
-    action['action'] = torch.zeros(1, params.action_len, dtype=torch.int)
-    trajectory_td = env.step(action)
-    assert trajectory_td.shape == (1,)
-    assert trajectory_td['next', 'reward'].shape == (1, 1)
-    assert trajectory_td['next', 'done'].shape == (1, 1)
+    action = torch.zeros(1, params.action_len, dtype=torch.int)
+    next_state, reward, done, info = env.step(action)
+    assert next_state.shape == (1, 2)
+    assert reward.shape == (1, 1)
+    assert done.shape == (1, 1)
 
 def test_gymnasium_wrapper_continuous_actions():
     env = wrappers.GymnasiumWrapper(
@@ -133,17 +138,15 @@ def test_gymnasium_wrapper_continuous_actions():
     assert params.observation_min == pytest.approx([-1.2, -0.07])
     assert params.observation_max == pytest.approx([0.6, 0.07])
 
-    state_td = env.reset()
-    assert state_td.shape == (1,)
-    assert state_td['observation'].shape == (1, *params.observation_shape)
-    assert state_td['observation'].dtype == torch.float32
+    state, info = env.reset()
+    assert state.shape == (1, *params.observation_shape)
+    assert state.dtype == torch.float32
 
-    action = state_td
-    action['action'] = torch.zeros(1, params.action_len)
-    trajectory_td = env.step(action)
-    assert trajectory_td.shape == (1,)
-    assert trajectory_td['next', 'reward'].shape == (1, 1)
-    assert trajectory_td['next', 'done'].shape == (1, 1)
+    action = torch.zeros(1, params.action_len)
+    next_state, reward, done, info = env.step(action)
+    assert next_state.shape == (1, 2)
+    assert reward.shape == (1, 1)
+    assert done.shape == (1, 1)
 
 def test_gymnasium_multienv():
     num_envs = 5
@@ -162,17 +165,15 @@ def test_gymnasium_multienv():
     assert params.observation_min == pytest.approx([-1.2, -0.07])
     assert params.observation_max == pytest.approx([0.6, 0.07])
 
-    state_td = env.reset()
-    assert state_td.shape == (num_envs,)
-    assert state_td['observation'].shape == (num_envs, *params.observation_shape)
-    assert state_td['observation'].dtype == torch.float32
+    state, info = env.reset()
+    assert state.shape == (num_envs, *params.observation_shape)
+    assert state.dtype == torch.float32
 
-    action = state_td
-    action['action'] = torch.zeros(num_envs, params.action_len)
-    trajectory_td = env.step(action)
-    assert trajectory_td.shape == (num_envs,)
-    assert trajectory_td['next', 'reward'].shape == (num_envs, 1)
-    assert trajectory_td['next', 'done'].shape == (num_envs, 1)
+    action = torch.zeros(num_envs, params.action_len)
+    next_state, reward, done, info = env.step(action)
+    assert next_state.shape == (num_envs, *params.observation_shape)
+    assert reward.shape == (num_envs, 1)
+    assert done.shape == (num_envs, 1)
 
 def test_vmas_wrapper():
     num_envs = 2

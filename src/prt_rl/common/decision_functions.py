@@ -178,7 +178,7 @@ class EpsilonGreedy(Greedy):
 
         # Epsilon-greedy logic
         # Generate random values and check if they are larger than epsilon
-        random_actions = torch.rand(action_values.size(0), device=action_values.device) > self.epsilon
+        random_actions = torch.rand(action_values.size(0), device=action_values.device) <= self.epsilon
         actions = torch.zeros((action_values.shape[0], 1), device=action_values.device, dtype=torch.int)
         for i, _ in enumerate(random_actions):
             if random_actions[i]:
