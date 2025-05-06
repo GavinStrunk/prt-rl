@@ -14,9 +14,75 @@ class Logger:
     Based class for implementing loggers for RL algorithms.
 
     """
-    def __init__(self):
-        self.iteration = 0
+    _registry = {}
 
+    @classmethod
+    def register(cls, name):
+        def decorator(subclass):
+            cls._registry[name] = subclass
+            return subclass
+        return decorator
+
+    @classmethod
+    def create(cls, type_: str, **kwargs):
+        if type_ not in cls._registry:
+            raise ValueError(f"Unknown media reader type: {type_}")
+        return cls._registry[type_](**kwargs)
+    
+    def close(self):
+        """
+        Performs any necessary logger cleanup.
+        """
+        pass
+
+    def log_parameters(self,
+                       params: dict,
+                       ) -> None:
+        """
+        Logs a dictionary of parameters. Parameters are values used to initialize but do not change throughout training.
+
+        Args:
+            params (dict): Dictionary of parameters.
+        """
+        raise NotImplementedError("log_parameters must be implemented in subclasses.")
+    def log_scalar(self,
+                   name: str,
+                   value: float,
+                   iteration: Optional[int] = None,
+                   ) -> None:
+        """
+        Logs a scalar value. Scalar values are any metric or value that changes throughout training.
+
+        Args:
+            name (str): Name of the scalar value.
+            value (float): Value of the scalar value.
+            iteration (int, optional): Iteration number.
+        """
+        raise NotImplementedError("log_scalar must be implemented in subclasses.")
+    def save_policy(self,
+                    policy: Policy,
+                    ) -> None:
+        """
+        Saves the policy to the logger.
+
+        Args:
+            policy (Policy): Policy to save.
+        """
+        raise NotImplementedError("save_policy must be implemented in subclasses.")
+    def save_agent(self,
+                    agent: object,
+                    ) -> None:
+        """
+        Saves the agent to the logger.
+
+        Args:
+            agent (object): Agent to save.
+        """
+        raise NotImplementedError("save_agent must be implemented in subclasses.")
+    
+    
+@Logger.register('blank')
+class BlankLogger(Logger):
     def close(self):
         """
         Performs any necessary logger cleanup.
@@ -60,6 +126,18 @@ class Logger:
         """
         pass
 
+    def save_agent(self,
+                    agent: object,
+                    ) -> None:
+        """
+        Saves the agent to the MLFlow run.
+
+        Args:
+            agent (object): Agent to save.
+        """
+        pass
+
+@Logger.register('file')
 class FileLogger(Logger):
     def __init__(self,
                  output_dir: str
@@ -133,6 +211,7 @@ class FileLogger(Logger):
         os.makedirs(policy_path, exist_ok=True)
         torch.save(policy, os.path.join(policy_path, "model.pth"))
 
+@Logger.register('mlflow')
 class MLFlowLogger(Logger):
     """
     MLFlow Logger
@@ -154,6 +233,7 @@ class MLFlowLogger(Logger):
         self.tracking_uri = tracking_uri
         self.experiment_name = experiment_name
         self.run_name = run_name
+        self.iteration = 0
 
         mlflow.set_tracking_uri(self.tracking_uri)
         mlflow.set_registry_uri(self.tracking_uri)
