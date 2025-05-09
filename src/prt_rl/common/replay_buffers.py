@@ -71,43 +71,43 @@ class ReplayBuffer(BaseReplayBuffer):
         self.buffer = {}
         self.initialized = False
 
-    def _init_storage(self, transition: Dict[str, torch.Tensor]) -> None:
+    def _init_storage(self, experience: Dict[str, torch.Tensor]) -> None:
         """
         Initializes the storage for the replay buffer based on the first transition.
         
         Args:
-            transition (Dict[str, torch.Tensor]): A dictionary containing the transition data.
+            experience (Dict[str, torch.Tensor]): A dictionary containing the transition data.
         """
-        for k, v in transition.items():
+        for k, v in experience.items():
             shape = (self.capacity,) + v.shape[1:]  # Skip batch dim
             self.buffer[k] = torch.zeros(shape, dtype=v.dtype, device=self.device)
         self.initialized = True
 
     def add(self, 
-            transition: Dict[str, torch.Tensor]
+            experience: Dict[str, torch.Tensor]
             ) -> None:
         """
         Adds a new transition to the replay buffer.
 
         Args:
-            transition (Dict[str, torch.Tensor]): A dictionary containing the transition data.
+            experience (Dict[str, torch.Tensor]): A dictionary containing the transition data.
         """
         if not self.initialized:
-            self._init_storage(transition)
+            self._init_storage(experience)
 
-        batch_size = next(iter(transition.values())).shape[0]
+        batch_size = next(iter(experience.values())).shape[0]
         insert_end = self.pos + batch_size
 
         if insert_end <= self.capacity:
             # One contiguous block
             idx = slice(self.pos, insert_end)
-            for k, v in transition.items():
+            for k, v in experience.items():
                 self.buffer[k][idx] = v.to(self.device)
         else:
             # Wrap-around: split into two writes
             first_len = self.capacity - self.pos
             second_len = batch_size - first_len
-            for k, v in transition.items():
+            for k, v in experience.items():
                 self.buffer[k][self.pos:] = v[:first_len].to(self.device)
                 self.buffer[k][:second_len] = v[first_len:].to(self.device)
 
@@ -237,7 +237,6 @@ class PrioritizedReplayBuffer(BaseReplayBuffer):
                  capacity: int,
                  alpha: float = 0.6,
                  beta: float = 0.4,
-                #  beta_increment: float = 1e-4,
                  device: str = 'cpu'
                  ) -> None:
         super().__init__(capacity, device)
@@ -249,27 +248,37 @@ class PrioritizedReplayBuffer(BaseReplayBuffer):
         self.buffer = {}
         self.initialized = False
 
-    def _init_storage(self, transition: Dict[str, torch.Tensor]) -> None:
-        for k, v in transition.items():
+    def _init_storage(self, experience: Dict[str, torch.Tensor]) -> None:
+        """
+        Initializes the storage for the replay buffer based on the first transition.
+        Args:
+            experience (Dict[str, torch.Tensor]): A dictionary containing the transition data.
+        """
+        for k, v in experience.items():
             shape = (self.capacity,) + v.shape[1:]
             self.buffer[k] = torch.zeros(shape, dtype=v.dtype, device=self.device)
         self.initialized = True
 
-    def add(self, transition: Dict[str, torch.Tensor]) -> None:
+    def add(self, experience: Dict[str, torch.Tensor]) -> None:
+        """
+        Adds a new transition to the replay buffer.
+        Args:
+            experience (Dict[str, torch.Tensor]): A dictionary containing the transition data.
+        """
         if not self.initialized:
-            self._init_storage(transition)
+            self._init_storage(experience)
 
-        batch_size = next(iter(transition.values())).shape[0]
+        batch_size = next(iter(experience.values())).shape[0]
         insert_end = self.pos + batch_size
 
         if insert_end <= self.capacity:
             idx = slice(self.pos, insert_end)
-            for k, v in transition.items():
+            for k, v in experience.items():
                 self.buffer[k][idx] = v.to(self.device)
         else:
             first_len = self.capacity - self.pos
             second_len = batch_size - first_len
-            for k, v in transition.items():
+            for k, v in experience.items():
                 self.buffer[k][self.pos:] = v[:first_len].to(self.device)
                 self.buffer[k][:second_len] = v[first_len:].to(self.device)
 
@@ -280,6 +289,18 @@ class PrioritizedReplayBuffer(BaseReplayBuffer):
         self.size = min(self.size + batch_size, self.capacity)
 
     def sample(self, batch_size: int) -> Dict[str, torch.Tensor]:
+        """
+        Samples a batch of transitions from the replay buffer using prioritized sampling.
+        Returns a dictionary containing: 
+            - 'weights': Importance sampling weights for each sample.
+            - 'indices': Indices of the sampled transitions in the buffer.
+            - Other transition data (e.g., state, action, reward, etc.).
+            
+        Args:
+            batch_size (int): The number of samples to draw from the buffer.
+        Returns:
+            Dict[str, torch.Tensor]: A dictionary containing the sampled transitions.
+        """
         if self.size < batch_size:
             raise ValueError("Not enough samples in buffer to sample.")
 
