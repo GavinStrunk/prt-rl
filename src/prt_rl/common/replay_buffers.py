@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
+import numpy as np
 import torch
-from typing import Dict
+from typing import Dict, Tuple
 
 
 class BaseReplayBuffer(ABC):
@@ -135,3 +136,200 @@ class ReplayBuffer(BaseReplayBuffer):
         self.pos = 0
         self.buffer = {}
         self.initialized = False
+
+class SumTree:
+    """
+    A binary sum tree for efficient sampling of elements proportional to their priority.
+
+    The SumTree is a binary tree where each parent node stores the sum of its child nodes. It's particularly useful for:  
+
+    - Efficient sampling from a discrete probability distribution:  
+        - You can sample an index i proportional to a weight p_i in O(log N) time.
+    - Efficient dynamic updates of weights (e.g., priority values) while maintaining cumulative structure.
+
+    **Key Applications:**  
+
+    - Prioritized Experience Replay (PER): Sample transitions with probability ∝ priority.
+    - Importance Sampling in any algorithm that requires sampling proportional to some non-uniform, changeable weights.
+    - Event scheduling in simulations: Where some events happen more frequently than others.
+
+    Attributes:
+        capacity (int): Maximum number of elements the tree can hold.
+        tree (np.ndarray): Binary tree storing priorities.
+        data_pointer (int): Current position to insert new priority.
+    """
+    def __init__(self, capacity: int) -> None:
+        self.capacity = capacity
+        self.tree = np.zeros(2 * capacity - 1, dtype=np.float32)
+        self.data_pointer = 0
+
+    def add(self, priority: float) -> None:
+        """
+        Add a new priority to the sum tree.
+
+        Args:
+            priority (float): Priority value to insert.
+        """
+        tree_idx = self.data_pointer + self.capacity - 1
+        self.update(tree_idx, priority)
+        self.data_pointer = (self.data_pointer + 1) % self.capacity
+
+    def update(self, tree_idx: int, priority: float) -> None:
+        """
+        Update the priority at a specific tree index and propagate the change.
+
+        Args:
+            tree_idx (int): Index in the tree to update.
+            priority (float): New priority value.
+        """
+        change = priority - self.tree[tree_idx]
+        self.tree[tree_idx] = priority
+        while tree_idx != 0:
+            tree_idx = (tree_idx - 1) // 2
+            self.tree[tree_idx] += change
+
+    def get_leaf(self, value: float) -> Tuple[int, float, int]:
+        """
+        Traverse the tree to find the leaf node corresponding to the sample value.
+
+        Args:
+            value (float): A sample value in [0, total_priority).
+
+        Returns:
+            Tuple[int, float, int]: (tree index, priority, data index)
+        """
+        parent_idx = 0
+        while True:
+            left_idx = 2 * parent_idx + 1
+            right_idx = left_idx + 1
+            if left_idx >= len(self.tree):
+                leaf_idx = parent_idx
+                break
+            if value <= self.tree[left_idx]:
+                parent_idx = left_idx
+            else:
+                value -= self.tree[left_idx]
+                parent_idx = right_idx
+        data_idx = leaf_idx - self.capacity + 1
+        return leaf_idx, self.tree[leaf_idx], data_idx
+
+    def total_priority(self) -> float:
+        """
+        Returns the sum of all priorities.
+
+        Returns:
+            float: Total priority.
+        """
+        return self.tree[0]
+
+
+class PrioritizedReplayBuffer(BaseReplayBuffer):
+    """
+    A Prioritized Experience Replay Buffer using a SumTree for efficient sampling.
+
+    Attributes:
+        alpha (float): How much prioritization is used (0 = uniform, 1 = full prioritization).
+        beta (float): Importance sampling bias correction term.
+        priorities (SumTree): Sum tree to manage priorities.
+        max_priority (float): The maximum priority value observed.
+    """
+    def __init__(self,
+                 capacity: int,
+                 alpha: float = 0.6,
+                 beta: float = 0.4,
+                #  beta_increment: float = 1e-4,
+                 device: str = 'cpu'
+                 ) -> None:
+        super().__init__(capacity, device)
+        self.alpha = alpha
+        self.beta = beta
+        self.beta0 = beta
+        self.priorities = SumTree(capacity)
+        self.max_priority = 1.0
+        self.buffer = {}
+        self.initialized = False
+
+    def _init_storage(self, transition: Dict[str, torch.Tensor]) -> None:
+        for k, v in transition.items():
+            shape = (self.capacity,) + v.shape[1:]
+            self.buffer[k] = torch.zeros(shape, dtype=v.dtype, device=self.device)
+        self.initialized = True
+
+    def add(self, transition: Dict[str, torch.Tensor]) -> None:
+        if not self.initialized:
+            self._init_storage(transition)
+
+        batch_size = next(iter(transition.values())).shape[0]
+        insert_end = self.pos + batch_size
+
+        if insert_end <= self.capacity:
+            idx = slice(self.pos, insert_end)
+            for k, v in transition.items():
+                self.buffer[k][idx] = v.to(self.device)
+        else:
+            first_len = self.capacity - self.pos
+            second_len = batch_size - first_len
+            for k, v in transition.items():
+                self.buffer[k][self.pos:] = v[:first_len].to(self.device)
+                self.buffer[k][:second_len] = v[first_len:].to(self.device)
+
+        for _ in range(batch_size):
+            self.priorities.add(self.max_priority ** self.alpha)
+
+        self.pos = (self.pos + batch_size) % self.capacity
+        self.size = min(self.size + batch_size, self.capacity)
+
+    def sample(self, batch_size: int) -> Dict[str, torch.Tensor]:
+        if self.size < batch_size:
+            raise ValueError("Not enough samples in buffer to sample.")
+
+        segment = self.priorities.total_priority() / batch_size
+        indices = []
+        priorities = []
+
+        for i in range(batch_size):
+            a = segment * i
+            b = segment * (i + 1)
+            s = np.random.uniform(a, b)
+            leaf_idx, priority, data_idx = self.priorities.get_leaf(s)
+            indices.append(data_idx)
+            priorities.append(priority)
+
+        indices_torch = torch.tensor(indices, dtype=torch.long, device=self.device)
+        sampled = {k: v[indices_torch] for k, v in self.buffer.items()}
+
+        priorities = torch.tensor(priorities, dtype=torch.float32, device=self.device)
+        sampling_probabilities = priorities / self.priorities.total_priority()
+        weights = (self.size * sampling_probabilities).pow(-self.beta)
+        weights /= weights.max()
+
+        sampled['weights'] = weights
+        sampled['indices'] = indices_torch
+
+        return sampled
+
+    def update_priorities(self, indices: torch.Tensor, td_errors: torch.Tensor) -> None:
+        """
+        Update the priorities of the sampled transitions based on TD errors.
+
+        Args:
+            indices (torch.Tensor): Indices of the transitions to update.
+            td_errors (torch.Tensor): TD errors for the transitions.
+        """
+        priorities = (td_errors.abs() + 1e-6).pow(self.alpha)
+        for idx, priority in zip(indices.tolist(), priorities.tolist()):
+            tree_idx = idx + self.capacity - 1
+            self.priorities.update(tree_idx, priority)
+            self.max_priority = max(self.max_priority, priority)
+
+    def clear(self) -> None:
+        """
+        Clears the replay buffer, resetting its state.
+        """
+        self.size = 0
+        self.pos = 0
+        self.buffer = {}
+        self.initialized = False
+        self.priorities = SumTree(self.capacity)
+        self.max_priority = 1.0
+        self.beta = self.beta0

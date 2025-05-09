@@ -1,7 +1,8 @@
+import numpy as np
 import torch
 import pytest
 from typing import Dict
-from prt_rl.common.replay_buffers import ReplayBuffer, BaseReplayBuffer
+from prt_rl.common.replay_buffers import ReplayBuffer, BaseReplayBuffer, SumTree, PrioritizedReplayBuffer
 
 
 @pytest.fixture
@@ -105,3 +106,95 @@ def test_replay_buffer_clear():
     # After clearing, adding should reinitialize
     buffer.add(transition)
     assert len(buffer) == 5
+
+def test_sum_tree_add_and_total():
+    tree = SumTree(capacity=4)
+    tree.add(1.0)
+    tree.add(2.0)
+    tree.add(3.0)
+    tree.add(4.0)
+    assert tree.total_priority() == pytest.approx(10.0)
+
+def test_sum_tree_wraparound():
+    tree = SumTree(capacity=2)
+    tree.add(1.0)
+    tree.add(2.0)
+    # Now wrap around and overwrite
+    tree.add(3.0)
+    assert tree.total_priority() == pytest.approx(5.0)
+
+def test_sum_tree_update():
+    tree = SumTree(capacity=4)
+    tree.add(1.0)
+    tree.add(2.0)
+    tree.add(3.0)
+    tree.add(4.0)
+    idx = 2 + tree.capacity - 1  # third inserted item
+    tree.update(idx, 10.0)
+    assert tree.total_priority() == pytest.approx(10.0 + 1.0 + 2.0 + 4.0)
+
+def test_sum_tree_get_leaf():
+    tree = SumTree(capacity=4)
+    tree.add(1.0)
+    tree.add(1.0)
+    tree.add(1.0)
+    tree.add(7.0)
+    # 70% of the mass is in the last element
+    hits = [tree.get_leaf(np.random.uniform(0, tree.total_priority()))[2] for _ in range(1000)]
+    # Count how often index 3 is hit
+    assert hits.count(3) > 600  # At least 60% hits due to skewed distribution
+
+def test_sum_tree_deterministic_get_leaf():
+    tree = SumTree(capacity=4)
+    tree.add(1.0)  # index 0
+    tree.add(2.0)  # index 1
+    tree.add(3.0)  # index 2
+    tree.add(4.0)  # index 3
+    total = tree.total_priority()
+    leaf_idx, priority, data_idx = tree.get_leaf(0.1 * total)
+    assert data_idx in [0, 1]
+    leaf_idx, priority, data_idx = tree.get_leaf(0.9 * total)
+    assert data_idx in [2, 3]
+
+
+@pytest.fixture
+def simple_transition():
+    return {
+        'state': torch.randn(1, 4),
+        'action': torch.randint(0, 2, (1, 1)),
+        'reward': torch.randn(1, 1),
+        'next_state': torch.randn(1, 4),
+        'done': torch.randint(0, 2, (1, 1), dtype=torch.bool)
+    }
+
+def test_add_and_size(simple_transition):
+    buffer = PrioritizedReplayBuffer(capacity=10)
+    buffer.add(simple_transition)
+    assert buffer.get_size() == 1
+
+def test_sample_structure(simple_transition):
+    buffer = PrioritizedReplayBuffer(capacity=10)
+    for _ in range(10):
+        buffer.add(simple_transition)
+    batch = buffer.sample(batch_size=4)
+    assert set(batch.keys()) >= {'state', 'action', 'reward', 'next_state', 'done', 'weights', 'indices'}
+    assert batch['state'].shape[0] == 4
+    assert batch['weights'].shape == (4,)
+
+def test_update_priorities(simple_transition):
+    buffer = PrioritizedReplayBuffer(capacity=10)
+    for _ in range(10):
+        buffer.add(simple_transition)
+    batch = buffer.sample(batch_size=4)
+    old_weights = batch['weights'].clone()
+    td_errors = torch.randn(4)
+    buffer.update_priorities(batch['indices'], td_errors)
+    batch2 = buffer.sample(batch_size=4)
+    assert not torch.allclose(old_weights, batch2['weights'], atol=1e-6)
+
+def test_clear(simple_transition):
+    buffer = PrioritizedReplayBuffer(capacity=10)
+    buffer.add(simple_transition)
+    buffer.clear()
+    assert buffer.get_size() == 0
+    assert buffer.buffer == {}
