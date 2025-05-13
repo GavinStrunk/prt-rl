@@ -190,7 +190,7 @@ def test_update_priorities(simple_transition):
     td_errors = torch.randn(4)
     buffer.update_priorities(batch['indices'], td_errors)
     batch2 = buffer.sample(batch_size=4)
-    assert not torch.allclose(old_weights, batch2['weights'], atol=1e-6)
+    assert not torch.allclose(old_weights, batch2['weights'], atol=1e-4)
 
 def test_clear(simple_transition):
     buffer = PrioritizedReplayBuffer(capacity=10)
