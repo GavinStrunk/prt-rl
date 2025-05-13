@@ -94,3 +94,12 @@ def test_piecewise_linear_schedule():
     assert eg.epsilon == 0.1
 
 
+def test_sequential_updates():
+    eg = EpsilonGreedy()
+    s = sch.LinearScheduler(obj=eg, parameter_name='epsilon', start_value=0.2, end_value=0.1, interval=10)
+
+    s.update(current_step=1)
+    assert eg.epsilon == pytest.approx(0.19)
+    for _ in range(10):
+        s.update(current_step=1)
+    assert eg.epsilon == pytest.approx(0.19)

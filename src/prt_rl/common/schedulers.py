@@ -105,7 +105,12 @@ class LinearScheduler(ParameterScheduler):
         # Check if the current step is within any of the intervals
         for i, (start, end) in enumerate(self.interval):
             if start <= current_step <= end:
-                self.current_value += (current_step - start) * self.rates[i]
+                if i == 0:
+                    start_val = self.start_value
+                else:
+                    start_val = self.end_value[i-1]
+                    
+                self.current_value = (current_step - start) * self.rates[i] + start_val
                 self.current_value = max(self.current_value, self.end_value[i]) if self.rates[i] < 0 else min(self.current_value, self.end_value[i])
                 break
         
