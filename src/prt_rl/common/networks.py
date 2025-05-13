@@ -1,6 +1,7 @@
 from typing import Optional, List
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class MLP(nn.Sequential):
@@ -62,7 +63,7 @@ class MLP(nn.Sequential):
             'final_activation': self.final_activation
         }
 
-class NatureCNN(nn.Sequential):
+class NatureCNN(nn.Module):
     """
     Convolutional Neural Network as described in the Nature paper
 
@@ -75,44 +76,83 @@ class NatureCNN(nn.Sequential):
         - Conv2d(64, kernel_size=3, stride=1)
         - ReLU
         - Flatten
+
+    The standard MLP architecture is as follows:
         - Linear(64*7*7, feature_dim)
         - ReLU
         - Linear(feature_dim, action_len)
+
+    The dueling architecture is as follows:
+        - Advantage stream:
+            - Linear(64*7*7, feature_dim)
+            - ReLU
+            - Linear(feature_dim, action_len) (advantage)
+        - Value stream:
+            - Linear(64*7*7, feature_dim)
+            - ReLU
+            - Linear(feature_dim, 1) (value)
+        - Combine advantage and value to get Q-values
 
     Args:
         state_shape (tuple): Shape of the input state tensor (channels, height, width)
         action_len (int): Number of output actions
         feature_dim (int): Number of features in the hidden layer
+        dueling (bool): If True, use dueling architecture. Default is False.
     """
     def __init__(self,
                  state_shape: tuple,
                  action_len: int = 4,
-                 feature_dim: int = 512
+                 feature_dim: int = 512,
+                 dueling: bool = False,
                  ) -> None:
+        super(NatureCNN, self).__init__()
+        self.dueling = dueling
+
         if len(state_shape) != 3:
             raise ValueError("state_shape must be a tuple of (channels, height, width)")
-        
-        # Get the number of channels from the state shape
-        num_channels = state_shape[0]
-        layers = [
-            nn.Conv2d(num_channels, 32, kernel_size=8, stride=4, padding=0),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.Linear(64*7*7, feature_dim),
-            nn.ReLU(),
-            nn.Linear(feature_dim, action_len),
-        ]
-        super(NatureCNN, self).__init__(*layers)
 
-    def forward(self,
-                state: torch.Tensor
-                ) -> torch.Tensor:
+        num_channels = state_shape[0]
+
+        self.conv1 = nn.Conv2d(num_channels, 32, kernel_size=8, stride=4)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=4, stride=2)
+        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1)
+
+        # Compute the size of the feature map after conv layers
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, *state_shape)
+            conv_out = self._forward_conv(dummy_input)
+            conv_out_dim = conv_out.view(1, -1).size(1)
+
+        if not self.dueling:
+            self.fc1 = nn.Linear(conv_out_dim, feature_dim)
+            self.fc2 = nn.Linear(feature_dim, action_len)
+        else:
+            self.fc1_adv = nn.Linear(conv_out_dim, feature_dim)
+            self.fc2_adv = nn.Linear(feature_dim, action_len)
+            self.fc1_val = nn.Linear(conv_out_dim, feature_dim)
+            self.fc2_val = nn.Linear(feature_dim, 1)    
+
+    def _forward_conv(self, x: torch.Tensor) -> torch.Tensor:
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        return x
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
         if state.dtype == torch.uint8:
-            # Convert uint8 to float32 and scale to [0, 1]
             state = state.float() / 255.0
-            
-        return super().forward(state)
+
+        x = self._forward_conv(state)
+        x = x.view(x.size(0), -1)
+
+        if not self.dueling:
+            x = F.relu(self.fc1(x))
+            x = self.fc2(x)
+        else:
+            adv = F.relu(self.fc1_adv(x))
+            adv = self.fc2_adv(adv)
+            val = F.relu(self.fc1_val(x))
+            val = self.fc2_val(val)
+            x = val + (adv - adv.mean(dim=1, keepdim=True))
+        return x
+    
