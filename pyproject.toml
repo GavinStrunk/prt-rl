@@ -15,6 +15,7 @@ dependencies = [
     "matplotlib>=3.10.1",
     "mlflow>=2.20.4",
     "numpy>=2.2.3",
+    "optuna>=4.3.0",
     "prt-sim>=0.1.0",
     "psutil>=7.0.0",
     "pygame>=2.6.1",
