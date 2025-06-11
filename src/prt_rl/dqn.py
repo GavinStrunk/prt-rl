@@ -8,60 +8,12 @@ from prt_rl.common.networks import NatureCNN
 from prt_rl.common.decision_functions import EpsilonGreedy
 from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.collectors import SequentialCollector
-# from prt_rl.common.progress_bar import ProgressBar
 from prt_rl.common.loggers import Logger
+from prt_rl.agent import BaseAgent, RandomAgent
+from prt_rl.common.policies import QValuePolicy
 
 
-class BaseDQN:
-    _registry = {}
-
-    @classmethod
-    def register(cls, name):
-        def decorator(subclass):
-            cls._registry[name] = subclass
-            return subclass
-        return decorator
-
-    @classmethod
-    def create(cls, type_: str, **kwargs):
-        if type_ not in cls._registry:
-            raise ValueError(f"Unknown DQN type: {type_}")
-        return cls._registry[type_](**kwargs)
-    
-    def predict(self,
-                 state: torch.Tensor,
-                 ) -> torch.Tensor:
-        """
-        Predict the action using the policy network.
-
-        Args:
-            state (torch.Tensor): Current state of the environment.
-
-        Returns:
-            torch.Tensor: Action to be taken.
-        """
-        raise NotImplementedError("This method should be overridden by subclasses.")
-    
-    def train(self,
-              env: EnvironmentInterface,
-              total_frames: int,
-              schedulers: Optional[List[ParameterScheduler]] = None,
-              logger: Optional[Logger] = None,
-              logging_freq: int = 1000,
-              ) -> None:
-        """
-        Train the DQN agent.
-        Args:
-            env (EnvironmentInterface): The environment to train on.
-            total_frames (int): Total number of frames to train the agent.
-            schedulers (List[ParameterScheduler], optional): List of schedulers to update during training. Defaults to None.
-            logger (Logger, optional): Logger to log training metrics. Defaults to None.
-            logging_freq (int, optional): Frequency of logging. Defaults to 1000.
-        """
-        raise NotImplementedError("This method should be overridden by subclasses.")
-
-@BaseDQN.register("dqn")
-class DQN(BaseDQN):
+class DQN(BaseAgent):
     """
     Deep Q-Network (DQN) agent for reinforcement learning.
 
@@ -86,6 +38,7 @@ class DQN(BaseDQN):
     """
     def __init__(self,
                  env_params: EnvParams,
+                 policy: QValuePolicy,
                  alpha: float = 0.1,
                  gamma: float = 0.99,
                  buffer_size: int = 1_000_000,
@@ -94,13 +47,13 @@ class DQN(BaseDQN):
                  max_grad_norm: Optional[float] = 10.0,
                  target_update_freq: Optional[int] = None,
                  polyak_tau: Optional[float] = None,
-                 decision_function: Optional[EpsilonGreedy] = None,
+                 train_freq: int = 1,
+                 gradient_steps: int = 1,
                  replay_buffer: Optional[BaseReplayBuffer] = None,
-                 dueling: bool = False,
                  device: str = "cuda",
                  ) -> None:
         self.env_params = env_params
-        self.decision_function = EpsilonGreedy(epsilon=0.1) if decision_function is None else decision_function
+        self.policy = policy
         self.alpha = alpha
         self.gamma = gamma
         self.buffer_size = buffer_size
@@ -109,6 +62,8 @@ class DQN(BaseDQN):
         self.max_grad_norm = max_grad_norm
         self.target_update_freq = target_update_freq
         self.polyak_tau = polyak_tau
+        self.train_freq = train_freq
+        self.gradient_steps = gradient_steps
         self.device = torch.device(device)
         self._reset_env = True
 
@@ -118,13 +73,6 @@ class DQN(BaseDQN):
         
         # Initialize replay buffer
         self.replay_buffer = replay_buffer or ReplayBuffer(capacity=self.buffer_size, device=torch.device(device))
-
-        # Initialize Policy
-        self.policy = NatureCNN(
-            state_shape=self.env_params.observation_shape, 
-            action_len=self.env_params.action_max+1,
-            dueling=dueling
-            ).to(self.device)
 
         # Initialize target network
         self.target = copy.deepcopy(self.policy).to(self.device)
@@ -188,30 +136,6 @@ class DQN(BaseDQN):
             # Update target network parameters with policy network parameters
             target_params.data.copy_(policy_params.data)
 
-    # @staticmethod
-    # def _collect_experience(env: EnvironmentInterface, policy: Callable, last_experience: dict) -> Tuple[Dict[str, torch.Tensor], dict]:
-    #     """
-    #     Collect experience from a single step of the environment.
-    #     Args:
-    #         env (EnvironmentInterface): The environment from which to collect data.
-    #     """
-    #     if last_experience == {} or last_experience["done"]:
-    #         state, _ = env.reset()
-    #     else:
-    #         state = last_experience["next_state"]
-        
-    #     action = policy(state)
-    #     next_state, reward, done, info = env.step(action)
-
-    #     return {
-    #         "state": state,
-    #         "action": action,
-    #         "next_state": next_state,
-    #         "reward": reward,
-    #         "done": done
-    #     }, info
-
-
     def predict(self,
                  state: torch.Tensor,
                  ) -> torch.Tensor:
@@ -224,10 +148,7 @@ class DQN(BaseDQN):
         Returns:
             torch.Tensor: Action to be taken.
         """
-        q_val = self.policy(state)
-        action = self.decision_function.select_action(q_val)
-        return action
-
+        return self.policy(state)
 
     def train(self,
               env: EnvironmentInterface,
@@ -235,8 +156,6 @@ class DQN(BaseDQN):
               schedulers: Optional[List[ParameterScheduler]] = None,
               logger: Optional[Logger] = None,
               logging_freq: int = 1,
-              train_freq: int = 4,
-              gradient_steps: int = 1,
               ) -> None:
         """
         Train the DQN agent.
@@ -250,14 +169,12 @@ class DQN(BaseDQN):
         logger = logger or Logger.create('blank')
         collector = SequentialCollector(env, logger=logger, logging_freq=logging_freq)
         experience = {}
-        td_errors = []
-        losses = []
         iteration_count = 0
         num_steps = 0
 
-        # Collect initial random experience to fill the replay buffer
-        # @todo update with RandomAgent
-        random_experience = collector.collect_experience(policy=self.predict, num_steps=self.min_buffer_size)
+        # Collect initial random experience to the replay buffer minimum
+        random_agent = RandomAgent(env_params=self.env_params)
+        random_experience = collector.collect_experience(policy=random_agent, num_steps=self.min_buffer_size)
         num_steps += len(random_experience)
         self.replay_buffer.add(random_experience)
 
@@ -270,45 +187,49 @@ class DQN(BaseDQN):
 
             # Only train at a rate of the training frequency
             iteration_count += 1
-            if iteration_count % train_freq == 0:
-                # If minimum number of samples in replay buffer, sample a batch
-                batch_data = self.replay_buffer.sample(batch_size=self.mini_batch_size)
+            if iteration_count % self.train_freq == 0:
+                td_errors = []
+                losses = []
 
-                # Compute TD Target Values
-                td_targets = self._compute_td_targets(
-                    next_state=batch_data["next_state"],
-                    reward=batch_data["reward"],
-                    done=batch_data["done"]
-                )
+                for _ in range(self.gradient_steps):
+                    # If minimum number of samples in replay buffer, sample a batch
+                    batch_data = self.replay_buffer.sample(batch_size=self.mini_batch_size)
 
-                # Compute Q values 
-                q = self.policy(batch_data["state"])
-                qsa = torch.gather(q, dim=1, index=batch_data["action"].to(torch.int64))
-
-                # Compute loss
-                loss, td_error = self._compute_loss(
-                    td_target=td_targets,
-                    qsa=qsa,
-                )
-                td_errors.append(td_error.abs().mean().item())
-                losses.append(loss.mean().item())
-
-                # Optimize policy model parameters
-                self.optimizer.zero_grad()
-                loss.backward()
-
-                if self.max_grad_norm is not None:
-                    # Clip gradients if max_grad_norm is specified
-                    torch.nn.utils.clip_grad_norm_(
-                        self.policy.parameters(),
-                        max_norm=self.max_grad_norm
+                    # Compute TD Target Values
+                    td_targets = self._compute_td_targets(
+                        next_state=batch_data["next_state"],
+                        reward=batch_data["reward"],
+                        done=batch_data["done"]
                     )
-                
-                self.optimizer.step()
 
-                # Update sample priorities if this is a prioritized replay buffer
-                if isinstance(self.replay_buffer, PrioritizedReplayBuffer):
-                    self.replay_buffer.update_priorities(batch_data["indices"], td_error)
+                    # Compute Q values 
+                    q = self.policy(batch_data["state"])
+                    qsa = torch.gather(q, dim=1, index=batch_data["action"].to(torch.int64))
+
+                    # Compute loss
+                    loss, td_error = self._compute_loss(
+                        td_target=td_targets,
+                        qsa=qsa,
+                    )
+                    td_errors.append(td_error.abs().mean().item())
+                    losses.append(loss.mean().item())
+
+                    # Optimize policy model parameters
+                    self.optimizer.zero_grad()
+                    loss.backward()
+
+                    if self.max_grad_norm is not None:
+                        # Clip gradients if max_grad_norm is specified
+                        torch.nn.utils.clip_grad_norm_(
+                            self.policy.parameters(),
+                            max_norm=self.max_grad_norm
+                        )
+                    
+                    self.optimizer.step()
+
+                    # Update sample priorities if this is a prioritized replay buffer
+                    if isinstance(self.replay_buffer, PrioritizedReplayBuffer):
+                        self.replay_buffer.update_priorities(batch_data["indices"], td_error)
 
                 training_steps += 1
 
@@ -322,10 +243,10 @@ class DQN(BaseDQN):
                 # iteration_count = 0
 
             # Log training metrics
-            if iteration_count % logging_freq == 0:
+            if num_steps % logging_freq == 0:
                 if schedulers is not None:
                     for scheduler in schedulers:
-                        logger.log_scalar(name=scheduler.parameter_name, value=getattr(scheduler.obj, scheduler.parameter_name), iteration=num_frames)
+                        logger.log_scalar(name=scheduler.parameter_name, value=getattr(scheduler.obj, scheduler.parameter_name), iteration=num_steps)
                 logger.log_scalar(name="td_error", value=td_errors[-1], iteration=num_steps)
                 logger.log_scalar(name="loss", value=losses[-1], iteration=num_steps)
             
@@ -338,7 +259,6 @@ class DQN(BaseDQN):
         # Clear the replay buffer because it can be large
         self.replay_buffer.clear()
 
-@BaseDQN.register("double_dqn")
 class DoubleDQN(DQN):
     """
     Double DQN agent for reinforcement learning.
