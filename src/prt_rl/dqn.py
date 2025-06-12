@@ -67,7 +67,6 @@ class DQN(BaseAgent):
         self.gradient_steps = gradient_steps
         self.device = torch.device(device)
         self._reset_env = True
-        self.decision_function = EpsilonGreedy(epsilon=1.0)
 
         # Initialize replay buffer
         self.replay_buffer = replay_buffer or ReplayBuffer(capacity=self.buffer_size, device=torch.device(device))
@@ -90,8 +89,7 @@ class DQN(BaseAgent):
         Compute the TD target values for the sampled batch.
 
         """
-        # target_values = self.target.get_q_values(next_state)
-        target_values = self.target(next_state)
+        target_values = self.target.get_q_values(next_state)
         td_target = reward + (1-done.float()) * self.gamma * torch.max(target_values, dim=1, keepdim=True)[0]
         return td_target
 
@@ -104,8 +102,8 @@ class DQN(BaseAgent):
 
         """
         td_error = td_target - qsa
-        # loss = torch.mean(td_error ** 2)
-        loss = torch.nn.functional.smooth_l1_loss(qsa, td_target)
+        loss = torch.mean(td_error ** 2)
+        # loss = torch.nn.functional.smooth_l1_loss(qsa, td_target)
         return loss, td_error
     
     @staticmethod
@@ -146,9 +144,7 @@ class DQN(BaseAgent):
         Returns:
             torch.Tensor: Action to be taken.
         """
-        q_val = self.policy(state)
-        action = self.decision_function.select_action(q_val)
-        return action
+        return self.policy(state)
 
     def train(self,
               env: EnvironmentInterface,
@@ -182,7 +178,7 @@ class DQN(BaseAgent):
             
             # Collect initial experience until the replay buffer is filled
             if self.replay_buffer.get_size() < self.min_buffer_size:
-                experience = collector.collect_experience(policy=self.predict, num_steps=1)
+                experience = collector.collect_experience(num_steps=1)
                 num_steps += experience["state"].shape[0]
                 self.replay_buffer.add(experience)
                 progress_bar.update(current_step=num_steps, desc="Collecting initial experience...")
@@ -213,8 +209,7 @@ class DQN(BaseAgent):
                         )
 
                     # Compute Q values 
-                    # q = self.policy.get_q_values(batch_data["state"])
-                    q = self.policy(batch_data["state"])
+                    q = self.policy.get_q_values(batch_data["state"])
                     qsa = torch.gather(q, dim=1, index=batch_data["action"].long())
 
                     # Compute loss
@@ -253,8 +248,8 @@ class DQN(BaseAgent):
                 if schedulers is not None:
                     for scheduler in schedulers:
                         logger.log_scalar(name=scheduler.parameter_name, value=getattr(scheduler.obj, scheduler.parameter_name), iteration=num_steps)
-                logger.log_scalar(name="td_error", value=td_errors[-1], iteration=num_steps)
-                logger.log_scalar(name="loss", value=losses[-1], iteration=num_steps)
+                logger.log_scalar(name="td_error", value=np.mean(td_errors), iteration=num_steps)
+                logger.log_scalar(name="loss", value=np.mean(losses), iteration=num_steps)
             
 
 
@@ -284,20 +279,23 @@ class DoubleDQN(DQN):
     """
     def __init__(self,
                  env_params: EnvParams,
+                 policy,
                  alpha: float = 0.1,
                  gamma: float = 0.99,
                  buffer_size: int = 1_000_000,
                  min_buffer_size: int = 10_000,
                  mini_batch_size: int = 32,
-                 max_grad_norm: Optional[float] = None,
-                 target_update_freq: Optional[int] = None,
+                 max_grad_norm: Optional[float] = 10.0,
+                 target_update_freq: int = 1,
                  polyak_tau: Optional[float] = None,
-                 decision_function: Optional[EpsilonGreedy] = None,
+                 train_freq: int = 1,
+                 gradient_steps: int = 1,
                  replay_buffer: Optional[BaseReplayBuffer] = None,
                  device: str = "cuda",
                  ) -> None:
         super().__init__(
             env_params=env_params,
+            policy=policy,
             alpha=alpha,
             gamma=gamma,
             buffer_size=buffer_size,
@@ -306,7 +304,8 @@ class DoubleDQN(DQN):
             max_grad_norm=max_grad_norm,
             target_update_freq=target_update_freq,
             polyak_tau=polyak_tau,
-            decision_function=decision_function,
+            train_freq=train_freq,
+            gradient_steps=gradient_steps,
             replay_buffer=replay_buffer,
             device=device
         )
@@ -334,5 +333,5 @@ class DoubleDQN(DQN):
             torch.Tensor: TD target values.
         """
         action_selections = self.policy.get_q_values(next_state).argmax(dim=1, keepdim=True)
-        td_target = reward + (1-done.float()) * self.gamma * torch.gather(self.target(next_state), dim=1, index=action_selections)
+        td_target = reward + (1-done.float()) * self.gamma * torch.gather(self.target.get_q_values(next_state), dim=1, index=action_selections)
         return td_target

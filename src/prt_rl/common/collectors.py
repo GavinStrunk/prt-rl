@@ -82,6 +82,7 @@ class SequentialCollector:
         self.current_episode_reward = 0
         self.current_episode_length = 0
         self.cumulative_reward = 0
+        self.num_episodes = 0
 
     def _random_action(self, state: torch.Tensor) -> torch.Tensor:
         """
@@ -159,6 +160,7 @@ class SequentialCollector:
                 self.previous_episode_length = self.current_episode_length
                 self.current_episode_reward = 0
                 self.current_episode_length = 0
+                self.num_episodes += 1
 
             self.previous_experience = {
                 "state": state,
@@ -172,6 +174,7 @@ class SequentialCollector:
             self.logger.log_scalar(name='episode_reward', value=self.previous_episode_reward, iteration=self.collected_steps)
             self.logger.log_scalar(name='episode_length', value=self.previous_episode_length, iteration=self.collected_steps)
             self.logger.log_scalar(name='cumulative_reward', value=self.cumulative_reward, iteration=self.collected_steps)
+            self.logger.log_scalar(name='episode_number', value=self.num_episodes, iteration=self.collected_steps)
 
         return {
             "state": torch.stack(states, dim=0),

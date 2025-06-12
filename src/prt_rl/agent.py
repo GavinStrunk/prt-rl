@@ -43,7 +43,7 @@ class BaseAgent(ABC):
     @abstractmethod
     def train(self,
               env: EnvironmentInterface,
-              total_frames: int,
+              total_steps: int,
               schedulers: Optional[List[ParameterScheduler]] = None,
               logger: Optional[Logger] = None,
               logging_freq: int = 1000,
@@ -105,5 +105,5 @@ class RandomAgent(BaseAgent):
 
         return action
     
-    def train(self, env, total_frames, schedulers = None, logger = None, logging_freq = 1000):
+    def train(self, env, total_steps, schedulers = None, logger = None, logging_freq = 1000):
         raise NotImplementedError("RandomAgent does not support training. It is designed for interactive control only.")
