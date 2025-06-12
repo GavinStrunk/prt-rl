@@ -12,6 +12,7 @@ from prt_rl.common.loggers import Logger
 from prt_rl.agent import BaseAgent
 from prt_rl.common.policies import QValuePolicy
 from prt_rl.common.progress_bar import ProgressBar
+from prt_rl.common.evaluators import Evaluator
 
 
 class DQN(BaseAgent):
@@ -152,6 +153,8 @@ class DQN(BaseAgent):
               schedulers: Optional[List[ParameterScheduler]] = None,
               logger: Optional[Logger] = None,
               logging_freq: int = 1,
+              evaluator: Evaluator = Evaluator(),
+              eval_freq: int = 1000,
               ) -> None:
         """
         Train the DQN agent.
@@ -250,8 +253,12 @@ class DQN(BaseAgent):
                         logger.log_scalar(name=scheduler.parameter_name, value=getattr(scheduler.obj, scheduler.parameter_name), iteration=num_steps)
                 logger.log_scalar(name="td_error", value=np.mean(td_errors), iteration=num_steps)
                 logger.log_scalar(name="loss", value=np.mean(losses), iteration=num_steps)
+
+            if num_steps % eval_freq == 0:
+                evaluator.evaluate(agent=self.policy, iteration=num_steps)
             
 
+        evaluator.close()
 
         # Clean up for saving the agent
         # Clear the replay buffer because it can be large

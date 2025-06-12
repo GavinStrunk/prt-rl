@@ -1,10 +1,12 @@
 from abc import ABC, abstractmethod
+from sympy import E
 import torch
 from typing import Optional, List, Union
 from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.loggers import Logger
 from prt_rl.common.policies import BasePolicy
 from prt_rl.env.interface import EnvironmentInterface, EnvParams, MultiAgentEnvParams
+from prt_rl.common.evaluators import Evaluator
 
 class BaseAgent(ABC):
     """
@@ -47,6 +49,8 @@ class BaseAgent(ABC):
               schedulers: Optional[List[ParameterScheduler]] = None,
               logger: Optional[Logger] = None,
               logging_freq: int = 1000,
+              evaluator: Evaluator = Evaluator(),
+              eval_freq: int = 1000,
               ) -> None:
         """
         Update the agent's knowledge based on the action taken and the received reward.

@@ -279,7 +279,8 @@ class MLFlowLogger(Logger):
             self.iteration = iteration
 
     def save_agent(self,
-                   agent: object
+                   agent: object,
+                   agent_name: str = "agent.pt"
                    ) -> None:
         """
         Saves the agent to the MLFlow run.
@@ -287,7 +288,7 @@ class MLFlowLogger(Logger):
             agent (object): The agent object to save
         """
         with tempfile.TemporaryDirectory() as tmpdir:
-            save_path = os.path.join(tmpdir, "agent.pt")
+            save_path = os.path.join(tmpdir, agent_name)
             torch.save(agent, save_path)
             mlflow.log_artifact(save_path, artifact_path="agent")
         
