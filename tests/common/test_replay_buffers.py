@@ -37,7 +37,6 @@ def test_add_and_sample(example_transition):
     for k in batch:
         assert batch[k].shape[0] == 10
 
-
 def test_capacity_limit():
     buffer = ReplayBuffer(capacity=16, device=torch.device("cpu"))
 

@@ -158,12 +158,10 @@ def test_qvalue_policy_with_custom_decision_function():
         observation_max=1.0,
     )
     
+    dfcn = Softmax(tau=0.5)
     policy = QValuePolicy(
         env_params=params,
-        decision_function=Softmax,
-        decision_function_kwargs={
-            "tau": 0.5,
-        }
+        decision_function=dfcn
     )
     assert isinstance(policy.decision_function, Softmax)
 

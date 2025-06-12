@@ -102,7 +102,6 @@ class QValuePolicy(BasePolicy):
                  policy_head: Optional[torch.nn.Module] = MLP,
                  policy_head_kwargs: Optional[dict] = {},
                  decision_function: Optional[DecisionFunction] = None,
-                 decision_function_kwargs: Optional[dict] = {},
                  ) -> None:
         super().__init__(env_params)
 
@@ -134,7 +133,7 @@ class QValuePolicy(BasePolicy):
         if decision_function is None:
             self.decision_function = EpsilonGreedy(epsilon=1.0)
         else:
-            self.decision_function = decision_function(**decision_function_kwargs)
+            self.decision_function = decision_function
 
     def forward(self,
                    state: torch.Tensor

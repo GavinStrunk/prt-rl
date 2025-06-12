@@ -1,6 +1,6 @@
 import torch
 from typing import Dict, Optional, List
-from prt_rl.env.interface import EnvironmentInterface
+from prt_rl.env.interface import EnvironmentInterface, EnvParams, MultiAgentEnvParams
 from prt_rl.common.loggers import Logger
 
 class Collector:
@@ -14,7 +14,7 @@ class Collector:
         self.num_envs = state.shape[0]
 
     def collect(self, 
-                policy, 
+                policy: None, 
                 num_steps: int
                 ) -> Dict[str, torch.Tensor]:
         
@@ -72,6 +72,7 @@ class SequentialCollector:
                  logging_freq: int = 1
                  ) -> None:
         self.env = env
+        self.env_params = env.get_parameters()
         self.logger = logger or Logger.create('blank')
         self.logging_freq = logging_freq
         self.previous_experience = None
@@ -82,10 +83,40 @@ class SequentialCollector:
         self.current_episode_length = 0
         self.cumulative_reward = 0
 
+    def _random_action(self, state: torch.Tensor) -> torch.Tensor:
+        """
+        Randomly samples an action from action space.
+
+        Returns:
+            TensorDict: Tensordict with the "action" key added
+        """
+        if isinstance(self.env_params, EnvParams):
+            ashape = (state.shape[0], self.env_params.action_len)
+            params = self.env_params
+        elif isinstance(self.env_params, MultiAgentEnvParams):
+            ashape = (state.shape[0], self.env_params.num_agents, self.env_params.agent.action_len)
+            params = self.env_params.agent
+        else:
+            raise ValueError("env_params must be a EnvParams or MultiAgentEnvParams")
+
+        if not params.action_continuous:
+            # Add 1 to the high value because randint samples between low and 1 less than the high: [low,high)
+            action = torch.randint(low=params.action_min, high=params.action_max + 1,
+                                   size=ashape)
+        else:
+            action = torch.rand(size=ashape)
+
+            # Scale the random [0,1] actions to the action space [min,max]
+            max_actions = torch.tensor(params.action_max).unsqueeze(0)
+            min_actions = torch.tensor(params.action_min).unsqueeze(0)
+            action = action * (max_actions - min_actions) + min_actions
+
+        return action 
+
     def collect_experience(self,
-                           policy,
+                           policy = None,
                            num_steps: int = 1
-                           ) -> List[dict]:
+                           ) -> Dict[str, torch.Tensor]:
         """
         Collects the given number of experiences from the environment using the provided policy.
         Args:
@@ -94,24 +125,29 @@ class SequentialCollector:
         Returns:
             List[dict]: A list of experience dictionaries, each containing state, action, next_state, reward, and done.
         """
-        experience_list = []
+        states = []
+        actions = []
+        next_states = []
+        rewards = []
+        dones = []
+
         for _ in range(num_steps):
             # Reset the environment if no previous state
-            if self.previous_experience is None or self.previous_experience["done"] == True:
+            if self.previous_experience is None or self.previous_experience["done"]:
                 state, _ = self.env.reset()
             else:
-                state = self.previous_experience["state"]
+                state = self.previous_experience["next_state"]
 
-            action = policy(state)
+            # Use random or given policy
+            action = self._random_action(state) if policy is None else policy(state)
+
             next_state, reward, done, _ = self.env.step(action)
-            experience = {
-                "state": state,
-                "action": action,
-                "next_state": next_state,
-                "reward": reward,
-                "done": done,
-            }
-            experience_list.append(experience)
+
+            states.append(state.squeeze(0))
+            actions.append(action.squeeze(0))
+            next_states.append(next_state.squeeze(0))
+            rewards.append(reward.squeeze(0))
+            dones.append(torch.tensor([done], dtype=torch.bool, device=reward.device))
 
             self.collected_steps += 1
             self.current_episode_reward += reward.sum().item()
@@ -124,17 +160,24 @@ class SequentialCollector:
                 self.current_episode_reward = 0
                 self.current_episode_length = 0
 
-        # Keep the last experience for the next call
-        self.previous_experience = experience
+            self.previous_experience = {
+                "state": state,
+                "action": action,
+                "next_state": next_state,
+                "reward": reward,
+                "done": done,
+            }
 
         if self.collected_steps % self.logging_freq == 0:
             self.logger.log_scalar(name='episode_reward', value=self.previous_episode_reward, iteration=self.collected_steps)
             self.logger.log_scalar(name='episode_length', value=self.previous_episode_length, iteration=self.collected_steps)
-            self.logger.log_scalar(name="cumulative_reward", value=self.cumulative_reward, iteration=self.collected_steps)
-        return experience_list
+            self.logger.log_scalar(name='cumulative_reward', value=self.cumulative_reward, iteration=self.collected_steps)
+
+        return {
+            "state": torch.stack(states, dim=0),
+            "action": torch.stack(actions, dim=0),
+            "next_state": torch.stack(next_states, dim=0),
+            "reward": torch.stack(rewards, dim=0),
+            "done": torch.stack(dones, dim=0),
+        }
     
-
-            
-        
-
-        

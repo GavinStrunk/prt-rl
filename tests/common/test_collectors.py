@@ -18,22 +18,39 @@ def test_collecting_experience():
     env = GymnasiumWrapper("CartPole-v1")
 
     collector = SequentialCollector(env)
-    experience_list = collector.collect_experience(policy=lambda x: torch.zeros(1,1, dtype=torch.int64))
-    assert isinstance(experience_list, list)
-    assert len(experience_list) == 1
+    exp = collector.collect_experience(policy=lambda x: torch.zeros(1,1, dtype=torch.int64))
 
-    exp = experience_list[0]
     assert exp['action'].shape == (1, 1)
     assert exp['reward'].shape == (1, 1)
     assert exp['state'].shape == (1, 4)
     assert exp['next_state'].shape == (1, 4)
     assert exp['done'].shape == (1, 1)
 
+def test_collecting_random_experience():
+    env = GymnasiumWrapper("CartPole-v1")
+
+    collector = SequentialCollector(env)
+    exp = collector.collect_experience()
+
+    assert exp['action'].shape == (1, 1)
+    assert exp['reward'].shape == (1, 1)
+    assert exp['state'].shape == (1, 4)
+    assert exp['next_state'].shape == (1, 4)
+    assert exp['done'].shape == (1, 1)
+
+def test_collecting_experience_update():
+    env = GymnasiumWrapper("CartPole-v1")
+
+    collector = SequentialCollector(env)
+    exp = collector.collect_experience(policy=lambda x: torch.zeros(1,1, dtype=torch.int64))
+    exp2 = collector.collect_experience(policy=lambda x: torch.zeros(1,1, dtype=torch.int64))
+    assert torch.equal(exp['next_state'], exp2['state'])
+
 def test_collecting_multiple_steps(mock_env):
 
     collector = SequentialCollector(mock_env)
-    experience_list = collector.collect_experience(policy=lambda x: torch.zeros(1,1, dtype=torch.int64), num_steps=3)
-    assert len(experience_list) == 3
+    experience = collector.collect_experience(policy=lambda x: torch.zeros(1,1, dtype=torch.int64), num_steps=3)
+    assert experience['state'].shape == (3, 4)
 
 def test_environment_initial_reset(mock_env):
     collector = SequentialCollector(mock_env)
@@ -48,12 +65,12 @@ def test_environment_reset_on_done(mock_env):
     collector = SequentialCollector(mock_env)
 
     # Resets when a done occurs during collection
-    experience_list = collector.collect_experience(policy=lambda x: torch.zeros(1,1, dtype=torch.int64), num_steps=2)
+    exp = collector.collect_experience(policy=lambda x: torch.zeros(1,1, dtype=torch.int64), num_steps=2)
     assert mock_env.reset.call_count == 2  # One for initial reset and one for done
-    assert len(experience_list) == 2
+    assert exp['action'].shape == (2, 1)
 
     # Reset occurs on subsequent call
-    experience_list = collector.collect_experience(policy=lambda x: torch.zeros(1,1, dtype=torch.int64))
+    exp = collector.collect_experience(policy=lambda x: torch.zeros(1,1, dtype=torch.int64))
     assert mock_env.reset.call_count == 3  # One more reset after the done
 
 def test_reward_tracking(mock_env):

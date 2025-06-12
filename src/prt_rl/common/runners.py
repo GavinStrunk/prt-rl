@@ -1,6 +1,5 @@
 from typing import Optional
 from prt_rl.env.interface import EnvironmentInterface
-from prt_rl.common.policy import Policy
 from prt_rl.common.recorders import Recorder
 from prt_rl.common.visualizers import Visualizer
 

@@ -153,11 +153,13 @@ class GymnasiumWrapper(EnvironmentInterface):
                  gym_name: str,
                  num_envs: int = 1,
                  render_mode: Optional[str] = None,
+                 device: str = 'cpu',
                  **kwargs
                  ) -> None:
         super().__init__(render_mode)
         self.gym_name = gym_name
         self.num_envs = num_envs
+        self.device = torch.device(device)
 
         if num_envs == 1:
             self.env = gym.make(self.gym_name, render_mode=render_mode, **kwargs)
@@ -216,11 +218,11 @@ class GymnasiumWrapper(EnvironmentInterface):
 
         # Reshape the reward and done to be (# envs, 1)
         if self.num_envs == 1:
-            reward = torch.tensor([[reward]], dtype=torch.float)
-            done = torch.tensor([[done]], dtype=torch.bool)
+            reward = torch.tensor([[reward]], dtype=torch.float, device=self.device)
+            done = torch.tensor([[done]], dtype=torch.bool, device=self.device)
         else:
-            reward = torch.tensor(reward, dtype=torch.float).unsqueeze(-1)
-            done = torch.tensor(done, dtype=torch.bool).unsqueeze(-1)
+            reward = torch.tensor(reward, dtype=torch.float, device=self.device).unsqueeze(-1)
+            done = torch.tensor(done, dtype=torch.bool, device=self.device).unsqueeze(-1)
 
         next_state = self._process_observation(next_state)
 
@@ -243,9 +245,9 @@ class GymnasiumWrapper(EnvironmentInterface):
 
         # Add a dimension if there is only 1 environment
         if self.num_envs == 1:
-            observation = torch.tensor(observation).unsqueeze(0)
+            observation = torch.tensor(observation, device=self.device).unsqueeze(0)
         else:
-            observation = torch.tensor(observation)
+            observation = torch.tensor(observation, device=self.device)
 
         return observation
 
