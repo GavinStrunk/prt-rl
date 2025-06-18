@@ -1,57 +1,12 @@
 from abc import ABC, abstractmethod
+import copy
 import torch
-from typing import Any, Optional
-# from tensordict.tensordict import TensorDict
+from typing import Optional, Union, Dict, Type
 from prt_rl.env.interface import EnvParams
 from prt_rl.common.decision_functions import DecisionFunction, EpsilonGreedy
-from prt_rl.common.networks import MLP
+from prt_rl.common.networks import MLP, BaseEncoder
 import prt_rl.common.distributions as dist
 
-# def load_from_mlflow(
-#         tracking_uri: str,
-#         model_name: str,
-#         model_version: str,
-# ) -> 'Policy':
-#     """
-#     Loads a model that is either registered in mlflow or associated with a run id.
-
-#     Args:
-#         tracking_uri (str): mlflow tracking uri
-#         model_name (str): name of the model in the registry
-#         model_version (str): string version of the model
-
-#     Returns:
-#         Policy: policy object
-#     """
-#     try:
-#         import mlflow
-#     except ModuleNotFoundError:
-#         raise ModuleNotFoundError("mlflow is required to be installed load a policy from mlflow")
-
-#     mlflow.set_tracking_uri(tracking_uri)
-#     client = mlflow.tracking.MlflowClient()
-#     registered_models = client.search_registered_models()
-#     for model in registered_models:
-#         print(f"Model Name: {model.name}")
-
-#     model_str = f"models:/{model_name}/{model_version}"
-#     policy = mlflow.pyfunc.load_model(model_uri=model_str)
-
-#     # Extract the metadata
-#     metadata = policy.metadata.metadata
-
-#     # Policy factory
-#     module_name = f"prt_rl.utils.policy"
-#     try:
-#         module = importlib.import_module(module_name)
-#         policy_class = getattr(module, metadata['type'])
-#         policy = policy_class.load_from_dict(metadata['policy'])
-#     except ModuleNotFoundError:
-#         raise ValueError(f"Class {metadata['type']} not found")
-
-#     # if metadata['type'] == 'QTablePolicy':
-#     #     return QTablePolicy.load_from_dict(metadata['policy'])
-#     return policy
 
 class BasePolicy(torch.nn.Module, ABC):
     """
@@ -97,9 +52,9 @@ class QValuePolicy(BasePolicy):
     """
     def __init__(self,
                  env_params: EnvParams,
-                 encoder_network: Optional[torch.nn.Module] = None,
+                 encoder_network: Optional[Type[BaseEncoder]] = None,
                  encoder_network_kwargs: Optional[dict] = {},
-                 policy_head: Optional[torch.nn.Module] = MLP,
+                 policy_head: Optional[Type[torch.nn.Module]] = MLP,
                  policy_head_kwargs: Optional[dict] = {},
                  decision_function: Optional[DecisionFunction] = None,
                  ) -> None:
@@ -172,96 +127,192 @@ class QValuePolicy(BasePolicy):
         q_vals = self.policy_head(latent_state)
         return q_vals
 
+class ActorCriticPolicy(BasePolicy):
+    """
+    
+    This policy assumes if you provide a single encoder network, it will be shared between the actor and critic. It also assumes if a single network is provided for the actor and critic heads, it will be shared between them. If you want to use different networks for the actor and critic, you can provide them separately.
+    The policy head network should only define up to the last feature layer of the network. The specific distribution initializes the final layer of the network to ensure it is compatible.
 
-# class ActorCriticPolicy(Policy):
-#     """
-#     Actor critic policy
-#     """
-#     def __init__(self,
-#                  env_params: EnvParams,
-#                  distribution: Optional[dist.Distribution] = None,
-#                  device: str = "cpu",
-#                  ) -> None:
-#         super().__init__(env_params=env_params, device=device)
-#         self.distribution = distribution
+    """
+    def __init__(self,
+                 env_params: EnvParams,
+                 encoder_network: Optional[Union[Type[BaseEncoder], Dict[str, Type[BaseEncoder]]]] = None,
+                 encoder_network_kwargs: Optional[dict] = {},
+                 actor_critic_head: Union[Type[torch.nn.Module], Dict[str, Type[torch.nn.Module]]] = MLP,
+                 actor_critic_head_kwargs: Optional[dict] = {},
+                 distribution: Optional[dist.Distribution] = None,
+                 device: str = "cpu",
+                 ) -> None:
+        super().__init__(env_params=env_params)
+        self.device = device
+        self.env_params = env_params
 
-#         # Use a default distribution if one is not set
-#         if self.distribution is None:
-#             if env_params.action_continuous:
-#                 self.distribution = dist.Normal
-#             else:
-#                 self.distribution = dist.Categorical
+        self._build_encoder(encoder_network, encoder_network_kwargs)
+        self.actor_feature_dim = self._build_actor_critic_head(actor_critic_head, actor_critic_head_kwargs)
+        self._build_distribution(distribution)
 
-#         # Set the correct action dimension for the network
-#         if env_params.action_continuous:
-#             final_act = None
-#         else:
-#             final_act = torch.nn.Softmax(dim=-1)
+            
+    def _build_encoder(self, 
+                       encoder_network: Union[Type[BaseEncoder], Dict[str, Type[BaseEncoder]], None], 
+                       encoder_network_kwargs: dict
+                       ) -> None:
+        """
+        Builds the encoder network for the policy.
+        Args:
+            encoder_network (torch.nn.Module or Dict[str, torch.nn.Module]): The encoder network or a dictionary of encoder networks for actor and critic.
+            encoder_network_kwargs (dict): Keyword arguments for the encoder network.
+        """
+        # Initialize Type 1: No Encoder Network
+        if encoder_network is None:
+            self.actor_encoder_network = None
+            self.critic_encoder_network = None
+            self.actor_latent_dim = self.env_params.observation_shape[0]
+            self.critic_latent_dim = self.env_params.observation_shape[0]
 
-#         # Initialize Actor and Critic Networks
-#         self.action_dim = self.env_params.action_len
-#         self.num_dist_params = self.distribution.parameters_per_action()
-#         self.actor_network = MLP(
-#             state_dim=self.env_params.observation_shape[0],
-#             action_dim=self.action_dim * self.num_dist_params,
-#             final_activation=final_act,
-#         )
-#         self.critic_network = MLP(
-#             state_dim=self.env_params.observation_shape[0],
-#             action_dim=1,
-#         )
+        # Initialize Type 3: Construct encoder networks when they are separate
+        elif isinstance(encoder_network, dict):
+            if 'actor' not in encoder_network or 'critic' not in encoder_network:
+                raise ValueError("If encoder_network is a dictionary, it must contain keys 'actor' and 'critic'.")
+            
+            if 'actor' not in encoder_network_kwargs or 'critic' not in encoder_network_kwargs:
+                raise ValueError("If encoder_network is a dictionary, encoder_network_kwargs must contain keys 'actor' and 'critic'.")
+            
+            self.actor_encoder_network = encoder_network['actor'](
+                    input_shape=self.env_params.observation_shape,
+                    **encoder_network_kwargs['actor']
+                )
+            self.critic_encoder_network = encoder_network['critic'](
+                    input_shape=self.env_params.observation_shape,
+                    **encoder_network_kwargs['critic']
+                )
+            self.actor_latent_dim = self.actor_encoder_network.features_dim
+            self.critic_latent_dim = self.critic_encoder_network.features_dim
 
-#         self.current_dist = None
-#         self.value_estimates = None
-#         self.action_log_probs = None
-#         self.entropy = None
+        # Initialize Type 3: Construct encoder networks when they are shared
+        elif issubclass(encoder_network, BaseEncoder):
+            self.actor_encoder_network = encoder_network(
+                    input_shape=self.env_params.observation_shape,
+                    **encoder_network_kwargs
+                )
+            self.critic_encoder_network = self.actor_encoder_network
+            self.actor_latent_dim = self.actor_encoder_network.features_dim
+            self.critic_latent_dim = self.actor_encoder_network.features_dim
+        else:
+            raise ValueError("encoder_network must be either None, a BaseEncoder, or a dictionary with keys 'actor' and 'critic'.")
+    
+    def _build_actor_critic_head(self,
+                                 actor_critic_head: Union[Type[torch.nn.Module], Dict[str, Type[torch.nn.Module]]],
+                                 actor_critic_head_kwargs: dict,
+                                 ) -> None:
+        """
+        Builds the actor and critic heads for the policy.
+        Args:
+            actor_critic_head (torch.nn.Module or Dict[str, torch.nn.Module]): The actor and critic heads or a dictionary of actor and critic heads.
+            actor_critic_head_kwargs (dict): Keyword arguments for the actor and critic heads.
+        """
+        # Initialize Type 1: Construct separate actor and critic heads
+        if isinstance(actor_critic_head, dict):
+            if 'actor' not in actor_critic_head or 'critic' not in actor_critic_head:
+                raise ValueError("If actor_critic_head is a dictionary, it must contain keys 'actor' and 'critic'.")
+            if 'actor' not in actor_critic_head_kwargs or 'critic' not in actor_critic_head_kwargs:
+                raise ValueError("If actor_critic_head is a dictionary, actor_critic_head_kwargs must contain keys 'actor' and 'critic'.")
+            
+            self.actor_head = actor_critic_head['actor'](
+                input_dim=self.actor_latent_dim,
+                **actor_critic_head_kwargs['actor']
+            )
+            self.critic_head = actor_critic_head['critic'](
+                input_dim=self.critic_latent_dim,
+                output_dim=1,
+                **actor_critic_head_kwargs['critic']
+            )
+        
+        # Initialize Type 2: Construct the same network for actor and critic heads
+        elif issubclass(actor_critic_head, torch.nn.Module):
+            self.actor_head = actor_critic_head(
+                input_dim=self.actor_latent_dim,
+                **actor_critic_head_kwargs
+            )
 
-#     def get_actor_network(self):
-#         return self.actor_network
+            # Set the 'output_dim' key to 1 for the critic head
+            self.critic_head = actor_critic_head(
+                input_dim=self.critic_latent_dim,
+                output_dim=1,
+                **actor_critic_head_kwargs
+            )   
+        else:
+            raise ValueError("actor_critic_head must be either a torch.nn.Module, or a dictionary with keys 'actor' and 'critic'.")                              
+        
+        # Last layer is an activation so we can get the feature dimension from the second to last linear layer
+        return self.actor_head.layers[-2].out_features
 
-#     def get_critic_network(self):
-#         return self.critic_network
+    def _build_distribution(self,
+                           distribution: dist.Distribution,
+                           ) -> None:
+        """
+        Builds the distribution for the policy.
 
-#     def get_action(self, state: TensorDict) -> TensorDict:
-#         obs = state['observation']
-#         action_probs = self.actor_network(obs)
-#         action_probs = action_probs.view(-1, self.action_dim, self.num_dist_params)
-#         dist = self.distribution(action_probs)
-#         action = dist.sample()
+        Args:
+            distribution (dist.Distribution): The distribution to use for the policy.
+        """
+        # Default distributions for discrete and continuous action spaces
+        if distribution is None:
+            if self.env_params.action_continuous:
+                self.distribution = dist.Normal
+            else:
+                self.distribution = dist.Categorical
+        else:
+            self.distribution = distribution
 
-#         # @todo clean this up in the distribution interface
-#         if len(action.shape) == 1:
-#             action = action.unsqueeze(-1)
+        self.actor_distribution_layer = self.distribution.last_network_layer(feature_dim=self.actor_feature_dim, num_actions=self.env_params.action_len)
 
-#         self.current_dist = dist
-#         self.value_estimates = self.critic_network(obs)
-#         self.entropy = dist.entropy()
 
-#         state['action'] = action
-#         return state
+    def forward(self,
+                   state: torch.Tensor
+                   ) -> torch.Tensor:
+        """
+        Chooses an action based on the current state. Expects the key "observation" in the state tensordict
 
-#     def get_value_estimates(self) -> torch.Tensor:
-#         return self.value_estimates
+        Args:
+            state (TensorDict): current state tensordict
 
-#     def get_log_probs(self, actions) -> torch.Tensor:
-#         log_probs = self.current_dist.log_prob(actions.squeeze())
-#         return log_probs.unsqueeze(-1)
+        Returns:
+            TensorDict: tensordict with the "action" key added
+        """
+        action, _, _ = self.predict(state)
+        return action
 
-#     def get_entropy(self) -> torch.Tensor:
-#         return self.entropy
+    def predict(self,
+                state: torch.Tensor
+                ) -> torch.Tensor:
+        # Run Actor
+        action_encoding = self.actor_encoder_network(state)
+        latent_features = self.actor_head(action_encoding)
+        action_params = self.actor_distribution_layer(latent_features)
+        distribution = self.distribution(action_params)
+        action = distribution.sample()
+        log_probs = distribution.log_prob(action)
 
-# class TabularPolicy(BasePolicy):
-#     """
-#     Base class for implementing tabular policies.
+        # Run Critic
+        critic_features = self.critic_encoder_network(state)
+        value_est = self.critic_head(critic_features)
 
-#     Args:
-#         env_params (EnvParams): Environment parameters.
-#         device (str): The device to use.
-#     """
-#     def __init__(self,
-#                  env_params: EnvParams,
-#                  q_table: Optional[Any] = None,
-#                  decision_function: Optional[DecisionFunction] = EpsilonGreedy(),
-#                  device: str = 'cpu',
-#                  ) -> None:
-#         super().__init__(env_params, device)
+        return action, value_est, log_probs
+    
+    def evaluate_actions(self,
+                         state: torch.Tensor,
+                         action: torch.Tensor
+                         ) -> torch.Tensor:
+        # Run Actor
+        action_encoding = self.actor_encoder_network(state)
+        latent_features = self.actor_head(action_encoding)
+        action_params = self.actor_distribution_layer(latent_features)
+        distribution = self.distribution(action_params)
+        entropy = distribution.entropy()
+        log_probs = distribution.log_prob(action)
+
+        # Run Critic
+        critic_features = self.critic_encoder_network(state)
+        value_est = self.critic_head(critic_features)
+
+        return value_est, log_probs, entropy

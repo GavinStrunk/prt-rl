@@ -156,16 +156,20 @@ class GymnasiumWrapper(EnvironmentInterface):
                  device: str = 'cpu',
                  **kwargs
                  ) -> None:
-        super().__init__(render_mode)
+        super().__init__(render_mode, num_envs=num_envs)
         self.gym_name = gym_name
-        self.num_envs = num_envs
         self.device = torch.device(device)
 
-        if num_envs == 1:
+        if self.num_envs == 1:
             self.env = gym.make(self.gym_name, render_mode=render_mode, **kwargs)
             vectorized = False
         else:
-            self.env = gym.make_vec(self.gym_name, num_envs=self.num_envs, render_mode=render_mode, **kwargs)
+            def make_fcn(gym_name, render_mode=None, **kwargs):
+                def _init():
+                    return gym.make(gym_name, render_mode=render_mode, **kwargs)
+                return _init
+            
+            self.env = gym.vector.SyncVectorEnv([make_fcn(self.gym_name, render_mode=render_mode, **kwargs) for _ in range(num_envs)])
             vectorized = True
 
         self.env_params = self._make_env_params(vectorized=vectorized)
@@ -194,6 +198,33 @@ class GymnasiumWrapper(EnvironmentInterface):
             info['rgb_array'] = rgb[np.newaxis, ...]
             
         return state, info
+    
+    def reset_done(self, done: torch.Tensor, seed: int | None = None) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        """
+        Resets only the environments that are done.
+
+        Args:
+            done (torch.Tensor): Boolean tensor of shape (num_envs, 1) or (num_envs,)
+
+        Returns:
+            Tuple[torch.Tensor, Dict[str, Any]]: The new observations and info dict
+        """
+        if self.num_envs == 1:
+            return self.reset(seed=seed)
+        
+        if done.all():
+            state, info = self.env.reset(seed=seed)
+        else:
+            done_mask = done.squeeze(-1).cpu().numpy().astype(bool)
+            # Call Gymnasium's vectorized env reset with mask
+            state, info = self.env.reset(reset_mask=done_mask)
+
+        state = self._process_observation(state)
+
+        if self.render_mode == 'rgb_array':
+            info['rgb_array'] = self.env.render()[np.newaxis, ...]
+
+        return state, info
 
     def step(self, action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """
@@ -205,7 +236,12 @@ class GymnasiumWrapper(EnvironmentInterface):
         """
         # Discrete actions send the raw integer value to the step function
         if not self.env_params.action_continuous:
-            action = action.item()
+            if self.num_envs == 1:
+                # If there is only one environment, the step function expects a single integer action
+                action = action.item()
+            else:
+                # If there are multiple environments and 1 action, the step function expects an action with shape (# envs,)
+                action = action.cpu().numpy().squeeze(-1)
         else:
             action = action.cpu().numpy()
 

@@ -1,3 +1,4 @@
+import pytest
 from prt_rl.common.networks import *
 
 def test_mlp_construction():
@@ -35,6 +36,20 @@ def test_mlp_forward():
     assert state.shape == (1, 1)
     qval = mlp(state)
     assert qval.shape == (1, 2)
+
+def test_mlp_output_and_arch_cannot_be_none():
+    with pytest.raises(ValueError):
+        MLP(input_dim=4, output_dim=None, network_arch=None)
+
+def test_mlp_no_output_dim():
+    mlp = MLP(input_dim=4)
+    assert len(mlp.layers) == 4
+    assert mlp.layers[0].in_features == 4
+    assert mlp.layers[0].out_features == 64
+    assert isinstance(mlp.layers[1], nn.ReLU)
+    assert mlp.layers[2].in_features == 64
+    assert mlp.layers[2].out_features == 64
+    assert isinstance(mlp.layers[3], nn.ReLU)
 
 def test_dueling_mlp_construction():
     mlp = DuelingMLP(input_dim=512, output_dim=4)

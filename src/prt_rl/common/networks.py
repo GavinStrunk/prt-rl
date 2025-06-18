@@ -17,27 +17,29 @@ class MLP(nn.Module):
     """
     def __init__(self,
                  input_dim: int,
-                 output_dim: int,
+                 output_dim: Optional[int] = None,
                  network_arch: Optional[List[int]] = [64, 64],
                  hidden_activation: nn.Module = nn.ReLU(),
                  final_activation: Optional[nn.Module] = None
                  ) -> None:
         super().__init__()
+        if output_dim is None and network_arch is None:
+            raise ValueError("Either output_dim or network_arch must be provided.")
+        
+        self.layers = nn.ModuleList()
 
         if network_arch is None:
             dims = [input_dim, output_dim]
         else:
-            dims = [input_dim] + network_arch + [output_dim]
+            dims = [input_dim] + network_arch
 
-        self.layers = nn.ModuleList()
-
-        for i in range(len(dims) - 2):
+        for i in range(len(dims) - 1):
             self.layers.append(nn.Linear(dims[i], dims[i + 1]))
             self.layers.append(hidden_activation)
 
-        self.layers.append(nn.Linear(dims[-2], dims[-1]))
-
-        self.final_activation = final_activation
+        if output_dim is not None:
+            self.layers.append(nn.Linear(dims[-1], output_dim))
+            self.final_activation = final_activation
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         for layer in self.layers:

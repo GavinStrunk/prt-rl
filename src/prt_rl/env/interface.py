@@ -71,11 +71,22 @@ class EnvironmentInterface(ABC):
     }
     def __init__(self,
                  render_mode: Optional[str] = None,
+                 num_envs: int = 1,
                  ) -> None:
         self.render_mode = render_mode
+        self.num_envs = num_envs
 
         if self.render_mode is not None:
             assert self.render_mode in EnvironmentInterface.metadata["render_modes"], f"Valid render_modes are: {EnvironmentInterface.metadata['render_modes']}"
+
+    def get_num_envs(self) -> int:
+        """
+        Returns the number of environments in the interface.
+
+        Returns:
+            int: Number of environments
+        """
+        return self.num_envs
 
     @abstractmethod
     def get_parameters(self) -> Union[EnvParams]:

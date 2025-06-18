@@ -175,6 +175,59 @@ def test_gymnasium_multienv():
     assert reward.shape == (num_envs, 1)
     assert done.shape == (num_envs, 1)
 
+def test_gymnasium_discrete_multienv():
+    num_envs = 4
+    env = wrappers.GymnasiumWrapper(
+        gym_name="CartPole-v1",
+        num_envs=num_envs,
+        render_mode=None,
+    )
+
+    params = env.get_parameters()
+    assert params.action_len == 1
+    assert params.action_continuous is False
+    assert params.action_min == 0
+    assert params.action_max == 1
+    assert params.observation_shape == (4,)
+    assert params.observation_continuous is True
+    assert len(params.observation_min) == 4
+    assert len(params.observation_max) == 4
+
+    state, _ = env.reset()
+    assert state.shape == (num_envs, *params.observation_shape)
+    assert state.dtype == torch.float32
+
+    action = torch.zeros(num_envs, params.action_len, dtype=torch.int)
+    next_state, reward, done, _ = env.step(action)
+    assert next_state.shape == (num_envs, *params.observation_shape)
+    assert reward.shape == (num_envs, 1)
+    assert done.shape == (num_envs, 1)
+
+def test_gymnasium_reset_done():
+    env = wrappers.GymnasiumWrapper(
+        gym_name="CartPole-v1",
+        render_mode=None,
+        num_envs=4
+    )
+
+    state, _ = env.reset(seed=0)
+    assert state.shape == (4, 4)
+
+    action = torch.zeros(4, 1, dtype=torch.int)
+    next_state, reward, done, info = env.step(action)
+
+    # Set all dones to true to reset all environments
+    done = torch.ones(4, 1, dtype=torch.bool)
+    new_state, _ = env.reset_done(done, seed=0)
+    torch.testing.assert_close(new_state, state, rtol=1e-6, atol=1e-6)
+
+    next_state, reward, done, info = env.step(action)
+
+    # Reset only the second and third environments
+    done = torch.tensor([[False], [True], [True], [False]], dtype=torch.bool)
+    new_state, _ = env.reset_done(done, seed=0)
+    torch.testing.assert_close(new_state[1:3], state[1:3], rtol=1e-6, atol=1e-6)
+
 def test_vmas_wrapper():
     num_envs = 2
     env = wrappers.VmasWrapper(

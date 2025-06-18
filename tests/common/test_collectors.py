@@ -2,7 +2,7 @@ import pytest
 import torch
 from unittest.mock import MagicMock
 from prt_rl.env.wrappers import GymnasiumWrapper
-from prt_rl.common.collectors import SequentialCollector
+from prt_rl.common.collectors import SequentialCollector, ParallelCollector
 
 @pytest.fixture
 def mock_env():
@@ -92,4 +92,5 @@ def test_reward_tracking(mock_env):
     assert collector.current_episode_reward == 1
     assert collector.current_episode_length == 1
     assert collector.cumulative_reward == 7
+
 
