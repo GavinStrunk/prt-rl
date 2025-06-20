@@ -4,64 +4,180 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class MLP(nn.Sequential):
+class MLP(nn.Module):
     """
     Multi-layer perceptron network
 
     Args:
-        state_dim (int): Number of input states
-        action_dim (int): Number of output actions
-        network_arch: List of hidden nodes
-        hidden_activation: Activation function applied to hidden nodes
-        final_activation: Activation function applied to output nodes
+        input_dim (int): Number of input features
+        output_dim (int): Number of output features
+        network_arch (List[int], optional): Hidden layer sizes. Defaults to [64, 64].
+        hidden_activation (nn.Module): Activation function for hidden layers.
+        final_activation (Optional[nn.Module]): Optional activation after final layer.
     """
     def __init__(self,
-                 state_dim: int,
-                 action_dim: int,
-                 network_arch: List[int] = None,
+                 input_dim: int,
+                 output_dim: Optional[int] = None,
+                 network_arch: Optional[List[int]] = [64, 64],
                  hidden_activation: nn.Module = nn.ReLU(),
                  final_activation: Optional[nn.Module] = None
                  ) -> None:
-        # Default architecture is state:64 -> 64:64 -> 64:action
+        super().__init__()
+        if output_dim is None and network_arch is None:
+            raise ValueError("Either output_dim or network_arch must be provided.")
+        
+        self.layers = nn.ModuleList()
+
         if network_arch is None:
-            network_arch = [64, 64]
+            dims = [input_dim, output_dim]
+        else:
+            dims = [input_dim] + network_arch
 
-        dimensions = [state_dim] + network_arch + [action_dim]
+        for i in range(len(dims) - 1):
+            self.layers.append(nn.Linear(dims[i], dims[i + 1]))
+            self.layers.append(hidden_activation)
 
-        # Create layers
-        layers = []
-        for i in range(len(dimensions) - 2):
-            layers.append(nn.Linear(dimensions[i], dimensions[i + 1]))
-            layers.append(hidden_activation)
+        if output_dim is not None:
+            self.layers.append(nn.Linear(dims[-1], output_dim))
+            self.final_activation = final_activation
+        else:
+            self.final_activation = None
 
-        # Create the final linear layer
-        layers.append(nn.Linear(dimensions[-2], dimensions[-1]))
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        for layer in self.layers:
+            x = layer(x)
+        if self.final_activation is not None:
+            x = self.final_activation(x)
+        return x
 
-        # Add activation after final linear layer if specified
+class DuelingMLP(nn.Module):
+    """
+    Dueling Multi-layer Perceptron network
+    Args:
+        input_dim (int): Number of input features
+        output_dim (int): Number of output features
+        network_arch (Optional[List[int]], optional): Hidden layer sizes. Defaults to None.
+        hidden_activation (nn.Module): Activation function for hidden layers.
+        final_activation (Optional[nn.Module]): Optional activation after final layer.
+    """
+    def __init__(self,
+                 input_dim: int,
+                 output_dim: int,
+                 network_arch: Optional[List[int]] = None,
+                 hidden_activation: nn.Module = nn.ReLU(),
+                 final_activation: Optional[nn.Module] = None
+                 ) -> None:
+        super().__init__()
+
+        if network_arch is None:
+            dims = [input_dim, output_dim]
+        else:
+            dims = [input_dim] + network_arch + [output_dim]
+
+        self.advantage_layers = nn.ModuleList()
+        for i in range(len(dims) - 2):
+            self.advantage_layers.append(nn.Linear(dims[i], dims[i + 1]))
+
+            if hidden_activation is not None:
+                self.advantage_layers.append(hidden_activation)
+
+        self.advantage_layers.append(nn.Linear(dims[-2], dims[-1]))
         if final_activation is not None:
-            layers.append(final_activation)
+            self.advantage_layers.append(final_activation)
 
-        super(MLP, self).__init__(*layers)
+        self.value_layers = nn.ModuleList()
+        for i in range(len(dims) - 2):
+            self.value_layers.append(nn.Linear(dims[i], dims[i + 1]))
 
-    def forward(self,
+            if hidden_activation is not None:
+                self.value_layers.append(hidden_activation)
+
+        self.value_layers.append(nn.Linear(dims[-2], 1))
+        if final_activation is not None:
+            self.value_layers.append(final_activation)
+
+    def forward(self, 
                 state: torch.Tensor
                 ) -> torch.Tensor:
-        return super().forward(state)
+        
+        adv = state
+        for layer in self.advantage_layers:
+            adv = layer(adv)
 
-    def init_args(self) -> dict:
-        """
-        Returns a dictionary of arguments passed to __init__
+        val = state
+        for layer in self.value_layers:
+            val = layer(val)
 
-        Returns:
-            dict: Initialization arguments
-        """
-        return {
-            'state_dim': self.state_dim,
-            'action_dim': self.action_dim,
-            'network_arch': self.network_arch,
-            'hidden_activation': self.hidden_activation,
-            'final_activation': self.final_activation
-        }
+        # Combine advantage and value to get Q-values
+        q_values = val + (adv - adv.mean(dim=1, keepdim=True))
+        return q_values
+
+
+class BaseEncoder(nn.Module):
+    def __init__(self, 
+                 features_dim: int
+                 ) -> None:
+        super(BaseEncoder, self).__init__()
+        self._features_dim = features_dim
+
+    @property
+    def features_dim(self) -> int:
+        return self._features_dim
+    
+class NatureCNNEncoder(BaseEncoder):
+    """
+        Convolutional Neural Network as described in the Nature paper
+
+    The Nature CNN expects a 3D input image tensor with shape (channels, height, width) and values scaled to [0, 1]. The output is a tensor with shape (batch_size, action_len).
+    The CNN architecture is as follows:
+        - Conv2d(32, kernel_size=8, stride=4)
+        - ReLU
+        - Conv2d(64, kernel_size=4, stride=2)
+        - ReLU
+        - Conv2d(64, kernel_size=3, stride=1)
+        - ReLU
+        - Flatten
+        - Linear(output_dim=feature_dim)
+        - ReLU
+    """
+    def __init__(self,
+                 input_shape: tuple,
+                 features_dim: int = 512,
+                ) -> None:
+        super().__init__(features_dim=features_dim)
+
+        if len(input_shape) != 3:
+            raise ValueError("state_shape must be a tuple of (channels, height, width)")
+        
+        num_channels = input_shape[0]
+
+        self.layers = nn.ModuleList([
+            nn.Conv2d(num_channels, 32, kernel_size=8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.Flatten(),
+        ])
+
+        with torch.no_grad():
+            x = torch.zeros(1, *input_shape)
+            for layer in self.layers:
+                x = layer(x)
+            conv_out_dim = x.view(1, -1).size(1)
+
+        self.layers.append(nn.Linear(conv_out_dim, features_dim))
+        self.layers.append(nn.ReLU())
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        if state.dtype == torch.uint8:
+            state = state.float() / 255.0
+
+        for layer in self.layers:
+            state = layer(state)
+
+        return state
 
 class NatureCNN(nn.Module):
     """
@@ -76,6 +192,7 @@ class NatureCNN(nn.Module):
         - Conv2d(64, kernel_size=3, stride=1)
         - ReLU
         - Flatten
+        - Linear(output_dim=feature_dim)
 
     The standard MLP architecture is as follows:
         - Linear(64*7*7, feature_dim)

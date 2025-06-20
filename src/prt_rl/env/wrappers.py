@@ -153,17 +153,21 @@ class GymnasiumWrapper(EnvironmentInterface):
                  gym_name: str,
                  num_envs: int = 1,
                  render_mode: Optional[str] = None,
+                 device: str = 'cpu',
                  **kwargs
                  ) -> None:
-        super().__init__(render_mode)
+        super().__init__(render_mode, num_envs=num_envs)
         self.gym_name = gym_name
-        self.num_envs = num_envs
+        self.device = torch.device(device)
 
-        if num_envs == 1:
+        if self.num_envs == 1:
             self.env = gym.make(self.gym_name, render_mode=render_mode, **kwargs)
             vectorized = False
         else:
-            self.env = gym.make_vec(self.gym_name, num_envs=self.num_envs, render_mode=render_mode, **kwargs)
+            def make_fcn(env_name: str, render_mode=None, **kwargs):
+                return lambda: gym.make(env_name, render_mode=render_mode, **kwargs)
+            
+            self.env = gym.vector.SyncVectorEnv([make_fcn(self.gym_name, render_mode=render_mode, **kwargs) for _ in range(num_envs)])
             vectorized = True
 
         self.env_params = self._make_env_params(vectorized=vectorized)
@@ -192,6 +196,28 @@ class GymnasiumWrapper(EnvironmentInterface):
             info['rgb_array'] = rgb[np.newaxis, ...]
             
         return state, info
+    
+    def reset_index(self, index: int, seed: int | None = None) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        """
+        Resets only the environments that are done.
+
+        Args:
+            done (torch.Tensor): Boolean tensor of shape (num_envs, 1) or (num_envs,)
+
+        Returns:
+            Tuple[torch.Tensor, Dict[str, Any]]: The new observations and info dict
+        """
+        if index > self.num_envs:
+            raise ValueError(f"Index {index} is out of bounds for {self.num_envs} environments.")
+        
+        state, info = self.env.envs[index].reset(seed=seed)
+        state = self._process_observation(state)
+
+        if self.render_mode == 'rgb_array':
+            rgb = self.env.render()
+            info['rgb_array'] = rgb[np.newaxis, ...]
+
+        return state, info
 
     def step(self, action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """
@@ -203,7 +229,12 @@ class GymnasiumWrapper(EnvironmentInterface):
         """
         # Discrete actions send the raw integer value to the step function
         if not self.env_params.action_continuous:
-            action = action.item()
+            if self.num_envs == 1:
+                # If there is only one environment, the step function expects a single integer action
+                action = action.item()
+            else:
+                # If there are multiple environments and 1 action, the step function expects an action with shape (# envs,)
+                action = action.cpu().numpy().squeeze(-1)
         else:
             action = action.cpu().numpy()
 
@@ -216,11 +247,11 @@ class GymnasiumWrapper(EnvironmentInterface):
 
         # Reshape the reward and done to be (# envs, 1)
         if self.num_envs == 1:
-            reward = torch.tensor([[reward]], dtype=torch.float)
-            done = torch.tensor([[done]], dtype=torch.bool)
+            reward = torch.tensor([[reward]], dtype=torch.float, device=self.device)
+            done = torch.tensor([[done]], dtype=torch.bool, device=self.device)
         else:
-            reward = torch.tensor(reward, dtype=torch.float).unsqueeze(-1)
-            done = torch.tensor(done, dtype=torch.bool).unsqueeze(-1)
+            reward = torch.tensor(reward, dtype=torch.float, device=self.device).unsqueeze(-1)
+            done = torch.tensor(done, dtype=torch.bool, device=self.device).unsqueeze(-1)
 
         next_state = self._process_observation(next_state)
 
@@ -243,9 +274,9 @@ class GymnasiumWrapper(EnvironmentInterface):
 
         # Add a dimension if there is only 1 environment
         if self.num_envs == 1:
-            observation = torch.tensor(observation).unsqueeze(0)
+            observation = torch.tensor(observation, device=self.device).unsqueeze(0)
         else:
-            observation = torch.tensor(observation)
+            observation = torch.tensor(observation, device=self.device)
 
         return observation
 

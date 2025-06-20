@@ -6,11 +6,11 @@ class ProgressBar:
     Training Progress Bar
 
     Args:
-        total_frames (int): Total number of frames collected
+        total_steps (int): Total number of environment steps that will be collected.
 
     """
-    def __init__(self, total_frames):
-        self.pbar = tqdm(total=total_frames)
+    def __init__(self, total_steps):
+        self.pbar = tqdm(total=total_steps)
         self.prev_iteration = 0
 
     def update(self, current_step: int, desc: str) -> None:

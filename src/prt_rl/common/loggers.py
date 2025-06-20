@@ -6,7 +6,7 @@ import shutil
 import tempfile
 import torch
 from typing import Optional
-from prt_rl.common.policy import Policy
+from prt_rl.common.policies import BasePolicy
 
 
 class Logger:
@@ -60,13 +60,13 @@ class Logger:
         """
         raise NotImplementedError("log_scalar must be implemented in subclasses.")
     def save_policy(self,
-                    policy: Policy,
+                    policy: BasePolicy,
                     ) -> None:
         """
         Saves the policy to the logger.
 
         Args:
-            policy (Policy): Policy to save.
+            policy (BasePolicy): Policy to save.
         """
         raise NotImplementedError("save_policy must be implemented in subclasses.")
     def save_agent(self,
@@ -116,13 +116,13 @@ class BlankLogger(Logger):
         pass
 
     def save_policy(self,
-                    policy: Policy,
+                    policy: BasePolicy,
                     ) -> None:
         """
         Saves the policy to the MLFlow run.
 
         Args:
-            policy (Policy): Policy to save.
+            policy (BasePolicy): Policy to save.
         """
         pass
 
@@ -279,7 +279,8 @@ class MLFlowLogger(Logger):
             self.iteration = iteration
 
     def save_agent(self,
-                   agent: object
+                   agent: object,
+                   agent_name: str = "agent.pt"
                    ) -> None:
         """
         Saves the agent to the MLFlow run.
@@ -287,24 +288,24 @@ class MLFlowLogger(Logger):
             agent (object): The agent object to save
         """
         with tempfile.TemporaryDirectory() as tmpdir:
-            save_path = os.path.join(tmpdir, "agent.pt")
+            save_path = os.path.join(tmpdir, agent_name)
             torch.save(agent, save_path)
             mlflow.log_artifact(save_path, artifact_path="agent")
         
 
     def save_policy(self,
-                    policy: Policy
+                    policy: BasePolicy
                     ) -> None:
 
         """
         Saves the policy as a Python model so it can be registered in the MLFlow Registry.
 
         Args:
-            policy (Policy): The policy to be saved.
+            policy (BasePolicy): The policy to be saved.
         """
         # Wrap policy in a PythonModel so it is a valid model
         class PolicyWrapper(mlflow.pyfunc.PythonModel):
-            def __init__(self, policy: Policy):
+            def __init__(self, policy: BasePolicy):
                 self.policy = policy
 
             def predict(self, context, input_data):
