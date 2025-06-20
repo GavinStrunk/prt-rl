@@ -128,6 +128,43 @@ class ReplayBuffer(BaseBuffer):
         indices = torch.randint(0, self.size, (batch_size,), device=self.device)
         return {k: v[indices] for k, v in self.buffer.items()}
     
+    def resize(self, new_capacity: int):
+        """
+        Expands the buffer to a new capacity while preserving existing data.
+        Args:
+            new_capacity (int): The new buffer capacity.
+        """
+        if new_capacity <= self.capacity:
+            raise ValueError("New capacity must be greater than current capacity.")
+
+        new_buffer = {}
+        for k, v in self.buffer.items():
+            new_shape = (new_capacity,) + v.shape[1:]
+            new_tensor = torch.zeros(new_shape, dtype=v.dtype, device=self.device)
+            if self.pos >= self.size:
+                # No wrap-around
+                new_tensor[:self.size] = v[:self.size]
+            else:
+                # Wrap-around logic
+                new_tensor[:self.capacity - self.pos] = v[self.pos:]
+                new_tensor[self.capacity - self.pos:self.size] = v[:self.pos]
+            new_buffer[k] = new_tensor
+
+        self.buffer = new_buffer
+        self.capacity = new_capacity
+        self.pos = self.size  # Next write after last element    
+
+    def get_batches(self, batch_size: int):
+        """
+        Yields shuffled mini-batches from the buffer.
+        """
+        if self.size == 0:
+            return
+        indices = torch.randperm(self.size, device=self.device)
+        for i in range(0, self.size, batch_size):
+            idx = indices[i:i + batch_size]
+            yield {k: v[idx] for k, v in self.buffer.items()}        
+    
     def clear(self) -> None:
         """
         Clears the replay buffer, resetting its state.

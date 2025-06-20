@@ -15,7 +15,15 @@ def example_transition():
         "done": torch.zeros(4, 1),
         "next_state": torch.randn(4, 8),
     }
-
+@pytest.fixture
+def transition_batch():
+    return {
+        "state": torch.randn(10, 4),
+        "action": torch.randint(0, 2, (10, 1)),
+        "reward": torch.randn(10, 1),
+        "done": torch.randint(0, 2, (10, 1), dtype=torch.bool),
+        "next_state": torch.randn(10, 4),
+    }
 
 def test_init():
     buffer = ReplayBuffer(capacity=100, device=torch.device("cpu"))
@@ -105,6 +113,45 @@ def test_replay_buffer_clear():
     # After clearing, adding should reinitialize
     buffer.add(transition)
     assert len(buffer) == 5
+
+def test_resize_increases_capacity_and_preserves_data(transition_batch):
+    buffer = ReplayBuffer(capacity=10)
+    buffer.add(transition_batch)
+    assert buffer.get_size() == 10
+    old_data = {k: v.clone() for k, v in buffer.buffer.items()}
+    
+    # Resize to larger capacity
+    buffer.resize(new_capacity=50)
+    assert buffer.capacity == 50
+    assert buffer.get_size() == 10
+    assert buffer.pos == 10
+
+    # Check that all old data was preserved
+    for k in old_data:
+        assert torch.allclose(buffer.buffer[k][:10], old_data[k])
+
+
+def test_resize_error_on_shrink(transition_batch):
+    buffer = ReplayBuffer(capacity=20)
+    buffer.add(transition_batch)
+    with pytest.raises(ValueError):
+        buffer.resize(new_capacity=5)
+
+
+def test_get_batches_returns_correct_batches(transition_batch):
+    buffer = ReplayBuffer(capacity=50)
+    buffer.add(transition_batch)
+    buffer.add(transition_batch)  # 20 items total
+
+    all_batches = list(buffer.get_batches(batch_size=7))
+    assert sum(b["state"].shape[0] for b in all_batches) == 20
+    assert all(set(b.keys()) == set(transition_batch.keys()) for b in all_batches)
+
+
+def test_get_batches_empty():
+    buffer = ReplayBuffer(capacity=10)
+    batches = list(buffer.get_batches(batch_size=4))
+    assert batches == []    
 
 def test_sum_tree_add_and_total():
     tree = SumTree(capacity=4)
