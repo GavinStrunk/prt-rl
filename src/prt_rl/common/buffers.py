@@ -4,7 +4,7 @@ import torch
 from typing import Dict, Tuple
 
 
-class BaseReplayBuffer(ABC):
+class BaseBuffer(ABC):
     def __init__(self,
                  capacity: int,
                  device: str = 'cpu'
@@ -58,7 +58,7 @@ class BaseReplayBuffer(ABC):
         raise NotImplementedError
 
 
-class ReplayBuffer(BaseReplayBuffer):
+class ReplayBuffer(BaseBuffer):
     """
     A circular replay buffer that overwrites old experiences when full.
     
@@ -223,7 +223,7 @@ class SumTree:
         return self.tree[0]
 
 
-class PrioritizedReplayBuffer(BaseReplayBuffer):
+class PrioritizedReplayBuffer(BaseBuffer):
     """
     A Prioritized Experience Replay Buffer using a SumTree for efficient sampling.
 
@@ -354,3 +354,76 @@ class PrioritizedReplayBuffer(BaseReplayBuffer):
         self.priorities = SumTree(self.capacity)
         self.max_priority = 1.0
         self.beta = self.beta0
+
+class RolloutBuffer(BaseBuffer):
+    def __init__(self, 
+                 capacity: int, 
+                 device: str = 'cpu'
+                 ) -> None:
+        """
+        Args:
+            capacity: Max number of transitions the buffer can store.
+            device: Torch device.
+        """
+        super().__init__(capacity, device)
+        self.buffer: Dict[str, torch.Tensor] = {}
+        self.initialized = False
+
+    def _init_storage(self, experience: Dict[str, torch.Tensor]) -> None:
+        for k, v in experience.items():
+            shape = (self.capacity,) + v.shape[1:]
+            self.buffer[k] = torch.zeros(shape, dtype=v.dtype, device=self.device)
+        self.initialized = True
+
+    def add(self, experience: Dict[str, torch.Tensor]) -> None:
+        if not self.initialized:
+            self._init_storage(experience)
+
+        batch_size = next(iter(experience.values())).shape[0]
+        if self.size + batch_size > self.capacity:
+            raise ValueError("RolloutBuffer overflow: not enough capacity")
+
+        idx = slice(self.size, self.size + batch_size)
+        for k, v in experience.items():
+            self.buffer[k][idx] = v.to(self.device)
+
+        self.size += batch_size
+
+    def sample(self, batch_size: int) -> Dict[str, torch.Tensor]:
+        if self.size < batch_size:
+            raise ValueError("Not enough samples to draw")
+
+        indices = torch.randperm(self.size, device=self.device)[:batch_size]
+        sampled = {k: v[indices] for k, v in self.buffer.items()}
+
+        # Keep the remaining entries by copying them up
+        keep_mask = torch.ones(self.size, dtype=bool, device=self.device)
+        keep_mask[indices] = False
+        keep_indices = keep_mask.nonzero(as_tuple=False).squeeze(-1)
+
+        for k in self.buffer:
+            self.buffer[k][:len(keep_indices)] = self.buffer[k][keep_indices]
+
+        self.size -= batch_size
+        return sampled
+
+    def get_batches(self, batch_size: int):
+        """
+        Yields mini-batches in random order. The final batch may be smaller.
+
+        After iteration, if drop_after_get=True, the buffer is cleared.
+        """
+        if self.size == 0:
+            return
+
+        indices = torch.randperm(self.size, device=self.device)
+
+        for i in range(0, self.size, batch_size):
+            idx = indices[i:i + batch_size]
+            batch = {k: v[idx] for k, v in self.buffer.items()}
+            yield batch
+
+    def clear(self) -> None:
+        self.size = 0
+        self.buffer = {}
+        self.initialized = False

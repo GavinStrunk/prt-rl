@@ -93,4 +93,26 @@ def test_reward_tracking(mock_env):
     assert collector.current_episode_length == 1
     assert collector.cumulative_reward == 7
 
+def test_parallel_collector():
+    env = GymnasiumWrapper("CartPole-v1", num_envs=2)
 
+    collector = ParallelCollector(env)
+    exp = collector.collect_experience(policy=lambda x: torch.zeros(2,1, dtype=torch.int64), num_steps=10)
+
+    assert exp['action'].shape == (10, 1)
+    assert exp['reward'].shape == (10, 1)
+    assert exp['state'].shape == (10, 4)
+    assert exp['next_state'].shape == (10, 4)
+    assert exp['done'].shape == (10, 1)
+
+def test_parallel_collector_with_one_environment():
+    env = GymnasiumWrapper("CartPole-v1", num_envs=1)
+
+    collector = ParallelCollector(env)
+    exp = collector.collect_experience(policy=lambda x: torch.zeros(1,1, dtype=torch.int64), num_steps=5)
+
+    assert exp['action'].shape == (5, 1)
+    assert exp['reward'].shape == (5, 1)
+    assert exp['state'].shape == (5, 4)
+    assert exp['next_state'].shape == (5, 4)
+    assert exp['done'].shape == (5, 1)

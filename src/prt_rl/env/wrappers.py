@@ -164,10 +164,8 @@ class GymnasiumWrapper(EnvironmentInterface):
             self.env = gym.make(self.gym_name, render_mode=render_mode, **kwargs)
             vectorized = False
         else:
-            def make_fcn(gym_name, render_mode=None, **kwargs):
-                def _init():
-                    return gym.make(gym_name, render_mode=render_mode, **kwargs)
-                return _init
+            def make_fcn(env_name: str, render_mode=None, **kwargs):
+                return lambda: gym.make(env_name, render_mode=render_mode, **kwargs)
             
             self.env = gym.vector.SyncVectorEnv([make_fcn(self.gym_name, render_mode=render_mode, **kwargs) for _ in range(num_envs)])
             vectorized = True
@@ -199,7 +197,7 @@ class GymnasiumWrapper(EnvironmentInterface):
             
         return state, info
     
-    def reset_done(self, done: torch.Tensor, seed: int | None = None) -> Tuple[torch.Tensor, Dict[str, Any]]:
+    def reset_index(self, index: int, seed: int | None = None) -> Tuple[torch.Tensor, Dict[str, Any]]:
         """
         Resets only the environments that are done.
 
@@ -209,20 +207,15 @@ class GymnasiumWrapper(EnvironmentInterface):
         Returns:
             Tuple[torch.Tensor, Dict[str, Any]]: The new observations and info dict
         """
-        if self.num_envs == 1:
-            return self.reset(seed=seed)
+        if index > self.num_envs:
+            raise ValueError(f"Index {index} is out of bounds for {self.num_envs} environments.")
         
-        if done.all():
-            state, info = self.env.reset(seed=seed)
-        else:
-            done_mask = done.squeeze(-1).cpu().numpy().astype(bool)
-            # Call Gymnasium's vectorized env reset with mask
-            state, info = self.env.reset(reset_mask=done_mask)
-
+        state, info = self.env.envs[index].reset(seed=seed)
         state = self._process_observation(state)
 
         if self.render_mode == 'rgb_array':
-            info['rgb_array'] = self.env.render()[np.newaxis, ...]
+            rgb = self.env.render()
+            info['rgb_array'] = rgb[np.newaxis, ...]
 
         return state, info
 

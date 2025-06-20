@@ -2,6 +2,7 @@ import torch
 from typing import Dict, Optional, List
 from prt_rl.env.interface import EnvironmentInterface, EnvParams, MultiAgentEnvParams
 from prt_rl.common.loggers import Logger
+from prt_rl.common.policies import ActorCriticPolicy
 
    
 class SequentialCollector:
@@ -204,16 +205,34 @@ class ParallelCollector:
         next_states = []
         rewards = []
         dones = []
+        value_estimates = []
+        log_probs = []
 
         for _ in range(num_steps_per_env):
             # Reset the environment if no previous state
             if self.previous_experience is None:
                 state, _ = self.env.reset()
             else:
-                state = self.env.reset_done(self.previous_experience["done"])
+                # Only reset the environments that are done
+                state = self.previous_experience["next_state"]
+                for i in range(self.previous_experience["done"].shape[0]):
+                    if self.previous_experience["done"][i]:
+                        # Reset the environment for this index
+                        reset_state, _ = self.env.reset_index(i)
+                        # Update the previous experience for this index
+                        state[i] = reset_state
+
 
             # Use random or given policy
-            action = self._random_action(state) if policy is None else policy(state)
+            if policy is None:
+                action = self._random_action(state)
+            elif isinstance(policy, ActorCriticPolicy):
+                action, value_est, log_prob = policy.predict(state)
+                value_estimates.append(value_est)
+                log_probs.append(log_prob)
+            else:
+                action = policy(state)
+
             next_state, reward, done, _ = self.env.step(action)
 
             states.append(state)
@@ -230,10 +249,19 @@ class ParallelCollector:
                 "done": done,
             }
 
-        return {
+        experience = {
             "state": torch.cat(states, dim=0),
             "action": torch.cat(actions, dim=0),
             "next_state": torch.cat(next_states, dim=0),
             "reward": torch.cat(rewards, dim=0),
             "done": torch.cat(dones, dim=0),
         }
+
+        if isinstance(policy, ActorCriticPolicy):
+            # Compute the last value estimate
+            _, last_value_estimate, _ = self.policy.predict(self.previous_experience['next_state'])
+            experience['value_est'] = torch.cat(value_estimates, dim=0)
+            experience['log_prob'] = torch.cat(log_probs, dim=0)
+            experience['last_value_est'] = last_value_estimate
+        
+        return experience

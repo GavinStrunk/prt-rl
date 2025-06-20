@@ -40,6 +40,8 @@ class MLP(nn.Module):
         if output_dim is not None:
             self.layers.append(nn.Linear(dims[-1], output_dim))
             self.final_activation = final_activation
+        else:
+            self.final_activation = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         for layer in self.layers:

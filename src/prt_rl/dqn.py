@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from typing import Optional, List, Dict, Tuple
 from prt_rl.env.interface import EnvParams, EnvironmentInterface
-from prt_rl.common.replay_buffers import ReplayBuffer, BaseReplayBuffer, PrioritizedReplayBuffer
+from prt_rl.common.buffers import ReplayBuffer, BaseBuffer, PrioritizedReplayBuffer
 from prt_rl.common.networks import NatureCNN
 from prt_rl.common.decision_functions import EpsilonGreedy
 from prt_rl.common.schedulers import ParameterScheduler
@@ -51,7 +51,7 @@ class DQN(BaseAgent):
                  polyak_tau: Optional[float] = None,
                  train_freq: int = 1,
                  gradient_steps: int = 1,
-                 replay_buffer: Optional[BaseReplayBuffer] = None,
+                 replay_buffer: Optional[BaseBuffer] = None,
                  device: str = "cuda",
                  ) -> None:
         self.env_params = env_params
@@ -297,7 +297,7 @@ class DoubleDQN(DQN):
                  polyak_tau: Optional[float] = None,
                  train_freq: int = 1,
                  gradient_steps: int = 1,
-                 replay_buffer: Optional[BaseReplayBuffer] = None,
+                 replay_buffer: Optional[BaseBuffer] = None,
                  device: str = "cuda",
                  ) -> None:
         super().__init__(

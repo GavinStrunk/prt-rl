@@ -286,7 +286,11 @@ class ActorCriticPolicy(BasePolicy):
                 state: torch.Tensor
                 ) -> torch.Tensor:
         # Run Actor
-        action_encoding = self.actor_encoder_network(state)
+        if self.actor_encoder_network is None:
+            action_encoding = state
+        else:
+            action_encoding = self.actor_encoder_network(state)
+
         latent_features = self.actor_head(action_encoding)
         action_params = self.actor_distribution_layer(latent_features)
         distribution = self.distribution(action_params)
@@ -294,7 +298,11 @@ class ActorCriticPolicy(BasePolicy):
         log_probs = distribution.log_prob(action)
 
         # Run Critic
-        critic_features = self.critic_encoder_network(state)
+        if self.critic_encoder_network is None:
+            critic_features = state
+        else:
+            critic_features = self.critic_encoder_network(state)
+            
         value_est = self.critic_head(critic_features)
 
         return action, value_est, log_probs

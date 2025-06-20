@@ -204,6 +204,7 @@ def test_gymnasium_discrete_multienv():
     assert done.shape == (num_envs, 1)
 
 def test_gymnasium_reset_done():
+    import copy
     env = wrappers.GymnasiumWrapper(
         gym_name="CartPole-v1",
         render_mode=None,
@@ -216,17 +217,13 @@ def test_gymnasium_reset_done():
     action = torch.zeros(4, 1, dtype=torch.int)
     next_state, reward, done, info = env.step(action)
 
-    # Set all dones to true to reset all environments
-    done = torch.ones(4, 1, dtype=torch.bool)
-    new_state, _ = env.reset_done(done, seed=0)
-    torch.testing.assert_close(new_state, state, rtol=1e-6, atol=1e-6)
-
-    next_state, reward, done, info = env.step(action)
-
     # Reset only the second and third environments
-    done = torch.tensor([[False], [True], [True], [False]], dtype=torch.bool)
-    new_state, _ = env.reset_done(done, seed=0)
+    new_state = copy.deepcopy(next_state)
+    new_state[1], _ = env.reset_index(1, seed=1)
+    new_state[2], _ = env.reset_index(2, seed=2)
     torch.testing.assert_close(new_state[1:3], state[1:3], rtol=1e-6, atol=1e-6)
+    assert not torch.allclose(new_state[0], state[0], rtol=1e-6, atol=1e-6)
+    assert not torch.allclose(new_state[3], state[3], rtol=1e-6, atol=1e-6)
 
 def test_vmas_wrapper():
     num_envs = 2
