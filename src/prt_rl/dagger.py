@@ -3,6 +3,8 @@ from prt_rl.agent import BaseAgent
 from prt_rl.env.interface import EnvironmentInterface 
 from prt_rl.common.buffers import ReplayBuffer
 from prt_rl.common.collectors import SequentialCollector
+
+
 class DAgger(BaseAgent):
     def __init__(self,
                  policy: torch.nn.Module,
@@ -49,7 +51,9 @@ class DAgger(BaseAgent):
 
             # Update the policy experience with expert actions
             policy_experience['action'] = expert_actions
+
             # Add the policy experience to the replay buffer
+            experience_buffer.add(policy_experience)
 
             # Optimize the policy
             for _ in range(self.optim_steps):

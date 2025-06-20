@@ -40,7 +40,7 @@ class DQN(BaseAgent):
     """
     def __init__(self,
                  env_params: EnvParams,
-                 policy,
+                 policy: QValuePolicy,
                  alpha: float = 0.1,
                  gamma: float = 0.99,
                  buffer_size: int = 1_000_000,
