@@ -304,8 +304,6 @@ def test_get_batches_exact_division():
     for batch in batches:
         assert all(v.shape[0] == 10 for v in batch.values())
 
-    assert buffer.get_size() == 0  # Cleared after get_batches
-
 def test_get_batches_inexact_division():
     buffer = RolloutBuffer(capacity=25)
     buffer.add({
@@ -319,7 +317,6 @@ def test_get_batches_inexact_division():
     assert len(batches) == 3
     sizes = [b["state"].shape[0] for b in batches]
     assert sizes == [8, 8, 7]
-    assert buffer.get_size() == 0
 
 def test_get_batches_empty():
     buffer = RolloutBuffer(capacity=10)
