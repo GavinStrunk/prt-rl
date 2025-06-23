@@ -225,6 +225,19 @@ def test_gymnasium_reset_done():
     assert not torch.allclose(new_state[0], state[0], rtol=1e-6, atol=1e-6)
     assert not torch.allclose(new_state[3], state[3], rtol=1e-6, atol=1e-6)
 
+def test_gymnasium_wrapper_with_render():
+    env = wrappers.GymnasiumWrapper(
+        gym_name="CartPole-v1",
+        render_mode="rgb_array",
+    )
+
+    state, info = env.reset()
+    assert info['rgb_array'].shape == (1, 400, 600, 3)
+
+    action = torch.zeros((1, 1), dtype=torch.int)
+    next_state, reward, done, info = env.step(action)
+    assert info['rgb_array'].shape == (1, 400, 600, 3)
+
 def test_vmas_wrapper():
     num_envs = 2
     env = wrappers.VmasWrapper(

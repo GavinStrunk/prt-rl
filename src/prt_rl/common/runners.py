@@ -1,7 +1,8 @@
-from typing import Optional
+from typing import Optional, List
 from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.common.recorders import Recorder
 from prt_rl.common.visualizers import Visualizer
+from prt_rl.agent import BaseAgent
 
 
 class Runner:
@@ -15,39 +16,49 @@ class Runner:
     """
     def __init__(self,
                  env: EnvironmentInterface,
-                 policy: object,
-                 recorder: Optional[Recorder] = None,
+                 policy: BaseAgent,
+                 recorders: Optional[List[Recorder]] = None,
                  visualizer: Optional[Visualizer] = None,
                  ) -> None:
         self.env = env
         self.policy = policy
-        self.recorder = recorder or Recorder()
+        self.recorders = recorders or []
         self.visualizer = visualizer or Visualizer()
 
     def run(self):
         # Reset the environment and recorder
-        self.recorder.reset()
+        for r in self.recorders:
+            r.reset()
+
         state, info = self.env.reset()
         done = False
 
         # Start visualizer and show initial frame
         self.visualizer.start()
-        rgb_frame = info['rgb_array'][0]
-        rgb_frame = rgb_frame.transpose(1, 2, 0)
-        self.recorder.capture_frame(rgb_frame)
-        self.visualizer.show(rgb_frame)
+        self.visualizer.show(info['rgb_array'][0])
+        for r in self.recorders:
+            r.record_info(info)
 
         # Loop until the episode is done
         while not done:
-            action = self.policy.predict(state)
+            action = self.policy(state)
             next_state, reward, done, info = self.env.step(action)
 
             # Record the environment frame
-            rgb_frame = info['rgb_array'][0]
-            rgb_frame = rgb_frame.transpose(1, 2, 0)
-            self.recorder.capture_frame(rgb_frame)
-            self.visualizer.show(rgb_frame)
+            self.visualizer.show(info['rgb_array'][0])
+            for r in self.recorders:
+                r.record_info(info)
+                r.record_experience({
+                    'state': state,
+                    'action': action,
+                    'reward': reward,
+                    'next_state': next_state,
+                    'done': done
+                })
+
+            state = next_state
 
         self.visualizer.stop()
         # Save the recording
-        self.recorder.save()
+        for r in self.recorders:
+            r.close()

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import torch
-import torch.distributions as dist
+import torch.distributions as tdist
 
 class Distribution(ABC):
     @staticmethod
@@ -28,7 +28,7 @@ class Distribution(ABC):
         raise NotImplementedError("This method should be implemented by subclasses to return the last layer of the network for this distribution.")
         
 
-class Categorical(Distribution, dist.Categorical):
+class Categorical(Distribution, tdist.Categorical):
     def __init__(self,
                  probs: torch.Tensor
                  ) -> None:
@@ -49,9 +49,12 @@ class Categorical(Distribution, dist.Categorical):
         Args:
             num_actions (int): The number of actions in the environment.
         """
-        return torch.nn.Softmax(dim=-1)
+        return torch.nn.Sequential(
+            torch.nn.Linear(in_features=feature_dim, out_features=num_actions),
+            torch.nn.Softmax(dim=-1)
+        )
 
-class Normal(Distribution, dist.Normal):
+class Normal(Distribution, tdist.Normal):
     def __init__(self,
                  probs: torch.Tensor
                  ) -> None:

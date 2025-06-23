@@ -1,22 +1,57 @@
+import numpy as np
 import torch
+from typing import Optional, List
 from prt_rl.agent import BaseAgent
-from prt_rl.env.interface import EnvironmentInterface 
+from prt_rl.env.interface import EnvironmentInterface, EnvParams
+from prt_rl.common.schedulers import ParameterScheduler
+from prt_rl.common.loggers import Logger
+from prt_rl.common.progress_bar import ProgressBar
+from prt_rl.common.evaluators import Evaluator
+
 from prt_rl.common.buffers import ReplayBuffer
 from prt_rl.common.collectors import SequentialCollector
+from prt_rl.common.policies import DistributionPolicy
+from prt_rl.common.distributions import Categorical, Normal
 
 
 class DAgger(BaseAgent):
     def __init__(self,
-                 policy: torch.nn.Module,
+                 env_params: EnvParams, 
+                 policy: Optional[DistributionPolicy] = None,
                  buffer_size: int = 10000,
+                 learning_rate: float = 1e-3,
+                 optim_steps: int = 1,
                  mini_batch_size: int = 32,
+                 max_grad_norm: float = 10.0,
+                 device: str = 'cpu',
                  ) -> None:
-        self.policy = policy
+        self.env_params = env_params
+        self.policy = policy if policy is not None else DistributionPolicy(env_params=env_params)
         self.buffer_size = buffer_size
+        self.learning_rate = learning_rate
+        self.optim_steps = optim_steps
         self.mini_batch_size = mini_batch_size
+        self.max_grad_norm = max_grad_norm
+        self.device = torch.device(device)
+        self.policy.to(self.device)
 
-        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=1e-3)
+        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.learning_rate)
+        self.loss_function = self._get_loss_function(self.policy)
 
+    @staticmethod
+    def _get_loss_function(policy: DistributionPolicy) -> torch.nn.Module:
+        """
+        Returns the loss function used for training the policy based on the type of distribution.
+        """
+        if issubclass(policy.distribution, Categorical):
+            # For categorical distributions, use CrossEntropyLoss
+            return torch.nn.CrossEntropyLoss()
+        elif issubclass(policy.distribution, Normal):
+            # For continuous distributions, use MSELoss
+            return torch.nn.MSELoss()
+        else:
+            raise ValueError(f"Unsupported distribution type {policy.distribution.__class__} loss function.")
+    
     def predict(self, state: torch.Tensor) -> torch.Tensor:
         """
         Perform an action based on the current state using the policy.
@@ -35,16 +70,31 @@ class DAgger(BaseAgent):
               expert_policy: torch.nn.Module,
               experience_buffer: ReplayBuffer,
               total_steps: int,
+              schedulers: List[ParameterScheduler] = [],              
+              logger: Optional[Logger] = None,
+              logging_freq: int = 1,              
+              evaluator: Evaluator = Evaluator(),
+              eval_freq: int = 1000,
               ) -> None:
+        logger = logger or Logger.create('blank')
+        progress_bar = ProgressBar(total_steps=total_steps)
+
         # Resize the replay buffer with size: initial experience + total_steps
         experience_buffer.resize(new_capacity=experience_buffer.size + self.buffer_size)
 
         # Add initial experience to the replay buffer
         collector = SequentialCollector(env=env)
 
-        for i in range(total_steps):
+        num_steps = 0
+
+        while num_steps < total_steps:
+            # Update schedulers if any
+            for scheduler in schedulers:
+                scheduler.update(current_step=num_steps)
+
             # Collect experience using the current policy
-            policy_experience = collector.collect_experience(policy=self.policy, num_steps=1)
+            policy_experience = collector.collect_experience(policy=self.policy, num_steps=1000)
+            num_steps += policy_experience['state'].shape[0]
 
             # Get expert action for each state in the collected experience
             expert_actions = expert_policy(policy_experience['state'])
@@ -56,14 +106,35 @@ class DAgger(BaseAgent):
             experience_buffer.add(policy_experience)
 
             # Optimize the policy
+            losses = []
             for _ in range(self.optim_steps):
                 for batch in experience_buffer.get_batches(batch_size=self.mini_batch_size):
-                    policy_actions = self.policy(batch['state'])
-
                     # Compute the loss between the policy's actions and the expert's actions
-                    loss = torch.nn.functional.mse_loss(policy_actions, batch['action'])
+                    if not self.env_params.action_continuous:
+                        policy_logits = self.policy.get_logits(batch['state'])
+                        loss = self.loss_function(policy_logits, batch['action'].squeeze(1))
+                    else:
+                        policy_actions = self.policy(batch['state'])
+                        loss = self.loss_function(policy_actions, batch['action'])
+
+                    losses.append(loss.item())
 
                     self.optimizer.zero_grad()
                     loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=1.0)
+                    torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=self.max_grad_norm)
                     self.optimizer.step()
+            
+            progress_bar.update(num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}, "
+                                                                   f"Episode Length: {collector.previous_episode_length}, "
+                                                                   f"Loss: {np.mean(losses):.4f},")
+
+            # Log the training progress
+            if num_steps % logging_freq == 0:
+                for scheduler in schedulers:
+                    logger.log_scalar(name=scheduler.parameter_name, value=getattr(scheduler.obj, scheduler.parameter_name), iteration=num_steps)
+
+            # Evaluate the agent periodically
+            if num_steps % eval_freq == 0:
+                evaluator.evaluate(agent=self.policy, iteration=num_steps)
+
+        evaluator.close()

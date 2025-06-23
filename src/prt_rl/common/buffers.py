@@ -174,6 +174,41 @@ class ReplayBuffer(BaseBuffer):
         self.buffer = {}
         self.initialized = False
 
+    def save(self, path: str) -> None:
+        """
+        Saves the replay buffer to a file.
+
+        Args:
+            path (str): Path to the file where the buffer will be saved.
+        """
+        torch.save({
+            'buffer': self.buffer,
+            'size': self.size,
+            'pos': self.pos,
+            'capacity': self.capacity
+        }, path)
+
+    @classmethod
+    def load(cls, path: str, device: str = "cpu") -> "ReplayBuffer":
+        """
+        Loads a replay buffer from a file.
+
+        Args:
+            path (str): Path to the saved buffer file.
+            device (str): Device to load the buffer to. Defaults to "cpu".
+
+        Returns:
+            ReplayBuffer: A ReplayBuffer instance with restored data.
+        """
+        data = torch.load(path, map_location=torch.device(device))
+
+        obj = cls(capacity=data['capacity'], device=torch.device(device))
+        obj.buffer = {k: v.to(torch.device(device)) for k, v in data['buffer'].items()}
+        obj.size = data['size']
+        obj.pos = data['pos']
+        obj.initialized = True
+        return obj        
+
 class SumTree:
     """
     A binary sum tree for efficient sampling of elements proportional to their priority.

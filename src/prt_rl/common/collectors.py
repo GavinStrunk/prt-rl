@@ -97,7 +97,7 @@ class SequentialCollector:
             actions.append(action.squeeze(0))
             next_states.append(next_state.squeeze(0))
             rewards.append(reward.squeeze(0))
-            dones.append(torch.tensor([done], dtype=torch.bool, device=reward.device))
+            dones.append(done.squeeze(0))
 
             self.collected_steps += 1
             self.current_episode_reward += reward.sum().item()
