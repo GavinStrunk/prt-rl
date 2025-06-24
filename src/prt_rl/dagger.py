@@ -87,7 +87,7 @@ class DAgger(BaseAgent):
     
     def train(self,
               env: EnvironmentInterface,
-              expert_policy: torch.nn.Module,
+              expert_policy: BaseAgent,
               experience_buffer: ReplayBuffer,
               total_steps: int,
               schedulers: List[ParameterScheduler] = [],              
@@ -101,7 +101,7 @@ class DAgger(BaseAgent):
 
         Args:
             env (EnvironmentInterface): The environment in which the agent will operate.
-            expert_policy (torch.nn.Module): The expert policy to provide actions for the states.
+            expert_policy (BaseAgent): The expert agent to provide actions for the states.
             experience_buffer (ReplayBuffer): The replay buffer to store experiences.
             total_steps (int): Total number of training steps to perform.
             schedulers (List[ParameterScheduler]): List of parameter schedulers to update during training.
