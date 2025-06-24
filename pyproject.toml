@@ -44,6 +44,7 @@ dev = [
     "sphinxcontrib-mermaid>=1.0.0",
 ]
 sb3 = [
+    "rl-zoo3>=2.6.0",
     "sb3-contrib>=2.6.0",
     "stable-baselines3>=2.6.0",
 ]
