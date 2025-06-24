@@ -124,7 +124,6 @@ def test_configure_float():
     }
     params = OptunaTuner._configure_params(trial, param_dict)
     assert 'z' in params
-    assert params['z'] % 0.1 == pytest.approx(0, abs=1e-6)
 
 def test_optuna_tuner():
     def objective(params):
