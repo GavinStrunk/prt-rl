@@ -7,6 +7,20 @@ from prt_rl.common.evaluators import Evaluator
 from prt_rl.agent import BaseAgent
 
 class SB3Agent(BaseAgent):
+    """
+    Stable Baselines3 (SB3) agent for reinforcement learning. 
+    
+    This agent wraps a pre-trained model from Stable Baselines3 and uses it to predict actions based on the current state.
+
+    Note:
+        You must install prt-rl[sb3] to use this agent, which includes the necessary dependencies for Stable Baselines3.
+
+    Args:
+        model_path (str): Path to the pre-trained model file.
+        model_type (str): Type of the model (e.g., 'ppo', 'dqn', 'sac', etc.).
+        device (str): Device to run the model on ('cpu' or 'cuda'). Default is 'cpu'.
+        **kwargs: Additional keyword arguments to pass to the model loading function.
+    """
     def __init__(self, 
                  model_path: str, 
                  model_type: str,
@@ -75,14 +89,5 @@ class SB3Agent(BaseAgent):
               evaluator: Evaluator = Evaluator(),
               eval_freq: int = 1000,
               ) -> None:
-        """
-        Update the agent's knowledge based on the action taken and the received reward.
-
-        Args:
-            state: The current state of the environment.
-            action: The action taken.
-            reward: The reward received after taking the action.
-            next_state: The next state of the environment after taking the action.
-        """
         raise NotImplementedError("The train method must be implemented by subclasses.")
       

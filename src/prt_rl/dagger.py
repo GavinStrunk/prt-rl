@@ -15,6 +15,19 @@ from prt_rl.common.distributions import Categorical, Normal
 
 
 class DAgger(BaseAgent):
+    """
+    Dataset Aggregation from Demonstrations (DAgger) agent.
+
+    Args:
+        env_params (EnvParams): Environment parameters.
+        policy (Optional[DistributionPolicy]): The policy to be used by the agent. If None, a default policy will be created based on the environment parameters.
+        buffer_size (int): Size of the replay buffer. Default is 10000.
+        learning_rate (float): Learning rate for the optimizer. Default is 1e-3.
+        optim_steps (int): Number of optimization steps per training iteration. Default is 1.
+        mini_batch_size (int): Size of the mini-batch for training. Default is 32.
+        max_grad_norm (float): Maximum gradient norm for gradient clipping. Default is 10.0.
+        device (str): Device to run the agent on (e.g., 'cpu' or 'cuda'). Default is 'cpu'.
+    """
     def __init__(self,
                  env_params: EnvParams, 
                  policy: Optional[DistributionPolicy] = None,
@@ -42,6 +55,13 @@ class DAgger(BaseAgent):
     def _get_loss_function(policy: DistributionPolicy) -> torch.nn.Module:
         """
         Returns the loss function used for training the policy based on the type of distribution.
+
+        Args:
+            policy (DistributionPolicy): The policy for which to get the loss function.
+        Returns:
+            torch.nn.Module: The loss function to be used for training.
+        Raises:
+            ValueError: If the distribution type is not supported.
         """
         if issubclass(policy.distribution, Categorical):
             # For categorical distributions, use CrossEntropyLoss
@@ -60,7 +80,7 @@ class DAgger(BaseAgent):
             state: The current state of the environment.
         
         Returns:
-            The action to be taken.
+            The action to be taken by the policy.
         """
         with torch.no_grad():
             return self.policy(state)
@@ -76,6 +96,20 @@ class DAgger(BaseAgent):
               evaluator: Evaluator = Evaluator(),
               eval_freq: int = 1000,
               ) -> None:
+        """
+        Train the DAgger agent using the provided environment and expert policy.
+
+        Args:
+            env (EnvironmentInterface): The environment in which the agent will operate.
+            expert_policy (torch.nn.Module): The expert policy to provide actions for the states.
+            experience_buffer (ReplayBuffer): The replay buffer to store experiences.
+            total_steps (int): Total number of training steps to perform.
+            schedulers (List[ParameterScheduler]): List of parameter schedulers to update during training.
+            logger (Optional[Logger]): Logger for logging training progress. If None, a default logger will be created.
+            logging_freq (int): Frequency of logging training progress.
+            evaluator (Evaluator): Evaluator to evaluate the agent periodically.
+            eval_freq (int): Frequency of evaluation during training.
+        """
         logger = logger or Logger.create('blank')
         progress_bar = ProgressBar(total_steps=total_steps)
 
@@ -83,7 +117,7 @@ class DAgger(BaseAgent):
         experience_buffer.resize(new_capacity=experience_buffer.size + self.buffer_size)
 
         # Add initial experience to the replay buffer
-        collector = SequentialCollector(env=env)
+        collector = SequentialCollector(env=env, logger=logger, logging_freq=logging_freq)
 
         num_steps = 0
 
@@ -132,6 +166,7 @@ class DAgger(BaseAgent):
             if num_steps % logging_freq == 0:
                 for scheduler in schedulers:
                     logger.log_scalar(name=scheduler.parameter_name, value=getattr(scheduler.obj, scheduler.parameter_name), iteration=num_steps)
+                logger.log_scalar(name='loss', value=np.mean(losses), iteration=num_steps)
 
             # Evaluate the agent periodically
             if num_steps % eval_freq == 0:
