@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from sympy import E
 import torch
 from typing import Optional, List, Union
 from prt_rl.common.schedulers import ParameterScheduler

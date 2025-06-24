@@ -1,11 +1,9 @@
 import copy
 import numpy as np
 import torch
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Tuple
 from prt_rl.env.interface import EnvParams, EnvironmentInterface
 from prt_rl.common.buffers import ReplayBuffer, BaseBuffer, PrioritizedReplayBuffer
-from prt_rl.common.networks import NatureCNN
-from prt_rl.common.decision_functions import EpsilonGreedy
 from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.collectors import SequentialCollector
 from prt_rl.common.loggers import Logger

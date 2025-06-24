@@ -127,6 +127,118 @@ class QValuePolicy(BasePolicy):
         q_vals = self.policy_head(latent_state)
         return q_vals
 
+class DistributionPolicy(BasePolicy):
+    """
+    """
+    def __init__(self,
+                 env_params: EnvParams,
+                 encoder_network: Optional[Union[Type[BaseEncoder], Dict[str, Type[BaseEncoder]]]] = None,
+                 encoder_network_kwargs: Optional[dict] = {},
+                 policy_head: Union[Type[torch.nn.Module], Dict[str, Type[torch.nn.Module]]] = MLP,
+                 policy_kwargs: Optional[dict] = {},
+                 distribution: Optional[dist.Distribution] = None,
+                 device: str = "cpu",
+                 ) -> None:
+        super().__init__(env_params=env_params)
+        self.device = torch.device(device)
+        self.env_params = env_params
+        self.encoder_network = None
+
+        # Construct the encoder network if provided
+        if encoder_network is not None:
+            self.encoder_network = encoder_network(
+                input_shape=self.env_params.observation_shape,
+                **encoder_network_kwargs
+            )
+            self.latent_dim = self.encoder_network.features_dim
+        else:
+            self.encoder_network = None
+            self.latent_dim = self.env_params.observation_shape[0]
+        
+        # Construct the policy head network
+        self.policy_head = policy_head(
+            input_dim=self.latent_dim,
+            **policy_kwargs
+        )
+
+        self.policy_feature_dim = self.policy_head.layers[-2].out_features
+
+        self._build_distribution(distribution)
+
+        # Build the distribution layer
+    def _build_distribution(self,
+                           distribution: dist.Distribution,
+                           ) -> None:
+        """
+        Builds the distribution for the policy.
+
+        Args:
+            distribution (dist.Distribution): The distribution to use for the policy.
+        """
+        # Default distributions for discrete and continuous action spaces
+        if distribution is None:
+            if self.env_params.action_continuous:
+                self.distribution = dist.Normal
+            else:
+                self.distribution = dist.Categorical
+        else:
+            self.distribution = distribution
+
+        if self.env_params.action_continuous:
+            num_actions = self.env_params.action_len
+        else:
+            num_actions = self.env_params.action_max - self.env_params.action_min + 1
+
+        self.distribution_layer = self.distribution.last_network_layer(feature_dim=self.policy_feature_dim, num_actions=num_actions)
+
+    def forward(self,
+                   state: torch.Tensor
+                   ) -> torch.Tensor:
+        """
+        Chooses an action based on the current state. Expects the key "observation" in the state tensordict.
+
+        Args:
+            state (torch.Tensor): Current state tensor.
+
+        Returns:
+            torch.Tensor: Tensor with the chosen action.
+        """
+        if self.encoder_network is not None:
+            latent_state = self.encoder_network(state)
+        else:
+            latent_state = state
+        
+        latent_features = self.policy_head(latent_state)
+        action_params = self.distribution_layer(latent_features)
+        distribution = self.distribution(action_params)
+        action = distribution.sample().unsqueeze(1)
+        return action
+    
+    def get_logits(self,
+                        state: torch.Tensor
+                    ) -> torch.Tensor:
+        """
+        Returns the logits from the policy network given the input state.
+
+        Args:
+            state (torch.Tensor): Input state tensor of shape (batch_size, obs_dim).
+
+        Returns:
+            torch.Tensor: Logits tensor of shape (batch_size, num_actions).
+        """
+        if not issubclass(self.distribution, dist.Categorical):
+            raise ValueError("get_logits is only supported for Categorical distributions. Use forward for other distributions.")
+        
+        if self.encoder_network is not None:
+            latent_state = self.encoder_network(state)
+        else:
+            latent_state = state
+        
+        latent_features = self.policy_head(latent_state)
+        action_params = self.distribution_layer(latent_features)
+        return action_params
+
+
 class ActorCriticPolicy(BasePolicy):
     """
     

@@ -37,8 +37,10 @@ class SequentialCollector:
         """
         Randomly samples an action from action space.
 
+        Args:
+            state (torch.Tensor): The current state of the environment.
         Returns:
-            TensorDict: Tensordict with the "action" key added
+            torch.Tensor: A tensor containing the sampled action.
         """
         if isinstance(self.env_params, EnvParams):
             ashape = (state.shape[0], self.env_params.action_len)
@@ -73,7 +75,12 @@ class SequentialCollector:
             policy (callable): A callable that takes a state and returns an action.
             num_steps (int): The number of steps to collect experience for. Defaults to 1.
         Returns:
-            List[dict]: A list of experience dictionaries, each containing state, action, next_state, reward, and done.
+            Dict[str, torch.Tensor]: A dictionary containing the collected experience with keys:
+                - 'state': The states collected.
+                - 'action': The actions taken.
+                - 'next_state': The next states after taking the actions.
+                - 'reward': The rewards received.
+                - 'done': The done flags indicating if the episode has ended.
         """
         states = []
         actions = []
@@ -97,7 +104,7 @@ class SequentialCollector:
             actions.append(action.squeeze(0))
             next_states.append(next_state.squeeze(0))
             rewards.append(reward.squeeze(0))
-            dones.append(torch.tensor([done], dtype=torch.bool, device=reward.device))
+            dones.append(done.squeeze(0))
 
             self.collected_steps += 1
             self.current_episode_reward += reward.sum().item()
@@ -165,8 +172,10 @@ class ParallelCollector:
         """
         Randomly samples an action from action space.
 
+        Args:
+            state (torch.Tensor): The current state of the environment.
         Returns:
-            TensorDict: Tensordict with the "action" key added
+            torch.Tensor: A tensor containing the sampled action.
         """
         if isinstance(self.env_params, EnvParams):
             ashape = (state.shape[0], self.env_params.action_len)
@@ -195,6 +204,19 @@ class ParallelCollector:
                            policy = None,
                            num_steps: int = 1
                            ) -> Dict[str, torch.Tensor]:
+        """
+        Collects the given number of experiences from the environment using the provided policy.
+        Args:
+            policy (callable): A callable that takes a state and returns an action.
+            num_steps (int): The number of steps to collect experience for. Defaults to 1.
+        Returns:
+            Dict[str, torch.Tensor]: A dictionary containing the collected experience with keys:
+                - 'state': The states collected.
+                - 'action': The actions taken.
+                - 'next_state': The next states after taking the actions.
+                - 'reward': The rewards received.
+                - 'done': The done flags indicating if the episode has ended.
+        """
         # Get the number of steps to take per environment to get at least `num_steps`
         # A trick for ceiling division: (a + b - 1) // b
         num_envs = self.env.get_num_envs()
