@@ -98,7 +98,13 @@ class SB3Agent(BaseAgent):
             state = state.cpu().numpy()
 
         action, _ = self.model.predict(state, deterministic=True)
-        return torch.tensor(action, device=self.device).unsqueeze(-1)
+
+        if len(action.shape) == 1:
+            # Discrete actions are returned with shape (batch_size,)
+            action = torch.tensor(action, device=self.device).unsqueeze(-1)
+        else:
+            action = torch.tensor(action, device=self.device)
+        return action
 
     def train(self,
               env: EnvironmentInterface,
