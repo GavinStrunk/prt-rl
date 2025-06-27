@@ -23,7 +23,7 @@ class Runner:
         self.env = env
         self.policy = policy
         self.recorders = recorders or []
-        self.visualizer = visualizer or Visualizer()
+        self.visualizer = visualizer
 
     def run(self):
         # Reset the environment and recorder
@@ -34,8 +34,10 @@ class Runner:
         done = False
 
         # Start visualizer and show initial frame
-        self.visualizer.start()
-        self.visualizer.show(info['rgb_array'][0])
+        if self.visualizer is not None:
+            self.visualizer.start()
+            self.visualizer.show(info['rgb_array'][0])
+
         for r in self.recorders:
             r.record_info(info)
 
@@ -45,7 +47,9 @@ class Runner:
             next_state, reward, done, info = self.env.step(action)
 
             # Record the environment frame
-            self.visualizer.show(info['rgb_array'][0])
+            if self.visualizer is not None:
+                self.visualizer.show(info['rgb_array'][0])
+
             for r in self.recorders:
                 r.record_info(info)
                 r.record_experience({
@@ -58,7 +62,11 @@ class Runner:
 
             state = next_state
 
-        self.visualizer.stop()
+        if self.visualizer is not None:
+            self.visualizer.stop()
+
         # Save the recording
         for r in self.recorders:
             r.close()
+
+        self.env.close()

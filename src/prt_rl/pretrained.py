@@ -21,6 +21,9 @@ class SB3Agent(BaseAgent):
         model_type (str): Type of the model (e.g., 'ppo', 'dqn', 'sac', etc.).
         device (str): Device to run the model on ('cpu' or 'cuda'). Default is 'cpu'.
         **kwargs: Additional keyword arguments to pass to the model loading function.
+
+    Reference:
+        [1] [Model Library](https://huggingface.co/sb3)
     """
     def __init__(self, 
                  model_dir: str, 

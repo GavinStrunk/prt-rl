@@ -123,6 +123,12 @@ class EnvironmentInterface(ABC):
             Tuple: Tuple of tensors containing the next state, reward, done, and info dictionary
         """
         raise NotImplementedError()
+    
+    def close(self) -> None:
+        """
+        Closes the environment and cleans up any resources.
+        """
+        pass
 
 
 class NumpyEnvironmentInterface(ABC):
