@@ -1,3 +1,4 @@
+import os
 import torch
 from typing import Optional, List
 from prt_rl.common.schedulers import ParameterScheduler
@@ -16,14 +17,15 @@ class SB3Agent(BaseAgent):
         You must install prt-rl[sb3] to use this agent, which includes the necessary dependencies for Stable Baselines3.
 
     Args:
-        model_path (str): Path to the pre-trained model file.
+        model_dir (str): Path to the pre-trained model file.
         model_type (str): Type of the model (e.g., 'ppo', 'dqn', 'sac', etc.).
         device (str): Device to run the model on ('cpu' or 'cuda'). Default is 'cpu'.
         **kwargs: Additional keyword arguments to pass to the model loading function.
     """
     def __init__(self, 
-                 model_path: str, 
+                 model_dir: str, 
                  model_type: str,
+                 env_name: str,
                  device: str = "cpu",
                  **kwargs
                  ) -> None:
@@ -34,6 +36,8 @@ class SB3Agent(BaseAgent):
             from sb3_contrib import ARS, QRDQN, TQC, TRPO, CrossQ, RecurrentPPO
             from stable_baselines3 import A2C, DDPG, DQN, PPO, SAC, TD3
             from stable_baselines3.common.base_class import BaseAlgorithm
+            from rl_zoo3.load_from_hub import download_from_hub
+            from rl_zoo3.utils import get_model_path
 
             ALGOS: dict[str, type[BaseAlgorithm]] = {
                 "a2c": A2C,
@@ -58,7 +62,23 @@ class SB3Agent(BaseAgent):
         except ImportError:
             raise ImportError("Please install prt-rl with stable-baselines3 support with pip install prt-rl[sb3].")
         
-        self.model = self.model_class.load(model_path, device=self.device, **kwargs)
+        # Get the model path and if it does not exist, download it from the hub
+        try:
+            _, self.model_path, _ = get_model_path(exp_id=0, folder=model_dir, algo=self.model_type, env_name=env_name)
+        except (AssertionError, ValueError) as e:
+            download_from_hub(
+                algo=self.model_type, 
+                env_name=env_name, 
+                exp_id=0,
+                folder=model_dir,
+                organization="sb3",
+                repo_name=None,
+                force=False 
+                )
+            _, self.model_path, _ = get_model_path(exp_id=0, folder=model_dir, algo=self.model_type, env_name=env_name)
+        
+        # Load the model
+        self.model = self.model_class.load(self.model_path, device=self.device, **kwargs)
 
     def predict(self, state: torch.Tensor) -> torch.Tensor:
         """
@@ -78,7 +98,13 @@ class SB3Agent(BaseAgent):
             state = state.cpu().numpy()
 
         action, _ = self.model.predict(state, deterministic=True)
-        return torch.tensor(action, device=self.device).unsqueeze(-1)
+
+        if len(action.shape) == 1:
+            # Discrete actions are returned with shape (batch_size,)
+            action = torch.tensor(action, device=self.device).unsqueeze(-1)
+        else:
+            action = torch.tensor(action, device=self.device)
+        return action
 
     def train(self,
               env: EnvironmentInterface,
