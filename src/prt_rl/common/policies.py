@@ -184,12 +184,9 @@ class DistributionPolicy(BasePolicy):
         else:
             self.distribution = distribution
 
-        if self.env_params.action_continuous:
-            num_actions = self.env_params.action_len
-        else:
-            num_actions = self.env_params.action_max - self.env_params.action_min + 1
+        action_dim = self.distribution.get_action_dim(self.env_params)
 
-        self.distribution_layer = self.distribution.last_network_layer(feature_dim=self.policy_feature_dim, num_actions=num_actions)
+        self.distribution_layer = self.distribution.last_network_layer(feature_dim=self.policy_feature_dim, action_dim=action_dim)
 
     def forward(self,
                    state: torch.Tensor

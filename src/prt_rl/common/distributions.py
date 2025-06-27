@@ -1,11 +1,13 @@
 from abc import ABC, abstractmethod
 import torch
 import torch.distributions as tdist
+from typing import Tuple, Union
+from prt_rl.env.interface import EnvParams
 
 class Distribution(ABC):
     @staticmethod
     @abstractmethod
-    def parameters_per_action() -> int:
+    def get_action_dim(env_params: EnvParams) -> int:
         """
         Returns the number of parameters per action to define the distribution.
 
@@ -16,7 +18,7 @@ class Distribution(ABC):
     
     @staticmethod
     @abstractmethod
-    def last_network_layer(feature_dim: int, num_actions: int) -> torch.nn.Module:
+    def last_network_layer(feature_dim: int, action_dim: int, **kwargs) -> Union[torch.nn.Module, Tuple[torch.nn.Module, torch.nn.Parameter]]:
         """
         Returns the last layer of the network that produces the parameters for this distribution.
         This is used to determine the output shape of the policy head.
@@ -38,11 +40,21 @@ class Categorical(Distribution, tdist.Categorical):
         super().__init__(probs)
 
     @staticmethod
-    def parameters_per_action() -> int:
-        return 1
-    
+    def get_action_dim(env_params: EnvParams) -> int:
+        """
+        Returns the number of parameters per action to define the distribution.
+        For Categorical, this is the number of actions in the environment.
+        Args:
+            env_params (EnvParams): The environment parameters containing the action space.
+        Returns:
+            int: The number of actions in the environment.
+        """
+        if env_params.action_continuous:
+            raise ValueError("Categorical distribution is not suitable for continuous action spaces.")
+        return env_params.action_max - env_params.action_min + 1
+
     @staticmethod
-    def last_network_layer(feature_dim: int, num_actions: int) -> torch.nn.Module:
+    def last_network_layer(feature_dim: int, action_dim: int) -> torch.nn.Module:
         """
         Returns the last layer of the network that produces the parameters for this distribution.
         For Categorical, this is a linear layer with num_actions outputs.
@@ -50,27 +62,56 @@ class Categorical(Distribution, tdist.Categorical):
             num_actions (int): The number of actions in the environment.
         """
         return torch.nn.Sequential(
-            torch.nn.Linear(in_features=feature_dim, out_features=num_actions),
+            torch.nn.Linear(in_features=feature_dim, out_features=action_dim),
             torch.nn.Softmax(dim=-1)
         )
 
 class Normal(Distribution, tdist.Normal):
+    """
+    Multivariate Normal or Diagonal Gaussian distribution.
+    This distribution is state independent parameterized by a mean and a log standard deviation (or scale).
+    
+    .. math::
+        a \sim N(\mu(s), exp(log(\sigma(s)^2) I)
+    
+    Args:
+        probs (torch.Tensor): A tensor of shape (batch_size, num_actions, 2) where the last dimension contains the mean and scale.
+    """
     def __init__(self,
                  probs: torch.Tensor
                  ) -> None:
-        scale = torch.nn.functional.relu(probs[..., 1])
-        super().__init__(loc=probs[..., 0], scale=scale)
+        if probs.shape[-1] != 2:
+            raise ValueError("Normal distribution requires the last dimension of probs to have size 2 (mean and log std).")
+        
+        mean_actions = probs[..., 0]
+        action_std = torch.ones_like(mean_actions) * torch.exp(probs[..., 1])
+        super().__init__(mean_actions, action_std)
 
     @staticmethod
-    def parameters_per_action() -> int:
-        return 2
-    
+    def get_action_dim(env_params: EnvParams) -> int:
+        """
+        Returns the number of parameters per action to define the distribution.
+        For Normal, this is 2 * num_actions (mean and log standard deviation).
+        Args:
+            env_params (EnvParams): The environment parameters containing the action space.
+        Returns:
+            int: The number of parameters required for each action in the distribution.
+        """
+        if not env_params.action_continuous:
+            raise ValueError("Normal distribution is only suitable for continuous action spaces.")
+        return env_params.action_len
+
     @staticmethod
-    def last_network_layer(feature_dim: int, num_actions: int) -> torch.nn.Module:
+    def last_network_layer(feature_dim: int, action_dim: int, log_std_init: float = 0.0) -> Tuple[torch.nn.Module, torch.nn.Parameter]:
         """
         Returns the last layer of the network that produces the parameters for this distribution.
         For Normal, this is a linear layer with 2 * num_actions outputs (mean and std).
         Args:
             num_actions (int): The number of actions in the environment.
+        Returns:
+            torch.nn.Module: The last layer of the network that produces the parameters for this distribution.
+            torch.nn.Parameter: A parameter for the log standard deviation, initialized to zero.
         """
-        return torch.nn.Linear(in_features=feature_dim, out_features=2 * num_actions)
+        log_std = torch.nn.Parameter(torch.ones(action_dim) * log_std_init, requires_grad=True)
+        
+        return torch.nn.Linear(in_features=feature_dim, out_features=action_dim), log_std
