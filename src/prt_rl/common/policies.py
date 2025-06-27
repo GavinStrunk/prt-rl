@@ -373,7 +373,8 @@ class ActorCriticPolicy(BasePolicy):
         else:
             self.distribution = distribution
 
-        self.actor_distribution_layer = self.distribution.last_network_layer(feature_dim=self.actor_feature_dim, num_actions=self.env_params.action_len)
+        action_dim = self.distribution.get_action_dim(self.env_params)
+        self.actor_distribution_layer = self.distribution.last_network_layer(feature_dim=self.actor_feature_dim, action_dim=action_dim)
 
 
     def forward(self,
