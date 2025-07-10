@@ -65,7 +65,7 @@ class OptunaTuner(HyperparameterTuner):
         self.num_jobs = num_jobs
 
     def tune(self, 
-             objective_fcn: Callable[[Dict], float],
+             objective_fcn: Callable,
              parameters: dict,
              ) -> Dict[str, Any]:
         """
