@@ -1,5 +1,5 @@
 import torch
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple
 from prt_rl.env.interface import EnvironmentInterface, EnvParams, MultiAgentEnvParams
 from prt_rl.common.loggers import Logger
 from prt_rl.common.policies import ActorCriticPolicy, DistributionPolicy
@@ -143,7 +143,7 @@ class SequentialCollector:
                            policy = None,
                            num_trajectories: Optional[int] = None,
                            min_num_steps: Optional[int] = None
-                           ) -> Dict[str, torch.Tensor]:
+                           ) -> Tuple[Dict[str, torch.Tensor], int]:
         """
         Collects a single trajectory from the environment using the provided policy.
 
@@ -446,3 +446,33 @@ class ParallelCollector:
         
         return experience
     
+    def collect_trajectory(self, 
+                           policy = None,
+                           num_trajectories: Optional[int] = None,
+                           min_num_steps: Optional[int] = None
+                           ) -> Tuple[Dict[str, torch.Tensor], int]:
+        """
+        Collects a single trajectory from the environment using the provided policy.
+
+        Return the trajectory with the shape (T, ...), where T is the number of steps in the trajectory.
+        Args:
+            policy (callable): A callable that takes a state and returns an action.
+        Returns:
+            Dict[str, torch.Tensor]: A dictionary containing the collected trajectory with keys:
+                - 'state': The states collected.
+                - 'action': The actions taken.
+                - 'next_state': The next states after taking the actions.
+                - 'reward': The rewards received.
+                - 'done': The done flags indicating if the episode has ended.
+        """
+        if num_trajectories is None and min_num_steps is None:
+            num_trajectories = 1
+
+        if num_trajectories is not None and min_num_steps is not None:
+            raise ValueError("Only one of num_trajectories or min_num_steps should be provided, not both.")
+        
+        N = self.env.get_num_envs()
+        trajectories = []
+        total_steps = 0
+
+        return trajectories, total_steps    

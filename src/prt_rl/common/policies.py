@@ -248,6 +248,8 @@ class DistributionPolicy(BasePolicy):
             action = action.unsqueeze(-1)
 
         log_probs = distribution.log_prob(action)
+        # Compute the total log probability for the action vector
+        log_probs = log_probs.sum(dim=-1, keepdim=True)
 
         return action, log_probs
     
