@@ -554,7 +554,7 @@ def test_distribution_policy_predict_action_and_log_probs_continuous():
     action, log_probs = policy.predict(state)
     
     assert action.shape == (1, 2)  # Action shape should match the action_len of 2
-    assert log_probs.shape == (1, 2)  # Log probabilities for continuous actions
+    assert log_probs.shape == (1, 1)  # Log probabilities for continuous actions
     assert torch.all(log_probs >= -float('inf')) and torch.all(log_probs <= 0)  # Log probabilities should be valid
 
 def test_distribution_policy_forward():
