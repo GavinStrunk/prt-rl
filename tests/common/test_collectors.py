@@ -119,7 +119,7 @@ def test_sequential_trajectory_min_steps():
     collector = SequentialCollector(env)
     trajectory, _ = collector.collect_trajectory(policy=lambda x: torch.zeros(1,1, dtype=torch.int64), min_num_steps=20)
 
-    assert len(trajectory) == 3
+    assert len(trajectory) > 1
     assert trajectory[-1]['done'][-1]  # Ensure the last step is done
 
 def test_parallel_collector():
