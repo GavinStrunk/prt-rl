@@ -44,7 +44,7 @@ class MaxRewardEvaluator(Evaluator):
                  ) -> None:
         self.env = env
         self.num_episodes = num_episodes
-        self.logger = logger if logger is not None else Logger()
+        self.logger = logger
         self.keep_best = keep_best
         self.best_reward = float("-inf")
         self.best_agent = None
@@ -65,14 +65,18 @@ class MaxRewardEvaluator(Evaluator):
             A dictionary containing evaluation metrics.
         """
         rewards = []
-        for _ in range(self.num_episodes):
-            state, _ = self.env.reset()
+        for i in range(self.num_episodes):
+            state, _ = self.env.reset(seed=i)
+
             episode_reward = 0.0
             done = False
 
             while not done:
+                state = state.float()
                 action = agent(state)
+
                 next_state, reward, done, _ = self.env.step(action)
+
                 episode_reward += reward.item()
                 state = next_state
 
@@ -85,12 +89,13 @@ class MaxRewardEvaluator(Evaluator):
             if self.keep_best:
                 self.best_agent = copy.deepcopy(agent)
 
-        self.logger.log_scalar("evaluation_reward", avg_reward, iteration=iteration)
-        self.logger.log_scalar("evaluation_reward_std", np.std(rewards), iteration=iteration)
+        if self.logger is not None:
+            self.logger.log_scalar("evaluation_reward", avg_reward, iteration=iteration)
+            self.logger.log_scalar("evaluation_reward_std", np.std(rewards), iteration=iteration)
 
     def close(self) -> None:
         """
         Close the evaluator and release any resources.
         """
-        if self.keep_best and self.best_agent is not None:
+        if self.keep_best and self.best_agent is not None and self.logger is not None:
             self.logger.save_agent(self.best_agent, "agent-best.pt")

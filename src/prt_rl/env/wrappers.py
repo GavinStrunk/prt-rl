@@ -260,6 +260,9 @@ class GymnasiumWrapper(EnvironmentInterface):
             info['rgb_array'] = rgb[np.newaxis, ...]
 
         return next_state, reward, done, info
+    
+    def close(self):
+        return self.env.close()
 
     def _process_observation(self, observation: Union[torch.Tensor | int]) -> torch.Tensor:
         """

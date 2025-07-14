@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import copy
 import torch
-from typing import Optional, Union, Dict, Type
+from typing import Optional, Union, Dict, Type, Tuple
 from prt_rl.env.interface import EnvParams
 from prt_rl.common.decision_functions import DecisionFunction, EpsilonGreedy
 from prt_rl.common.networks import MLP, BaseEncoder
@@ -186,19 +186,46 @@ class DistributionPolicy(BasePolicy):
 
         action_dim = self.distribution.get_action_dim(self.env_params)
 
-        self.distribution_layer = self.distribution.last_network_layer(feature_dim=self.policy_feature_dim, action_dim=action_dim)
+        dist_layer = self.distribution.last_network_layer(feature_dim=self.policy_feature_dim, action_dim=action_dim)
+
+        # Support both interfaces: torch.nn.Module and Tuple[torch.nn.Module, torch.nn.Parameter]
+        if isinstance(dist_layer, tuple):
+            self.distribution_layer = dist_layer[0]
+            self.distribution_params = dist_layer[1]
+        else:
+            self.distribution_layer = dist_layer
+            self.distribution_params = None
 
     def forward(self,
                    state: torch.Tensor
                    ) -> torch.Tensor:
         """
-        Chooses an action based on the current state. Expects the key "observation" in the state tensordict.
+        Chooses an action based on the current state
+
+        Args:
+            state (torch.Tensor): Current state tensor.
+        Returns:
+            torch.Tensor: Tensor with the chosen action with shape (N, action_dim)
+        """
+        action, _ = self.predict(state)
+        return action
+    
+    def predict(self,
+                   state: torch.Tensor
+                   ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Chooses an action based on the current state. 
+
+        state -> Encoder Network -> Policy Head -> Distribution Layer -> Distribution ..
+        .. -> Sample -> Action
+        .. -> Log Probabilities
+        
 
         Args:
             state (torch.Tensor): Current state tensor.
 
         Returns:
-            torch.Tensor: Tensor with the chosen action.
+            torch.Tensor: Tensor with the chosen action. (N, action_dim), (N, # actions)
         """
         if self.encoder_network is not None:
             latent_state = self.encoder_network(state)
@@ -206,10 +233,25 @@ class DistributionPolicy(BasePolicy):
             latent_state = state
         
         latent_features = self.policy_head(latent_state)
-        action_params = self.distribution_layer(latent_features)
-        distribution = self.distribution(action_params)
-        action = distribution.sample().unsqueeze(1)
-        return action
+        dist_params = self.distribution_layer(latent_features)
+
+        # If the distribution has parameters, we use them to create the distribution
+        if self.distribution_params is not None:
+            distribution = self.distribution(dist_params, self.distribution_params)
+        else:
+            distribution = self.distribution(dist_params)
+
+        action = distribution.sample()
+
+        # Categorical distribution returns an action with shape (Batch, )
+        if isinstance(distribution, dist.Categorical):
+            action = action.unsqueeze(-1)
+
+        log_probs = distribution.log_prob(action)
+        # Compute the total log probability for the action vector
+        log_probs = log_probs.sum(dim=-1, keepdim=True)
+
+        return action, log_probs
     
     def get_logits(self,
                         state: torch.Tensor
@@ -217,11 +259,13 @@ class DistributionPolicy(BasePolicy):
         """
         Returns the logits from the policy network given the input state.
 
+        state -> Encoder Network -> Policy Head -> Categorical Layer -> logits
+
         Args:
-            state (torch.Tensor): Input state tensor of shape (batch_size, obs_dim).
+            state (torch.Tensor): Input state tensor of shape (N, obs_dim).
 
         Returns:
-            torch.Tensor: Logits tensor of shape (batch_size, num_actions).
+            torch.Tensor: Logits tensor of shape (N, num_actions).
         """
         if not issubclass(self.distribution, dist.Categorical):
             raise ValueError("get_logits is only supported for Categorical distributions. Use forward for other distributions.")
@@ -232,8 +276,8 @@ class DistributionPolicy(BasePolicy):
             latent_state = state
         
         latent_features = self.policy_head(latent_state)
-        action_params = self.distribution_layer(latent_features)
-        return action_params
+        logits = self.distribution_layer(latent_features)
+        return logits
 
 
 class ActorCriticPolicy(BasePolicy):

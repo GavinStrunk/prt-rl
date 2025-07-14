@@ -75,17 +75,17 @@ class Normal(Distribution, tdist.Normal):
         a \sim N(\mu(s), exp(log(\sigma(s)^2) I)
     
     Args:
-        probs (torch.Tensor): A tensor of shape (batch_size, num_actions, 2) where the last dimension contains the mean and scale.
+        probs (torch.Tensor): A tensor of means with shape (B, num_actions) 
+        parameters (torch.nn.Parameter): A tensor of log standard deviations with shape (num_actions, ).
     """
     def __init__(self,
-                 probs: torch.Tensor
+                 probs: torch.Tensor,
+                 parameters: torch.nn.Parameter
                  ) -> None:
-        if probs.shape[-1] != 2:
-            raise ValueError("Normal distribution requires the last dimension of probs to have size 2 (mean and log std).")
+        if len(probs.shape) != 2:
+            raise ValueError("Normal distribution requires probs to have shape (B, num_actions)")
         
-        mean_actions = probs[..., 0]
-        action_std = torch.ones_like(mean_actions) * torch.exp(probs[..., 1])
-        super().__init__(mean_actions, action_std)
+        super().__init__(probs, torch.exp(parameters))
 
     @staticmethod
     def get_action_dim(env_params: EnvParams) -> int:
