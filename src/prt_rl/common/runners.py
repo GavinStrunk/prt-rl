@@ -43,6 +43,7 @@ class Runner:
 
         # Loop until the episode is done
         while not done:
+            state = state.float()
             action = self.policy(state)
             next_state, reward, done, info = self.env.step(action)
 

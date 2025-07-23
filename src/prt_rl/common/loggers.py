@@ -211,6 +211,17 @@ class FileLogger(Logger):
         os.makedirs(policy_path, exist_ok=True)
         torch.save(policy, os.path.join(policy_path, "model.pth"))
 
+    def save_agent(self, 
+                   agent: object,
+                   name: str = "agent.pth"
+                   ) -> None:
+        """
+        Saves the agent to the MLFlow run.
+        Args:
+            agent (object): The agent object to save
+        """
+        torch.save(agent, os.path.join(self.output_dir, name))
+
 @Logger.register('mlflow')
 class MLFlowLogger(Logger):
     """

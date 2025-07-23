@@ -18,12 +18,14 @@ class SequentialCollector:
     def __init__(self,
                  env: EnvironmentInterface,
                  logger: Optional[Logger] = None,
-                 logging_freq: int = 1
+                 logging_freq: int = 1,
+                 seed: Optional[int] = None
                  ) -> None:
         self.env = env
         self.env_params = env.get_parameters()
         self.logger = logger or Logger.create('blank')
         self.logging_freq = logging_freq
+        self.seed = seed
         self.previous_experience = None
         self.collected_steps = 0
         self.previous_episode_reward = 0
@@ -91,7 +93,8 @@ class SequentialCollector:
         for _ in range(num_steps):
             # Reset the environment if no previous state
             if self.previous_experience is None or self.previous_experience["done"]:
-                state, _ = self.env.reset()
+                state, _ = self.env.reset(seed=self.seed)
+                self.seed = self.seed + 1 if self.seed is not None else None
             else:
                 state = self.previous_experience["next_state"]
 
