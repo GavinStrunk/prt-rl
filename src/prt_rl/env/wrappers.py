@@ -153,6 +153,7 @@ class GymnasiumWrapper(EnvironmentInterface):
                  gym_name: str,
                  num_envs: int = 1,
                  render_mode: Optional[str] = None,
+                 seed: Optional[int] = None,
                  device: str = 'cpu',
                  **kwargs
                  ) -> None:
@@ -162,12 +163,28 @@ class GymnasiumWrapper(EnvironmentInterface):
 
         if self.num_envs == 1:
             self.env = gym.make(self.gym_name, render_mode=render_mode, **kwargs)
+
+            # Seed the environment if a seed is provided
+            if seed is not None:
+                self.env.reset(seed=seed)
+                self.env.action_space.seed(seed)
+                self.env.observation_space.seed(seed)
             vectorized = False
         else:
-            def make_fcn(env_name: str, render_mode=None, **kwargs):
-                return lambda: gym.make(env_name, render_mode=render_mode, **kwargs)
-            
-            self.env = gym.vector.SyncVectorEnv([make_fcn(self.gym_name, render_mode=render_mode, **kwargs) for _ in range(num_envs)])
+            def make_env_fn(env_index: int):
+                def _init():
+                    env = gym.make(gym_name, render_mode=render_mode, **kwargs)
+                    
+                    # Seed the environment if a seed is provided
+                    if seed is not None:
+                        env_seed = seed + env_index
+                        env.reset(seed=env_seed)
+                        env.action_space.seed(env_seed)
+                        env.observation_space.seed(env_seed)
+                    return env
+                return _init
+
+            self.env = gym.vector.SyncVectorEnv([make_env_fn(i) for i in range(num_envs)])
             vectorized = True
 
         self.env_params = self._make_env_params(vectorized=vectorized)
