@@ -4,7 +4,65 @@ from prt_rl.env.interface import EnvironmentInterface, EnvParams, MultiAgentEnvP
 from prt_rl.common.loggers import Logger
 from prt_rl.common.policies import ActorCriticPolicy, DistributionPolicy
 
-   
+def random_action(env_params: EnvParams, state: torch.Tensor) -> torch.Tensor:
+    """
+    Randomly samples an action from action space.
+    Args:
+        state (torch.Tensor): The current state of the environment.
+    Returns:
+        torch.Tensor: A tensor containing the sampled action.
+    """
+    if isinstance(env_params, EnvParams):
+        ashape = (state.shape[0], env_params.action_len)
+        params = env_params
+    elif isinstance(env_params, MultiAgentEnvParams):
+        ashape = (state.shape[0], env_params.num_agents, env_params.agent.action_len)
+        params = env_params.agent
+    else:
+        raise ValueError("env_params must be a EnvParams or MultiAgentEnvParams")
+    if not params.action_continuous:
+        # Add 1 to the high value because randint samples between low and 1 less than the high: [low,high)
+        action = torch.randint(low=params.action_min, high=params.action_max + 1,
+                               size=ashape)
+    else:
+        action = torch.rand(size=ashape)
+        # Scale the random [0,1] actions to the action space [min,max]
+        max_actions = torch.tensor(params.action_max).unsqueeze(0)
+        min_actions = torch.tensor(params.action_min).unsqueeze(0)
+        action = action * (max_actions - min_actions) + min_actions
+    return action 
+
+def get_action_from_policy(policy, state: torch.Tensor, env_params: EnvParams = None) -> torch.Tensor:
+    """
+    Get an action from the policy given the state.
+    
+    Args:
+        policy: The policy to get the action from.
+        state (torch.Tensor): The current state of the environment.
+    
+    Returns:
+        torch.Tensor: The action to take.
+    """
+    # Ensure the state is float32
+    state = state.float()
+
+    value_estimate = None
+    log_prob = None 
+
+    if policy is None:
+        if env_params is not None:
+            action = random_action(env_params, state)
+        else:
+            raise ValueError("env_params must be provided if policy is None")
+    elif isinstance(policy, ActorCriticPolicy):
+        action, value_estimate, log_prob = policy.predict(state)
+    elif isinstance(policy, DistributionPolicy):
+        action, log_prob = policy.predict(state)
+    else:
+        action = policy(state)
+    
+    return action, value_estimate, log_prob
+
 class SequentialCollector:
     """
     The Sequential Collector collects experience from a single environment sequentially.
@@ -98,8 +156,7 @@ class SequentialCollector:
             else:
                 state = self.previous_experience["next_state"]
 
-            # Use random or given policy
-            action = self._random_action(state) if policy is None else policy(state)
+            action, value_est, log_prob = get_action_from_policy(policy, state, self.env_params)
 
             next_state, reward, done, _ = self.env.step(action)
 
@@ -202,20 +259,7 @@ class SequentialCollector:
         state, _ = self.env.reset()
 
         while True:
-            value_estimate = None
-            log_prob = None      
-
-            # Ensure the state is float32
-            state = state.float()
-
-            if policy is None:
-                action = self._random_action(state)
-            elif isinstance(policy, ActorCriticPolicy):
-                action, value_estimate, log_prob = policy.predict(state)
-            elif isinstance(policy, DistributionPolicy):
-                action, log_prob = policy.predict(state)
-            else:
-                action = policy(state)
+            action, value_estimate, log_prob = get_action_from_policy(policy, state, self.env_params)
 
             next_state, reward, done, _ = self.env.step(action)
 
@@ -296,37 +340,37 @@ class ParallelCollector:
         self.cumulative_reward = 0
         self.num_episodes = 0
 
-    def _random_action(self, state: torch.Tensor) -> torch.Tensor:
-        """
-        Randomly samples an action from action space.
+    # def _random_action(self, state: torch.Tensor) -> torch.Tensor:
+    #     """
+    #     Randomly samples an action from action space.
 
-        Args:
-            state (torch.Tensor): The current state of the environment.
-        Returns:
-            torch.Tensor: A tensor containing the sampled action.
-        """
-        if isinstance(self.env_params, EnvParams):
-            ashape = (state.shape[0], self.env_params.action_len)
-            params = self.env_params
-        elif isinstance(self.env_params, MultiAgentEnvParams):
-            ashape = (state.shape[0], self.env_params.num_agents, self.env_params.agent.action_len)
-            params = self.env_params.agent
-        else:
-            raise ValueError("env_params must be a EnvParams or MultiAgentEnvParams")
+    #     Args:
+    #         state (torch.Tensor): The current state of the environment.
+    #     Returns:
+    #         torch.Tensor: A tensor containing the sampled action.
+    #     """
+    #     if isinstance(self.env_params, EnvParams):
+    #         ashape = (state.shape[0], self.env_params.action_len)
+    #         params = self.env_params
+    #     elif isinstance(self.env_params, MultiAgentEnvParams):
+    #         ashape = (state.shape[0], self.env_params.num_agents, self.env_params.agent.action_len)
+    #         params = self.env_params.agent
+    #     else:
+    #         raise ValueError("env_params must be a EnvParams or MultiAgentEnvParams")
 
-        if not params.action_continuous:
-            # Add 1 to the high value because randint samples between low and 1 less than the high: [low,high)
-            action = torch.randint(low=params.action_min, high=params.action_max + 1,
-                                   size=ashape)
-        else:
-            action = torch.rand(size=ashape)
+    #     if not params.action_continuous:
+    #         # Add 1 to the high value because randint samples between low and 1 less than the high: [low,high)
+    #         action = torch.randint(low=params.action_min, high=params.action_max + 1,
+    #                                size=ashape)
+    #     else:
+    #         action = torch.rand(size=ashape)
 
-            # Scale the random [0,1] actions to the action space [min,max]
-            max_actions = torch.tensor(params.action_max).unsqueeze(0)
-            min_actions = torch.tensor(params.action_min).unsqueeze(0)
-            action = action * (max_actions - min_actions) + min_actions
+    #         # Scale the random [0,1] actions to the action space [min,max]
+    #         max_actions = torch.tensor(params.action_max).unsqueeze(0)
+    #         min_actions = torch.tensor(params.action_min).unsqueeze(0)
+    #         action = action * (max_actions - min_actions) + min_actions
 
-        return action 
+    #     return action 
 
     def collect_experience(self,
                            policy = None,
@@ -372,18 +416,7 @@ class ParallelCollector:
                         # Update the previous experience for this index
                         state[i] = reset_state
 
-
-            # Use random or given policy
-            value_estimate = None
-            log_prob = None
-            if policy is None:
-                action = self._random_action(state)
-            elif isinstance(policy, ActorCriticPolicy):
-                action, value_estimate, log_prob = policy.predict(state)
-            elif isinstance(policy, DistributionPolicy):
-                action, log_prob = policy.predict(state)
-            else:
-                action = policy(state)
+            action, value_estimate, log_prob = get_action_from_policy(policy, state, self.env_params)
 
             # Step the environment with the action
             next_state, reward, done, _ = self.env.step(action)
@@ -420,14 +453,14 @@ class ParallelCollector:
             if log_probs:
                 log_probs = torch.cat(log_probs, dim=0)
         else:
-            # Stack the lists of tensors into a single tensor with shape (N, T, ...)
-            states = torch.stack(states, dim=0).permute(1, 0, 2)
-            actions = torch.stack(actions, dim=0).permute(1, 0, 2)
-            next_states = torch.stack(next_states, dim=0).permute(1, 0, 2)
-            rewards = torch.stack(rewards, dim=0).permute(1, 0, 2)
-            dones = torch.stack(dones, dim=0).permute(1, 0, 2)
-            value_estimates = torch.stack(value_estimates, dim=0).permute(1, 0, 2) if value_estimates else None
-            log_probs = torch.stack(log_probs, dim=0).permute(1, 0, 2) if log_probs else None
+            # Stack the lists of tensors into a single tensor with shape (T, N, ...)
+            states = torch.stack(states, dim=0)
+            actions = torch.stack(actions, dim=0)
+            next_states = torch.stack(next_states, dim=0)
+            rewards = torch.stack(rewards, dim=0)
+            dones = torch.stack(dones, dim=0)
+            value_estimates = torch.stack(value_estimates, dim=0) if value_estimates else None
+            log_probs = torch.stack(log_probs, dim=0) if log_probs else None
 
         experience = {
             "state": states,
@@ -444,7 +477,7 @@ class ParallelCollector:
         # Compute the last value estimate for boostrapping
         if isinstance(policy, ActorCriticPolicy):
             # Compute the last value estimate
-            _, last_value_estimate, _ = self.policy.predict(self.previous_experience['next_state'])
+            _, last_value_estimate, _ = policy.predict(self.previous_experience['next_state'])
             experience['last_value_est'] = last_value_estimate
         
         return experience

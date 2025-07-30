@@ -36,6 +36,7 @@ class PPO(BaseAgent):
                  num_optim_steps: int = 10,
                  mini_batch_size: int = 32,
                  steps_per_batch: int = 2048,
+                 normalize_advantages: bool = False,
                  device: str = 'cpu',
                  ) -> None:
         super().__init__(policy=policy)
@@ -50,6 +51,7 @@ class PPO(BaseAgent):
         self.num_optim_steps = num_optim_steps
         self.mini_batch_size = mini_batch_size
         self.steps_per_batch = steps_per_batch
+        self.normalize_advantages = normalize_advantages
         self.device = torch.device(device)
 
         self.policy.to(self.device)
@@ -89,7 +91,7 @@ class PPO(BaseAgent):
         last_gae_lam = torch.zeros((N, 1), dtype=values.dtype, device=values.device)
 
         for t in reversed(range(T)):
-            not_done = 1.0 - dones[t]
+            not_done = 1.0 - dones[t].float()
             delta = rewards[t] + gamma * values[t + 1] * not_done - values[t]
             last_gae_lam = delta + gamma * gae_lambda * not_done * last_gae_lam
             advantages[t] = last_gae_lam
@@ -98,7 +100,8 @@ class PPO(BaseAgent):
         return advantages, returns
 
     def predict(self, state):
-        return super().predict(state)
+        with torch.no_grad():
+            return self.policy(state)  # Assuming policy has a forward method that returns action logits or actions directly
     
     def train(self,
               env: EnvironmentInterface,
@@ -125,8 +128,8 @@ class PPO(BaseAgent):
         progress_bar = ProgressBar(total_steps=total_steps)
         num_steps = 0
 
-        # Make collector
-        collector = ParallelCollector(env=env, logger=logger, logging_freq=logging_freq)
+        # Make collector and do not flatten the experience so the shape is (N, T, ...)
+        collector = ParallelCollector(env=env, logger=logger, logging_freq=logging_freq, flatten=False)
         rollout_buffer = RolloutBuffer(capacity=self.steps_per_batch, device=self.device)
 
         while num_steps < total_steps:
@@ -135,11 +138,10 @@ class PPO(BaseAgent):
                 for scheduler in schedulers:
                     scheduler.update(current_step=num_steps)
 
-            # Collect experience
+            # Collect experience dictionary with shape (N, T, ...)
             experience = collector.collect_experience(policy=self.policy, num_steps=self.steps_per_batch)
-            num_steps += experience['state'].shape[0]
 
-            # Compute Advantages
+            # Compute Advantages and Values
             advantages, returns = self.compute_gae_and_returns(
                 rewards=experience['reward'],
                 values=experience['value_est'],
@@ -148,8 +150,16 @@ class PPO(BaseAgent):
                 gamma=self.gamma,
                 gae_lambda=self.gae_lambda
             )
-            experience['advantages'] = advantages
-            experience['returns'] = returns
+            
+            if self.normalize_advantages:
+                advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+            experience['advantages'] = advantages.detach()
+            experience['returns'] = returns.detach()
+
+            # Flatten the experience batch (N, T, ...) -> (N*T, ...) and remove the last_value_est key because we don't need it anymore
+            experience = {k: v.reshape(-1, *v.shape[2:]) for k, v in experience.items() if k != 'last_value_est'}
+            num_steps += experience['state'].shape[0]
 
             # Add experience to the rollout buffer
             rollout_buffer.add(experience)
@@ -162,9 +172,10 @@ class PPO(BaseAgent):
             for _ in range(self.num_optim_steps):
                 for batch in rollout_buffer.get_batches(batch_size=self.mini_batch_size):
                     new_value_est, new_log_prob, entropy = self.policy.evaluate_actions(batch['state'], batch['action'])
+                    old_log_prob = batch['log_prob'].detach()
 
                     # Ratio between new and old policy
-                    ratio = torch.exp(new_log_prob - batch['log_prob'])
+                    ratio = torch.exp(new_log_prob - old_log_prob)
 
                     # Clipped surrogate loss
                     batch_advantages = batch['advantages']
@@ -186,7 +197,7 @@ class PPO(BaseAgent):
                     # Optimize
                     self.optimizer.zero_grad()
                     loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                    # torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                     self.optimizer.step()
 
             # Clear the buffer after optimization

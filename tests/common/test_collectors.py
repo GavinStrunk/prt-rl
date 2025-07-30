@@ -3,6 +3,7 @@ import torch
 from unittest.mock import MagicMock
 from prt_rl.env.wrappers import GymnasiumWrapper
 from prt_rl.common.collectors import SequentialCollector, ParallelCollector
+import prt_rl.common.collectors as collectors
 
 @pytest.fixture
 def mock_env():
@@ -14,6 +15,18 @@ def mock_env():
     env.step.return_value = (torch.zeros(1, 4, dtype=torch.float32), torch.tensor([[1.0]]), torch.tensor([[False]]), {})
     return env
 
+# Random Action Helper
+# =========================================================
+def test_random_discrete_action():
+    env = GymnasiumWrapper("CartPole-v1")
+
+    state, _ = env.reset()
+    action = collectors.random_action(env.get_parameters(), state)
+    assert action.shape == (1, 1)  # Single action for a single environment
+    assert action.dtype == torch.int64  # Discrete action should be int64
+
+# Sequential Collector Tests
+# =========================================================
 def test_collecting_experience():
     env = GymnasiumWrapper("CartPole-v1")
 
@@ -122,6 +135,8 @@ def test_sequential_trajectory_min_steps():
     assert len(trajectory) > 1
     assert trajectory[-1]['done'][-1]  # Ensure the last step is done
 
+# Parallel Collector Tests
+# =========================================================
 def test_parallel_collector():
     env = GymnasiumWrapper("CartPole-v1", num_envs=2)
 
@@ -152,10 +167,10 @@ def test_parallel_collector_without_flatten():
     collector = ParallelCollector(env, flatten=False)
     exp = collector.collect_experience(policy=lambda x: torch.zeros(2,1, dtype=torch.int64), num_steps=20)
 
-    assert exp['action'].shape == (2, 10, 1)
-    assert exp['reward'].shape == (2, 10, 1)
-    assert exp['state'].shape == (2, 10, 4)
-    assert exp['next_state'].shape == (2, 10, 4)
-    assert exp['done'].shape == (2, 10, 1)
+    assert exp['action'].shape == (10, 2, 1)
+    assert exp['reward'].shape == (10, 2, 1)
+    assert exp['state'].shape == (10, 2, 4)
+    assert exp['next_state'].shape == (10, 2, 4)
+    assert exp['done'].shape == (10, 2, 1)
 
 

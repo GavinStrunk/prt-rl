@@ -451,6 +451,10 @@ class ActorCriticPolicy(BasePolicy):
         action = distribution.sample()
         log_probs = distribution.log_prob(action)
 
+        # Convert the action and log probabilities to the correct shape (N, ) -> (N, 1)
+        action = action.unsqueeze(-1)
+        log_probs = log_probs.unsqueeze(-1)
+
         # Run Critic
         if self.critic_encoder_network is None:
             critic_features = state
@@ -466,15 +470,23 @@ class ActorCriticPolicy(BasePolicy):
                          action: torch.Tensor
                          ) -> torch.Tensor:
         # Run Actor
-        action_encoding = self.actor_encoder_network(state)
+        if self.actor_encoder_network is None:
+            action_encoding = state
+        else:
+            action_encoding = self.actor_encoder_network(state)
+
         latent_features = self.actor_head(action_encoding)
         action_params = self.actor_distribution_layer(latent_features)
         distribution = self.distribution(action_params)
-        entropy = distribution.entropy()
-        log_probs = distribution.log_prob(action)
+        entropy = distribution.entropy().unsqueeze(-1)
+        log_probs = distribution.log_prob(action.squeeze()).unsqueeze(-1)
 
         # Run Critic
-        critic_features = self.critic_encoder_network(state)
+        if self.critic_encoder_network is None:
+            critic_features = state
+        else:
+            critic_features = self.critic_encoder_network(state)
+
         value_est = self.critic_head(critic_features)
 
         return value_est, log_probs, entropy

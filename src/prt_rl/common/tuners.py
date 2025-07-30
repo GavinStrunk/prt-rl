@@ -189,7 +189,7 @@ class GridSearchTuner(HyperparameterTuner):
         with ProcessPoolExecutor(max_workers=self.num_jobs) as executor:
             futures = {executor.submit(objective_fcn, params): params for params in grid}
 
-            with tqdm(total=len(futures), desc="Grid Search", unit="trial") as pbar:
+            with tqdm(total=len(futures), desc="Grid Search", unit="trial", position=0) as pbar:
                 for future in as_completed(futures):
                     params = futures[future]
                     try:
