@@ -81,6 +81,7 @@ class PolicyGradient(BaseAgent):
               logging_freq: int = 1,
               evaluator: Evaluator = Evaluator(),
               eval_freq: int = 1000,
+              seed: Optional[int] = None
               ) -> None:
         """
         Train the PolicyGradient agent using the provided environment
@@ -98,7 +99,7 @@ class PolicyGradient(BaseAgent):
         progress_bar = ProgressBar(total_steps=total_steps)
 
         # Initialize collector without flattening so the experience shape is (N, T, ...)
-        collector = SequentialCollector(env=env, logger=logger, logging_freq=logging_freq)
+        collector = SequentialCollector(env=env, logger=logger, logging_freq=logging_freq, seed=seed)
 
         num_steps = 0
         while num_steps < total_steps:
@@ -145,6 +146,7 @@ class PolicyGradient(BaseAgent):
                 advantages = Q_hat - self.critic(batch_states).squeeze(1) if self.critic is not None else Q_hat
 
             loss = self._compute_loss(advantages, batch_log_probs, self.normalize_advantages)
+            save_loss = loss.item()
 
             self.optimizer.zero_grad()
             loss.backward()  # Backpropagate the loss
@@ -152,11 +154,13 @@ class PolicyGradient(BaseAgent):
             
             # Update the baseline is applicable
             if self.critic is not None:
+                critic_losses = []
                 for _ in range(self.baseline_optim_steps):
                     # Compute the Q function predictions
                     q_value_pred = self.critic(batch_states).squeeze(1)
 
                     critic_loss = torch.nn.functional.mse_loss(q_value_pred, Q_hat)
+                    critic_losses.append(critic_loss.item())
 
                     self.critic_optimizer.zero_grad()
                     critic_loss.backward()  # Backpropagate the critic loss
@@ -164,11 +168,13 @@ class PolicyGradient(BaseAgent):
                     
             progress_bar.update(num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}, "
                                                                    f"Episode Length: {collector.previous_episode_length}, "
-                                                                   f"Loss: {loss:.4f},")
+                                                                   f"Loss: {save_loss:.4f},")
 
             # Log the training progress
             if num_steps % logging_freq == 0:
-                pass
+                logger.log_scalar("policy_loss", save_loss, iteration=num_steps)
+                if self.critic is not None:
+                    logger.log_scalar("critic_loss", np.mean(critic_losses), iteration=num_steps)
 
             # Evaluate the agent periodically
             if num_steps % eval_freq == 0:
@@ -353,9 +359,6 @@ class PolicyGradientTrajectory(PolicyGradient):
             num_steps += batch_steps
 
             batch_states = torch.cat([t['state'] for t in trajectories], dim=0)  # Shape (N*T, D)
-            batch_rewards = [t['reward'] for t in trajectories]  # Shape (N, T, 1)
-            batch_dones = [t['done'] for t in trajectories]  # Shape (N, T, 1)
-            batch_log_probs = torch.cat([t['log_prob'] for t in trajectories], dim=0)  # Shape (N*T, 1)
 
             # Compute Monte Carlo estimate of the Q function
             if not self.reward_to_go:
@@ -376,33 +379,6 @@ class PolicyGradientTrajectory(PolicyGradient):
                 advantages = Q_hat - self.critic(batch_states)
             else:
                 advantages = Q_hat
-
-            # if not self.use_step_avg:
-            #     if self.normalize_advantages:
-            #         # Compute the mean and std of the advantages across all trajectories otherwise the advantages will all be 0 for the total discounted return
-            #         flat_adv = torch.cat(advantages)
-            #         mean_adv = flat_adv.mean()
-            #         std_adv = flat_adv.std()
-            #         for i in range(len(advantages)):
-            #             advantages[i] = (advantages[i] - mean_adv) / (std_adv + 1e-8)
-
-            #     # Update the policy using the computed advantages
-            #     # Trajectories is [T_i, ...]_N and advantages is [T_i, 1]_N
-            #     losses = []
-            #     for traj, adv in zip(trajectories, advantages):
-            #         log_prob_sum = traj['log_prob'] * adv.unsqueeze(1)  # Shape (T_i, 1)
-            #         losses.append(log_prob_sum.sum())
-            #     losses = torch.stack(losses, dim=0)
-
-            #     loss = -losses.mean()
-            # else:
-            #     advantages = torch.cat(advantages, dim=0)  # Shape (N*T,)
-
-            #     if self.normalize_advantages:
-            #         advantages = self._normalize_advantages(advantages)
-                
-            #     log_probs = torch.cat([t['log_prob'].squeeze() for t in trajectories], dim=0)  # Shape (N*T, 1)
-            #     loss = -(log_probs * advantages).mean()
 
             loss = self._compute_loss(advantages, [t['log_prob'] for t in trajectories], self.normalize_advantages)
 

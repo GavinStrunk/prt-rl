@@ -3,6 +3,7 @@ from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.common.recorders import Recorder
 from prt_rl.common.visualizers import Visualizer
 from prt_rl.agent import BaseAgent
+from prt_rl.common.collectors import get_action_from_policy
 
 
 class Runner:
@@ -43,7 +44,7 @@ class Runner:
 
         # Loop until the episode is done
         while not done:
-            action = self.policy(state)
+            action, _, _ = get_action_from_policy(self.policy, state)
             next_state, reward, done, info = self.env.step(action)
 
             # Record the environment frame

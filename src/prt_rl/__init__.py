@@ -2,6 +2,7 @@ from .dagger import DAgger
 from .dqn import DQN, DoubleDQN
 from .policy_gradient import PolicyGradient, PolicyGradientTrajectory
 from .ppo import PPO
+from prt_rl.common.utils import set_seed
 
 
 __all__ = [
@@ -10,5 +11,6 @@ __all__ = [
     "DoubleDQN",
     "PolicyGradient",
     "PolicyGradientTrajectory",
-    "PPO"
+    "PPO",
+    "set_seed"
 ]
