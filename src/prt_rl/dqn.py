@@ -11,7 +11,7 @@ from prt_rl.agent import BaseAgent
 from prt_rl.common.policies import QValuePolicy
 from prt_rl.common.progress_bar import ProgressBar
 from prt_rl.common.evaluators import Evaluator
-
+import prt_rl.common.utils as utils
 
 class DQN(BaseAgent):
     """
@@ -105,31 +105,31 @@ class DQN(BaseAgent):
         # loss = torch.nn.functional.smooth_l1_loss(qsa, td_target)
         return loss, td_error
     
-    @staticmethod
-    def _polyak_update(policy: torch.nn.Module, target: torch.nn.Module, tau: float) -> None:
-        """
-        Polyak update for the target network.
+    # @staticmethod
+    # def _polyak_update(policy: torch.nn.Module, target: torch.nn.Module, tau: float) -> None:
+    #     """
+    #     Polyak update for the target network.
 
-        .. math::
-            \Theta_{target} = \tau * \Theta_{\pi} + (1 - \tau) * \Theta_{target}
+    #     .. math::
+    #         \Theta_{target} = \tau * \Theta_{\pi} + (1 - \tau) * \Theta_{target}
 
-        References:
-        [1] https://github.com/DLR-RM/stable-baselines3/issues/93
-        """
-        for target_params, policy_params in zip(target.parameters(), policy.parameters()):
-            target_params.data.copy_(tau * policy_params.data + (1 - tau) * target_params.data)
+    #     References:
+    #     [1] https://github.com/DLR-RM/stable-baselines3/issues/93
+    #     """
+    #     for target_params, policy_params in zip(target.parameters(), policy.parameters()):
+    #         target_params.data.copy_(tau * policy_params.data + (1 - tau) * target_params.data)
 
-    @staticmethod
-    def _hard_update(policy: torch.nn.Module, target: torch.nn.Module) -> None:
-        """
-        Hard update for the target network.
+    # @staticmethod
+    # def _hard_update(policy: torch.nn.Module, target: torch.nn.Module) -> None:
+    #     """
+    #     Hard update for the target network.
 
-        .. math::
-            \Theta_{target} = \Theta_{\pi}
+    #     .. math::
+    #         \Theta_{target} = \Theta_{\pi}
 
-        """
-        for target_params, policy_params in zip(target.parameters(), policy.parameters()):
-            target_params.data.copy_(policy_params.data)
+    #     """
+    #     for target_params, policy_params in zip(target.parameters(), policy.parameters()):
+    #         target_params.data.copy_(policy_params.data)
 
     def predict(self,
                  state: torch.Tensor,
@@ -239,10 +239,10 @@ class DQN(BaseAgent):
             # Update target network with either hard or soft update
             if num_steps % self.target_update_freq == 0:
                 if self.polyak_tau is None:
-                    self._hard_update(policy=self.policy, target=self.target)
+                    utils.hard_update(target=self.target, network=self.policy)
                 else:
                     # Polyak update
-                    self._polyak_update(policy=self.policy, target=self.target, tau=self.polyak_tau)
+                    utils.polyak_update(target=self.target, network=self.policy, tau=self.polyak_tau)
                 
             # Log training metrics
             if num_steps % logging_freq == 0 and training_steps > 0:

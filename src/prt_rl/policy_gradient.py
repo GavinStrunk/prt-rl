@@ -7,10 +7,10 @@ from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.loggers import Logger
 from prt_rl.common.progress_bar import ProgressBar
 from prt_rl.common.evaluators import Evaluator
-
 from prt_rl.common.collectors import SequentialCollector
 from prt_rl.common.policies import DistributionPolicy
 from prt_rl.common.networks import MLP
+import prt_rl.common.utils as utils
 
 
 class PolicyGradient(BaseAgent):
@@ -195,7 +195,7 @@ class PolicyGradient(BaseAgent):
             torch.Tensor: Computed loss value.
         """
         if normalize:
-            advantages = self._normalize_advantages(advantages)
+            advantages = utils.normalize_advantages(advantages)
         
         loss = -(log_probs * advantages).mean()
         return loss
@@ -294,21 +294,6 @@ class PolicyGradient(BaseAgent):
 
         return advantages
     
-    @staticmethod
-    def _normalize_advantages(advantages: torch.Tensor) -> torch.Tensor:
-        """
-        Normalize advantages to have zero mean and unit variance.
-
-        Args:
-            advantages (torch.Tensor): Advantages to normalize with shape (B,).
-
-        Returns:
-            torch.Tensor: Normalized advantages with shape (B,).
-        """
-        mean = advantages.mean()
-        std = advantages.std()
-        normalized_advantages = (advantages - mean) / (std + 1e-8)
-        return normalized_advantages
     
 class PolicyGradientTrajectory(PolicyGradient):
     """
