@@ -299,3 +299,71 @@ def trajectory_returns(
 
     return segment_returns.unsqueeze(-1).view(original_shape)
 
+def gaussian_noise(
+    mean: float = 0.0,
+    std: float = 1.0,
+    shape: Tuple[int, ...] = (1,)
+) -> torch.Tensor:
+    """
+    Generates Gaussian noise with specified mean and standard deviation.
+
+    Args:
+        mean (float): Mean of the Gaussian distribution.
+        std (float): Standard deviation of the Gaussian distribution.
+        shape (Tuple[int, ...]): Shape of the output tensor.
+
+    Returns:
+        torch.Tensor: A tensor filled with Gaussian noise.
+    """
+    return torch.normal(mean=mean, std=std, size=shape)
+
+def ornstein_uhlenbeck_noise(
+    mean: float = 0.0,
+    std: float = 1.0,
+    shape: Tuple[int, ...] = (1,),
+    theta: float = 0.15,
+    dt: float = 1e-2,
+    x0: Optional[torch.Tensor] = None
+) -> torch.Tensor:
+    """
+    Generates Ornstein-Uhlenbeck noise for exploration in continuous action spaces.
+
+    Orstein-Uhlenbeck noise is a stochastic process that modelled the velocity of a massive Brownian particle under the influence of friction. It is defined by the following stochastic differential equation:
+
+    .. math::
+        dx_t = \theta (\mu - x_t) dt + \sigma dW_t
+
+    where :math:`\mu` is the mean, :math:`\sigma` is the standard deviation, and :math:`dW_t` is a Wiener process.
+
+    This implementation uses the Euler-Maruyama method to discretize and approximate the process following the equation:
+
+    .. math::
+        x_{t+1} = x_t + \theta (\mu - x_t) dt + \sigma \delta W_t
+
+    where :math:`\delta W_t \sim \mathcal{N}(0, \delta t) = \sqrt{\delta t}\mathcal{N}(0, 1)`.
+
+    Args:
+        mean (float): Mean of the noise.
+        std (float): Standard deviation of the noise.
+        shape (Tuple[int, ...]): Shape of the output tensor. Supports (B, action_dim)
+        theta (float): Rate of mean reversion.
+        dt (float): Time step size.
+        x0 (Optional[torch.Tensor]): Initial value or previous value for the noise process. (if None, it will be initialized to zeros)
+
+    Returns:
+        torch.Tensor: A tensor filled with Ornstein-Uhlenbeck noise.
+
+    References:
+        [1] http://math.stackexchange.com/questions/1287634/implementing-ornstein-uhlenbeck-in-matlab
+        [2] https://en.wikipedia.org/wiki/Ornstein%E2%80%93Uhlenbeck_process
+        [3] https://en.wikipedia.org/wiki/Euler%E2%80%93Maruyama_method
+    """
+    if x0 is None:
+        x0 = torch.zeros(shape)
+    
+    # Convert dt to tensor to make torch compatible
+    dt = torch.tensor(dt, dtype=x0.dtype, device=x0.device)
+    
+    noise = x0 + theta * (mean - x0) * dt + std * torch.sqrt(dt) * torch.randn_like(x0)
+    
+    return noise

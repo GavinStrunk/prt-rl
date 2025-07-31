@@ -231,3 +231,85 @@ def test_trajectory_returns_shape_error():
     dones = torch.tensor([[1.0], [0.0]])  # mismatched shape
     with pytest.raises(ValueError):
         utils.trajectory_returns(rewards, dones)        
+
+# Gaussian noise tests
+# ==================================================
+
+def test_gaussian_noise_shape():
+    shape = (3, 4)
+    noise = utils.gaussian_noise(mean=0.0, std=1.0, shape=shape)
+    assert noise.shape == shape
+
+def test_gaussian_noise_mean_std():
+    shape = (10000,)
+    mean = 2.0
+    std = 3.0
+    noise = utils.gaussian_noise(mean=mean, std=std, shape=shape)
+    assert abs(noise.mean().item() - mean) < 0.1
+    assert abs(noise.std(unbiased=True).item() - std) < 0.1
+
+def test_gaussian_noise_zero_std():
+    shape = (5, 5)
+    mean = 1.23
+    std = 0.0
+    noise = utils.gaussian_noise(mean=mean, std=std, shape=shape)
+    expected = torch.full(shape, mean)
+    assert torch.allclose(noise, expected, atol=1e-6)
+
+def test_gaussian_noise_default():
+    noise = utils.gaussian_noise()
+    assert isinstance(noise, torch.Tensor)
+    assert noise.shape == (1,)
+
+# Ornstein-Uhlenbeck process tests
+# ==================================================
+def test_ou_noise_shape():
+    shape = (3, 4)
+    noise = utils.ornstein_uhlenbeck_noise(mean=0.0, std=1.0, shape=shape)
+    assert noise.shape == shape
+
+def test_ou_noise_zero_std():
+    shape = (2, 2)
+    x0 = torch.ones(shape)
+    mean = 0.5
+    std = 0.0
+    theta = 0.2
+    dt = 0.1
+    expected = x0 + theta * (mean - x0) * dt
+    noise = utils.ornstein_uhlenbeck_noise(mean=mean, std=std, shape=shape, theta=theta, dt=dt, x0=x0)
+    assert torch.allclose(noise, expected, atol=1e-6)
+
+def test_ou_noise_deterministic_seed():
+    torch.manual_seed(42)
+    n1 = utils.ornstein_uhlenbeck_noise(shape=(5,))
+    torch.manual_seed(42)
+    n2 = utils.ornstein_uhlenbeck_noise(shape=(5,))
+    assert torch.allclose(n1, n2)
+
+def test_ou_noise_strong_theta_pull():
+    shape = (3,)
+    x0 = torch.tensor([2.0, -2.0, 0.5])
+    mean = 0.0
+    theta_small = 0.01
+    theta_large = 0.5
+    dt = 0.1
+    std = 0.0  # no stochasticity, test only drift
+    noise_small = utils.ornstein_uhlenbeck_noise(mean=mean, std=std, shape=shape, theta=theta_small, dt=dt, x0=x0)
+    noise_large = utils.ornstein_uhlenbeck_noise(mean=mean, std=std, shape=shape, theta=theta_large, dt=dt, x0=x0)
+    assert torch.norm(noise_large) < torch.norm(noise_small)
+
+def test_ou_sequential_calls():
+    shape = (2, 2)
+    x0 = torch.zeros(shape)
+    mean = 0.0
+    std = 1.0
+    theta = 0.15
+    dt = 0.1
+
+    torch.manual_seed(0)
+    noise1 = utils.ornstein_uhlenbeck_noise(mean=mean, std=std, shape=shape, theta=theta, dt=dt, x0=x0)
+    torch.manual_seed(0)
+    noise2 = utils.ornstein_uhlenbeck_noise(mean=mean, std=std, shape=shape, theta=theta, dt=dt, x0=noise1)
+
+    assert torch.allclose(noise1, torch.tensor([[0.4873, -0.0928], [-0.6890,  0.1798]]), atol=1e-4)
+    assert torch.allclose(noise2, torch.tensor([[0.9673, -0.1842], [-1.3677,  0.3568]]), atol=1e-4)

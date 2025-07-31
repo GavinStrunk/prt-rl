@@ -10,14 +10,15 @@ import torch.nn.functional as F
 from typing import Optional, List
 from prt_rl.agent import BaseAgent
 from prt_rl.env.interface import EnvParams, EnvironmentInterface
-from prt_rl.common.policies import ActorCriticPolicy
 from prt_rl.common.collectors import ParallelCollector
 from prt_rl.common.buffers import RolloutBuffer
 from prt_rl.common.loggers import Logger
 from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.progress_bar import ProgressBar
 from prt_rl.common.evaluators import Evaluator
+import prt_rl.common.utils as utils
 
+from prt_rl.common.policies import ActorCriticPolicy
 
 class PPO(BaseAgent):
     """
@@ -58,46 +59,46 @@ class PPO(BaseAgent):
         # Configure optimizers
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.learning_rate)
     
-    @staticmethod
-    def compute_gae_and_returns(
-        rewards: torch.Tensor,  
-        values: torch.Tensor,            
-        dones: torch.Tensor,             
-        last_values: torch.Tensor,       
-        gamma: float = 0.99,
-        gae_lambda: float = 0.95,
-    ):
-        """
-        Compute GAE and TD(lambda) returns for a batched rollout.
+    # @staticmethod
+    # def compute_gae_and_returns(
+    #     rewards: torch.Tensor,  
+    #     values: torch.Tensor,            
+    #     dones: torch.Tensor,             
+    #     last_values: torch.Tensor,       
+    #     gamma: float = 0.99,
+    #     gae_lambda: float = 0.95,
+    # ):
+    #     """
+    #     Compute GAE and TD(lambda) returns for a batched rollout.
 
-        Args:
-            rewards (T, N, 1): Rewards from rollout
-            values (T, N, 1): Estimated state values
-            dones (T, N, 1): Done flags (1 if episode ended at step t, else 0)
-            last_values (N, 1): Value estimates for final state (bootstrap)
-            gamma (float): Discount factor
-            gae_lambda (float): GAE lambda
+    #     Args:
+    #         rewards (T, N, 1): Rewards from rollout
+    #         values (T, N, 1): Estimated state values
+    #         dones (T, N, 1): Done flags (1 if episode ended at step t, else 0)
+    #         last_values (N, 1): Value estimates for final state (bootstrap)
+    #         gamma (float): Discount factor
+    #         gae_lambda (float): GAE lambda
 
-        Returns:
-            advantages (T, N): Estimated advantage values
-            returns (T, N): TD(lambda) returns
-        """
-        T, N, _ = rewards.shape
+    #     Returns:
+    #         advantages (T, N): Estimated advantage values
+    #         returns (T, N): TD(lambda) returns
+    #     """
+    #     T, N, _ = rewards.shape
 
-        # Concatenate last_values to get V(s_{t+1}) for final time step
-        values = torch.cat([values, last_values.unsqueeze(0)], dim=0)  # shape: (T+1, N, 1)
+    #     # Concatenate last_values to get V(s_{t+1}) for final time step
+    #     values = torch.cat([values, last_values.unsqueeze(0)], dim=0)  # shape: (T+1, N, 1)
 
-        advantages = torch.zeros((T, N, 1), dtype=values.dtype, device=values.device)
-        last_gae_lam = torch.zeros((N, 1), dtype=values.dtype, device=values.device)
+    #     advantages = torch.zeros((T, N, 1), dtype=values.dtype, device=values.device)
+    #     last_gae_lam = torch.zeros((N, 1), dtype=values.dtype, device=values.device)
 
-        for t in reversed(range(T)):
-            not_done = 1.0 - dones[t].float()
-            delta = rewards[t] + gamma * values[t + 1] * not_done - values[t]
-            last_gae_lam = delta + gamma * gae_lambda * not_done * last_gae_lam
-            advantages[t] = last_gae_lam
+    #     for t in reversed(range(T)):
+    #         not_done = 1.0 - dones[t].float()
+    #         delta = rewards[t] + gamma * values[t + 1] * not_done - values[t]
+    #         last_gae_lam = delta + gamma * gae_lambda * not_done * last_gae_lam
+    #         advantages[t] = last_gae_lam
 
-        returns = advantages + values[:-1]  # TD(lambda) returns
-        return advantages, returns
+    #     returns = advantages + values[:-1]  # TD(lambda) returns
+    #     return advantages, returns
 
     def predict(self, state):
         with torch.no_grad():
@@ -142,7 +143,7 @@ class PPO(BaseAgent):
             experience = collector.collect_experience(policy=self.policy, num_steps=self.steps_per_batch)
 
             # Compute Advantages and Returns under the current policy
-            advantages, returns = self.compute_gae_and_returns(
+            advantages, returns = utils.compute_gae_and_returns(
                 rewards=experience['reward'],
                 values=experience['value_est'],
                 dones=experience['done'],
