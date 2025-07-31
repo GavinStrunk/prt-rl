@@ -171,7 +171,7 @@ def rewards_to_go(
     Args:
         rewards (torch.Tensor): Rewards from rollout with shape (T, N, 1) or (B, 1)
         dones (torch.Tensor): Done flags (1 if episode ended at step t, else 0) with shape (T, N, 1) or (B, 1)
-        last_values (Optional[torch.Tensor]): Value estimates for final state (bootstrap) with shape (N, 1). This is required if the last state is not terminal or 0 is assumed for the last value.
+        last_values (Optional[torch.Tensor]): Value estimates for final state (bootstrap) with shape (N, 1) or (1, 1). This is required if the last state is not terminal or 0 is assumed for the last value.
         gamma (float): Discount factor
 
     Returns:
@@ -224,34 +224,78 @@ def trajectory_returns(
     gamma: float = 0.99,
 ) -> torch.Tensor:
     """
-    Computes the discounted returns for a sequence of rewards, also known as total discounted return.
+    Computes the discounted returns for a sequence of rewards, also known as total discounted return. This function supports bootstrapping partial trajectories, as well as, flattened or time-major inputs.
 
     ..math ::
-        \sum_{t'=0}^{T-1}\gamma^{t'}r(s_{i,t'},a_{i,t'})
+        \sum_{t'=0}^{T-1}\gamma^{t'}r(s_{i,t'},a_{i,t'}) + \gamma^{T}V(s_{i,T})
+
+    When arguments are passed in with shape (B, 1) it is assumed these are stacked trajectories. The assumption is only the last trajectory is potentially not complete. 
 
     Args:
-        rewards (torch.Tensor): Rewards from rollout with shape (T, N, 1)
-        dones (torch.Tensor): Done flags (1 if episode ended at step t, else 0) with shape (T, N, 1)
-        last_values (Optional[torch.Tensor]): Value estimates for final state (bootstrap) with shape (N, 1). This is required if the last state is not terminal.
+        rewards (torch.Tensor): Rewards from rollout with shape (T, N, 1) or (B, 1)
+        dones (torch.Tensor): Done flags (1 if episode ended at step t, else 0) with shape (T, N, 1) or (B, 1)
+        last_values (Optional[torch.Tensor]): Value estimates for final state (bootstrap) with shape (N, 1) or (1, 1). This is required if the last state is not terminal or 0 is assumed for the last value.
         gamma (float): Discount factor
 
     Returns:
         torch.Tensor: The returns with shape that matches the input rewards shape.
     """
-    if rewards.ndim != 3 or rewards.shape[-1] != 1:
-        raise ValueError(f"`trajectory_returns` only supports shape (T, N, 1), but got {rewards.shape}")
+    if rewards.shape != dones.shape:
+        raise ValueError(f"`rewards` and `dones` must match shape. Got {rewards.shape} and {dones.shape}")
 
-    T, N, _ = rewards.shape
-    returns = torch.zeros_like(rewards)
+    # Save the original shape so we can reshape the output
+    original_shape = rewards.shape
 
-    if last_values is None:
-        running_return = torch.zeros((N, 1), device=rewards.device)
+    # Case 1: time-major (T, N, 1)
+    if rewards.ndim == 3:
+        # Reshape rewards and dones to (T, N)
+        T, N, _ = rewards.shape
+        rewards = rewards.squeeze(-1)
+        dones = dones.squeeze(-1)
+
+    # Case 2: flattened batch (B, 1)
+    elif rewards.ndim == 2:
+        # Treat as a single environment where T=B and N=1
+        T, N = rewards.shape
+        rewards = rewards.view(T, N)
+        dones = dones.view(T, N)
     else:
-        running_return = last_values
+        raise ValueError(f"Unsupported input shape: {rewards.shape}")
 
-    for t in reversed(range(T)):
-        running_return = rewards[t] + gamma * running_return * (1.0 - dones[t])
-        returns[t] = running_return
+    G = torch.zeros(N, dtype=rewards.dtype, device=rewards.device)
+    discount = torch.ones(N, dtype=rewards.dtype, device=rewards.device)
 
-    return returns
+    segment_returns = torch.zeros_like(rewards)
+    segment_lengths = torch.zeros_like(rewards, dtype=torch.int)
+
+    t_start = torch.zeros(N, dtype=torch.long, device=rewards.device)
+
+    for t in range(T):
+        G += rewards[t] * discount
+        segment_lengths[t] = t - t_start + 1
+        segment_returns[t] = G
+        discount *= gamma
+
+        # Check if any trajectory has ended and handle multiple trajectories
+        done = dones[t] == 1.0
+        if done.any():
+            for i in range(N):
+                # If a trajectory has a done copy the trajectory return for the entire segment and reset the returns to 0
+                if done[i]:
+                    segment_returns[t_start[i]:t + 1, i] = G[i]
+                    t_start[i] = t + 1
+                    G[i] = 0.0
+                    discount[i] = 1.0
+
+    # Bootstrap remaining segments if last_values are provided
+    if last_values is not None:
+        last_values = last_values.view(-1)
+        for i in range(N):
+            # If t_start is less than T, then there was not a done for the last value
+            if t_start[i] < T:
+                # Bootstrap by adding the discounted last value
+                G[i] += (discount[i] * last_values[i])
+                segment_returns[t_start[i]:, i] = G[i]
+
+    return segment_returns.unsqueeze(-1).view(original_shape)
 

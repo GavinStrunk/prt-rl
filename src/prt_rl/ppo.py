@@ -141,7 +141,7 @@ class PPO(BaseAgent):
             # Collect experience dictionary with shape (N, T, ...)
             experience = collector.collect_experience(policy=self.policy, num_steps=self.steps_per_batch)
 
-            # Compute Advantages and Values
+            # Compute Advantages and Returns under the current policy
             advantages, returns = self.compute_gae_and_returns(
                 rewards=experience['reward'],
                 values=experience['value_est'],

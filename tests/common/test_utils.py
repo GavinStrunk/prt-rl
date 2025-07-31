@@ -193,3 +193,41 @@ def test_rtg_batch_flat_with_last_values():
     expected = torch.tensor([[12.6731], [11.791], [10.9]])
     rtg = utils.rewards_to_go(rewards, dones, gamma=0.99, last_values=last_values)
     assert torch.allclose(rtg, expected, atol=1e-4)    
+
+# Trajectory returns tests
+# ==================================================
+def test_trajectory_returns_terminal():
+    rewards = torch.tensor([[[1.0]], [[2.0]], [[3.0]]])
+    dones = torch.tensor([[[0.0]], [[0.0]], [[1.0]]])
+    expected = torch.tensor([[[6.0]], [[6.0]], [[6.0]]])
+    result = utils.trajectory_returns(rewards, dones, gamma=1.0)
+    assert torch.allclose(result, expected, atol=1e-4)
+
+def test_trajectory_returns_bootstrap():
+    rewards = torch.tensor([[[1.0]], [[2.0]], [[3.0]]])
+    dones = torch.tensor([[[0.0]], [[0.0]], [[0.0]]])
+    last_values = torch.tensor([[10.0]])
+    expected = torch.tensor([[[16.0]], [[16.0]], [[16.0]]])
+    result = utils.trajectory_returns(rewards, dones, last_values=last_values, gamma=1.0)
+    assert torch.allclose(result, expected, atol=1e-4)
+
+def test_trajectory_returns_gamma():
+    rewards = torch.tensor([[[1.0]], [[2.0]], [[3.0]]])
+    dones = torch.tensor([[[0.0]], [[0.0]], [[1.0]]])
+    expected_scalar = 1.0 + 0.99 * 2.0 + 0.99**2 * 3.0
+    expected = torch.full((3, 1, 1), expected_scalar)
+    result = utils.trajectory_returns(rewards, dones, gamma=0.99)
+    assert torch.allclose(result, expected, atol=1e-3)
+
+def test_trajectory_multiple_trajectories():
+    rewards = torch.tensor([[[1.0]], [[2.0]], [[3.0]], [[4.0]]])
+    dones = torch.tensor([[[0.0]], [[1.0]], [[0.0]], [[1.0]]])  # two trajectories
+    expected = torch.tensor([[[3.0]], [[3.0]], [[7.0]], [[7.0]]])
+    result = utils.trajectory_returns(rewards, dones, gamma=1.0)
+    assert torch.allclose(result, expected, atol=1e-4)
+
+def test_trajectory_returns_shape_error():
+    rewards = torch.tensor([[[1.0]], [[2.0]]])
+    dones = torch.tensor([[1.0], [0.0]])  # mismatched shape
+    with pytest.raises(ValueError):
+        utils.trajectory_returns(rewards, dones)        

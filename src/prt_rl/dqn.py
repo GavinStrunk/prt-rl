@@ -104,32 +104,6 @@ class DQN(BaseAgent):
         loss = torch.mean(td_error ** 2)
         # loss = torch.nn.functional.smooth_l1_loss(qsa, td_target)
         return loss, td_error
-    
-    # @staticmethod
-    # def _polyak_update(policy: torch.nn.Module, target: torch.nn.Module, tau: float) -> None:
-    #     """
-    #     Polyak update for the target network.
-
-    #     .. math::
-    #         \Theta_{target} = \tau * \Theta_{\pi} + (1 - \tau) * \Theta_{target}
-
-    #     References:
-    #     [1] https://github.com/DLR-RM/stable-baselines3/issues/93
-    #     """
-    #     for target_params, policy_params in zip(target.parameters(), policy.parameters()):
-    #         target_params.data.copy_(tau * policy_params.data + (1 - tau) * target_params.data)
-
-    # @staticmethod
-    # def _hard_update(policy: torch.nn.Module, target: torch.nn.Module) -> None:
-    #     """
-    #     Hard update for the target network.
-
-    #     .. math::
-    #         \Theta_{target} = \Theta_{\pi}
-
-    #     """
-    #     for target_params, policy_params in zip(target.parameters(), policy.parameters()):
-    #         target_params.data.copy_(policy_params.data)
 
     def predict(self,
                  state: torch.Tensor,
