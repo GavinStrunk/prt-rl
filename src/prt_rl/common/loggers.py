@@ -16,6 +16,12 @@ class Logger:
     """
     _registry = {}
 
+    def __init__(self,
+                 logging_freq: int = 1,
+                 ) -> None:
+        self.logging_freq = logging_freq
+        self.last_logging_iteration = 0
+
     @classmethod
     def register(cls, name):
         def decorator(subclass):
@@ -35,6 +41,26 @@ class Logger:
         """
         pass
 
+    def should_log(self, iteration: int) -> bool:
+        """
+        Determines whether to log based on the current iteration and logging frequency.
+
+        Args:
+            iteration (int): Current iteration number.
+
+        Returns:
+            bool: True if logging should occur, False otherwise.
+        """
+        iteration += 1  # Adjust for 0-based indexing
+
+        current_interval = iteration // self.logging_freq
+        last_interval = self.last_logging_iteration // self.logging_freq
+        if current_interval > last_interval:
+            self.last_logging_iteration = iteration
+            return True
+
+        return False
+    
     def log_parameters(self,
                        params: dict,
                        ) -> None:
@@ -79,6 +105,7 @@ class Logger:
             agent (object): Agent to save.
         """
         raise NotImplementedError("save_agent must be implemented in subclasses.")
+    
     
     
 @Logger.register('blank')
@@ -140,9 +167,10 @@ class BlankLogger(Logger):
 @Logger.register('file')
 class FileLogger(Logger):
     def __init__(self,
-                 output_dir: str
+                 output_dir: str,
+                 logging_freq: int = 1,
                  ) -> None:
-        super().__init__()
+        super().__init__(logging_freq=logging_freq)
         self.output_dir = output_dir
         os.makedirs(self.output_dir, exist_ok=True)  # Ensure the output directory exists
         self.parameters = {}
@@ -239,8 +267,9 @@ class MLFlowLogger(Logger):
                  experiment_name: str,
                  run_name: Optional[str] = None,
                  log_system_metrics: bool = False,
+                 logging_freq: int = 1,
                  ) -> None:
-        super().__init__()
+        super().__init__(logging_freq=logging_freq)
         self.tracking_uri = tracking_uri
         self.experiment_name = experiment_name
         self.run_name = run_name

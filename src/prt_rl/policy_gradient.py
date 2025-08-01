@@ -171,14 +171,15 @@ class PolicyGradient(BaseAgent):
                                                                    f"Loss: {save_loss:.4f},")
 
             # Log the training progress
-            if num_steps % logging_freq == 0:
+            # if num_steps % logging_freq == 0:
+            if logger.should_log(num_steps):
                 logger.log_scalar("policy_loss", save_loss, iteration=num_steps)
                 if self.critic is not None:
                     logger.log_scalar("critic_loss", np.mean(critic_losses), iteration=num_steps)
 
             # Evaluate the agent periodically
-            if num_steps % eval_freq == 0:
-                evaluator.evaluate(agent=self.policy, iteration=num_steps)
+            # if num_steps % eval_freq == 0:
+            evaluator.evaluate(agent=self.policy, iteration=num_steps)
         
         evaluator.close()
 

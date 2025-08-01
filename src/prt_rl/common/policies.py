@@ -490,3 +490,37 @@ class ActorCriticPolicy(BasePolicy):
         value_est = self.critic_head(critic_features)
 
         return value_est, log_probs, entropy
+
+class StateActionCritic(torch.nn.Module):
+    """
+    A simple state-action critic that can be used with ActorCriticPolicy.
+    It computes the Q-value for a given state and action pair.
+    """
+    def __init__(self, 
+                 env_params: EnvParams,
+                 num_critics: int = 1,
+                 encoder_network: Optional[Type[BaseEncoder]] = None,
+                 encoder_network_kwargs: Optional[dict] = {},
+                 critic_head: Type[torch.nn.Module] = MLP,
+                 critic_head_kwargs: Optional[dict] = {},
+                 ) -> None:
+        super().__init__()
+        self.env_params = env_params
+        self.num_critics = num_critics
+
+    def forward(self,
+                   state: torch.Tensor,
+                   action: torch.Tensor
+                   ) -> torch.Tensor:
+        """
+        Computes the Q-value for a given state and action pair.
+
+        Args:
+            state (torch.Tensor): Current state tensor.
+            action (torch.Tensor): Action tensor.
+
+        Returns:
+            torch.Tensor: Q-value tensor.
+        """
+        # This is a placeholder implementation. Replace with actual logic.
+        return torch.zeros(state.shape[0], 1, device=state.device)
