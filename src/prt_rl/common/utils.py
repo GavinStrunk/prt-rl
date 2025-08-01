@@ -302,7 +302,8 @@ def trajectory_returns(
 def gaussian_noise(
     mean: float = 0.0,
     std: float = 1.0,
-    shape: Tuple[int, ...] = (1,)
+    shape: Tuple[int, ...] = (1,),
+    device: str = 'cpu'
 ) -> torch.Tensor:
     """
     Generates Gaussian noise with specified mean and standard deviation.
@@ -315,7 +316,7 @@ def gaussian_noise(
     Returns:
         torch.Tensor: A tensor filled with Gaussian noise.
     """
-    return torch.normal(mean=mean, std=std, size=shape)
+    return torch.normal(mean=mean, std=std, size=shape, dtype=torch.float32, device=device)
 
 def ornstein_uhlenbeck_noise(
     mean: float = 0.0,

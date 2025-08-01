@@ -448,10 +448,8 @@ class ParallelCollector:
             next_states = torch.cat(next_states, dim=0)
             rewards = torch.cat(rewards, dim=0)
             dones = torch.cat(dones, dim=0)
-            if value_estimates:
-                value_estimates = torch.cat(value_estimates, dim=0)
-            if log_probs:
-                log_probs = torch.cat(log_probs, dim=0)
+            value_estimates = torch.cat(value_estimates, dim=0) if value_estimates else None
+            log_probs = torch.cat(log_probs, dim=0) if log_probs else None
         else:
             # Stack the lists of tensors into a single tensor with shape (T, N, ...)
             states = torch.stack(states, dim=0)

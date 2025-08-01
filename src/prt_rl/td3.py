@@ -1,3 +1,4 @@
+from calendar import c
 import torch
 import torch.nn.functional as F
 from typing import Optional, List
@@ -10,29 +11,152 @@ from prt_rl.common.evaluators import Evaluator
 import prt_rl.common.utils as utils
 
 import copy
-from prt_rl.common.collectors import ParallelCollector
+from prt_rl.common.collectors import SequentialCollector
 from prt_rl.common.buffers import ReplayBuffer
-from prt_rl.common.policies import StateActionCritic
+from prt_rl.common.policies import BasePolicy
+from prt_rl.common.networks import MLP, BaseEncoder
+from typing import Union, Dict, Type
 
-class TD3Policy:
+
+class Actor(torch.nn.Module):
+    def __init__(self,
+                 env_params: EnvParams,
+                 actor_head: Union[Type[torch.nn.Module], Dict[str, Type[torch.nn.Module]]] = MLP,
+                 actor_head_kwargs: Optional[dict] = {"network_arch": [400, 300]},
+                 ) -> None:
+        super().__init__()
+        self.env_params = env_params
+
+        # Construct the policy head network
+        self.policy_head = actor_head(
+            input_dim=self.env_params.observation_shape[0],
+            output_dim=self.env_params.action_len,
+            **actor_head_kwargs
+        )
+
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass through the actor network.
+
+        Args:
+            state: The current state of the environment.
+
+        Returns:
+            The action to be taken.
+        """
+        action = self.policy_head(state)
+        return action
+        # return action.clamp(self.env_params.action_min, self.env_params.action_max)
+
+
+class StateActionCritic(torch.nn.Module):
+    def __init__(self, 
+                 env_params: EnvParams, 
+                 num_critics: int = 2,
+                 critic_head: Type[torch.nn.Module] = MLP,
+                 critic_head_kwargs: Optional[dict] = {"network_arch": [400, 300]},
+                 ) -> None:
+        super(StateActionCritic, self).__init__()
+        self.env_params = env_params
+        self.num_critics = num_critics
+
+        # Initialize critics here
+        self.critics = []
+        for _ in range(num_critics):
+            critic = critic_head(
+                input_dim=self.env_params.observation_shape[0] + self.env_params.action_len,
+                output_dim=1,
+                **critic_head_kwargs
+            )
+            self.critics.append(critic)
+
+        # Convert list to ModuleList for proper parameter management
+        self.critics = torch.nn.ModuleList(self.critics)
+    # def to(self, device: str) -> 'StateActionCritic':
+    #     """
+    #     Move the critics to the specified device.
+
+    #     Args:
+    #         device: The device to move the critics to.
+
+    #     Returns:
+    #         self: The StateActionCritic instance with critics moved to the specified device.
+    #     """
+    #     self.critics = [critic.to(device) for critic in self.critics]
+    #     return self
+
+    def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass through the critic network.
+
+        Args:
+            state: The current state of the environment.
+            action: The action taken in the current state.
+
+        Returns:
+            The Q-value for the given state-action pair.
+        """
+        # Stack the state and action tensors
+        q_input = torch.cat([state, action], dim=1)
+
+        # Return a tuple of Q-values from each critic
+        return tuple(critic(q_input) for critic in self.critics)
+
+    def forward_first(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass through the first critic network.
+
+        Args:
+            state: The current state of the environment.
+            action: The action taken in the current state.
+
+        Returns:
+            The Q-value for the given state-action pair from the first critic.
+        """
+        q_input = torch.cat([state, action], dim=1)
+        return self.critics[0](q_input)
+
+
+class TD3Policy(BasePolicy):
     """
     Placeholder for TD3 policy class.
     This should be implemented with the actual policy logic.
 
     """
     def __init__(self, 
-                 env_params, 
+                 env_params: EnvParams, 
                  num_critics: int = 2,
-                 device='cpu'
+                 actor: Optional[Actor] = None,
+                 critic: Optional[StateActionCritic] = None,
+                 device: str='cpu'
                  ) -> None:
-        self.env_params = env_params
+        super().__init__(env_params=env_params)
         self.num_critics = num_critics
         self.device = torch.device(device)
 
-        self.critic = StateActionCritic(env_params=env_params, num_critics=num_critics)
+        # Create actor and target actor networks
+        self.actor = actor if actor is not None else Actor(env_params=env_params)
+        self.actor.to(self.device)
+        self.target_actor = copy.deepcopy(self.actor)
+        self.target_actor.to(self.device)
+
+        self.critic = critic if critic is not None else StateActionCritic(env_params=env_params, num_critics=num_critics)
         self.critic.to(self.device)
         self.critic_target = copy.deepcopy(self.critic)
         self.critic_target.to(self.device)
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass through the policy network.
+
+        Args:
+            state: The current state of the environment.
+
+        Returns:
+            The action to be taken.
+        """
+        return self.actor(state)
 
 class TD3(BaseAgent):
     """
@@ -41,11 +165,14 @@ class TD3(BaseAgent):
     """
     def __init__(self,
                  env_params: EnvParams,
-                 policy = None,
+                 policy: Optional[TD3Policy] = None,
+                 buffer_size: int = 100000,
                  batch_size: int = 256,
-                 min_num_steps: int = 1000,
+                 min_buffer_size: int = 1000,
                  gradient_steps: int = 1,
                  mini_batch_size: int = 256,
+                 learning_rate: float = 1e-3,
+                 gamma: float = 0.99,
                  policy_noise: float = 0.2,
                  noise_clip: float = 0.5,
                  delay_freq: int = 2,
@@ -54,18 +181,27 @@ class TD3(BaseAgent):
                  ) -> None:
         super().__init__(policy=policy)
         self.env_params = env_params
+        self.buffer_size = buffer_size
         self.batch_size = batch_size
-        self.min_num_steps = min_num_steps
+        self.min_buffer_size = min_buffer_size
         self.gradient_steps = gradient_steps
         self.mini_batch_size = mini_batch_size
+        self.learning_rate = learning_rate
+        self.gamma = gamma
         self.policy_noise = policy_noise
         self.noise_clip = noise_clip
         self.delay_freq = delay_freq
         self.tau = tau
         self.device = torch.device(device)
+        self.policy = policy if policy is not None else TD3Policy(env_params=env_params, num_critics=2, device=device)
         self.policy.to(self.device)
 
-    def predict(self, state: torch.Tensor) -> torch.Tensor:
+        self.actor_optimizer = torch.optim.Adam(self.policy.actor.parameters(), lr=self.learning_rate)
+        self.critic_optimizers = [
+            torch.optim.Adam(critic.parameters(), lr=self.learning_rate) for critic in self.policy.critic.critics
+        ]
+
+    def predict(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
         """
         Perform an action based on the current state.
 
@@ -76,7 +212,13 @@ class TD3(BaseAgent):
             The action to be taken.
         """
         with torch.no_grad():
-            return self.policy(state)
+            action = self.policy(state)
+            if not deterministic:
+                # Add noise to the action for exploration
+                noise = utils.gaussian_noise(mean=0, std=0.1, shape=action.shape, device=self.device)
+                action = action + noise
+                # action = action.clamp(self.env_params.action_min, self.env_params.action_max)
+        return action
         
     def train(self,
               env: EnvironmentInterface,
@@ -105,11 +247,10 @@ class TD3(BaseAgent):
         num_steps = 0
         num_gradient_steps = 0
 
-        # Make collector and do not flatten the experience so the shape is (N, T, ...)
-        collector = ParallelCollector(env=env, logger=logger, logging_freq=logging_freq, flatten=False)
-        replay_buffer = ReplayBuffer(capacity=100000, device=self.device)
+        # Make collector and flatten the experience so the shape is (N*T, ...)
+        collector = SequentialCollector(env=env, logger=logger, logging_freq=logging_freq)
+        replay_buffer = ReplayBuffer(capacity=self.buffer_size, device=self.device)
 
-        critic_losses = []
         actor_losses = []
         while num_steps < total_steps:
             # Update Schedulers if provided
@@ -117,15 +258,15 @@ class TD3(BaseAgent):
                 for scheduler in schedulers:
                     scheduler.update(current_step=num_steps)
 
-            # Collect experience dictionary with shape (T, N, ...)
+            # Collect experience dictionary with shape (B, ...)
             experience = collector.collect_experience(policy=self.policy, num_steps=self.batch_size)
-            num_steps += experience['state'].shape[0] * experience['state'].shape[1]
+            num_steps += experience['state'].shape[0]
 
             # Store experience in replay buffer
             replay_buffer.add(experience)
 
             # Collect a minimum number of steps in the replay buffer before training
-            if replay_buffer.get_size() < self.min_num_steps:
+            if replay_buffer.get_size() < self.min_buffer_size:
                 progress_bar.update(current_step=num_steps, desc="Collecting initial experience...")
                 continue
 
@@ -138,34 +279,35 @@ class TD3(BaseAgent):
                 # Compute current policy's action and target
                 with torch.no_grad():
                     # Compute the policies next action with noise and clip to ensure it does not exceed action bounds
-                    noise = utils.gaussian_noise(mean=0, std=self.policy_noise, size=batch['action'].shape)
+                    noise = utils.gaussian_noise(mean=0, std=self.policy_noise, shape=batch['action'].shape, device=self.device)
                     noise_clipped = noise.clamp(-self.noise_clip, self.noise_clip)
-                    next_action = (self.target_actor(batch['next_state']) + noise_clipped).clamp(self.env_params.action_min, self.env_params.action_max)
+                    next_action = (self.policy.target_actor(batch['next_state'].float()) + noise_clipped) #.clamp(self.env_params.action_min, self.env_params.action_max)
 
                     # Compute the Q-Values for all the critics
-                    next_q_values = self.target_critic.evaluate_actions(batch['next_state'], next_action)
+                    next_q_values = self.policy.critic_target(batch['next_state'].float(), next_action)
+                    next_q_values = torch.cat(next_q_values, dim=1)
 
                     # Use the minimum Q-Value across critics for the target
                     next_q_values = torch.min(next_q_values, dim=1, keepdim=True)[0] 
 
                     # Compute the target Q-Value
-                    y = batch['reward'] + self.env_params.gamma * (1 - batch['done'].float()) * next_q_values
+                    y = batch['reward'] + self.gamma * (1 - batch['done'].float()) * next_q_values
 
                 # Perform gradient step on critics
-                current_q_values = self.policy.evaluate_actions(batch['state'], batch['action'])
-
-                # Compute critics loss
-                critic_loss = F.mse_loss(y, current_q_values)
-                critic_losses.append(critic_loss.item())
-
-                self.critic_optimizer.zero_grad()
-                critic_loss.backward()
-                self.critic_optimizer.step()
+                q_input = torch.cat([batch['state'].float(), batch['action']], dim=1)
+                
+                for i in range(self.policy.num_critics):
+                    # Compute critics loss
+                    q_i = self.policy.critic.critics[i](q_input.detach())
+                    critic_loss = F.mse_loss(y, q_i)
+                    self.critic_optimizers[i].zero_grad()
+                    critic_loss.backward()
+                    self.critic_optimizers[i].step()
 
                 # Delayed policy update 
                 if num_gradient_steps % self.delay_freq == 0:
                     # Compute actor loss
-                    actor_loss = -self.critic1(batch['state'], self.actor(batch['state'])).mean()
+                    actor_loss = -self.policy.critic.forward_first(batch['state'].float(), self.policy.actor(batch['state'].float())).mean()
                     actor_losses.append(actor_loss.item())
 
                     # Take a gradient step on the actor
@@ -174,6 +316,8 @@ class TD3(BaseAgent):
                     self.actor_optimizer.step()
 
                     # Update target networks
-                    utils.polyak_update(self.target_actor, self.actor, tau=self.tau)
-                    utils.polyak_update(self.target_critic1, self.critic1, tau=self.tau)
-                    utils.polyak_update(self.target_critic2, self.critic2, tau=self.tau)
+                    utils.polyak_update(self.policy.target_actor, self.policy.actor, tau=self.tau)
+                    for i in range(self.policy.num_critics):
+                        utils.polyak_update(self.policy.critic_target.critics[i], self.policy.critic.critics[i], tau=self.tau)
+
+            progress_bar.update(current_step=num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}")

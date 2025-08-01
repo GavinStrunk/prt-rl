@@ -253,7 +253,7 @@ class GymnasiumWrapper(EnvironmentInterface):
                 # If there are multiple environments and 1 action, the step function expects an action with shape (# envs,)
                 action = action.cpu().numpy().squeeze(-1)
         else:
-            action = action.cpu().numpy()
+            action = action.detach().cpu().numpy()
 
             # If there is only one environment remove the first dimension
             if action.shape[0] == 1:
