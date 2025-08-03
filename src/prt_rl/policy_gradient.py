@@ -69,7 +69,7 @@ class PolicyGradient(BaseAgent):
             self.critic = None
 
 
-    def predict(self, state: torch.Tensor) -> torch.Tensor:
+    def predict(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
         with torch.no_grad():
             return self.policy(state)  # Forward pass through the policy
     

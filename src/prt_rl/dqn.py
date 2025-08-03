@@ -107,12 +107,14 @@ class DQN(BaseAgent):
 
     def predict(self,
                  state: torch.Tensor,
+                 deterministic: bool = False
                  ) -> torch.Tensor:
         """
         Predict the action using the policy network.
 
         Args:
             state (torch.Tensor): Current state of the environment.
+            deterministic (bool): If True, the action will be selected deterministically.
 
         Returns:
             torch.Tensor: Action to be taken.

@@ -72,7 +72,7 @@ class DAgger(BaseAgent):
         else:
             raise ValueError(f"Unsupported distribution type {policy.distribution.__class__} loss function.")
     
-    def predict(self, state: torch.Tensor) -> torch.Tensor:
+    def predict(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
         """
         Perform an action based on the current state using the policy.
         

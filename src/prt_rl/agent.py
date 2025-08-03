@@ -16,25 +16,27 @@ class BaseAgent(ABC):
                  ) -> None:
         self.policy = policy
 
-    def __call__(self, state: torch.Tensor) -> torch.Tensor:
+    def __call__(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
         """
         Call the agent to perform an action based on the current state.
 
         Args:
-            state: The current state of the environment.
+            state (torch.Tensor): The current state of the environment.
+            deterministic (bool): If True, the agent will select actions deterministically.
 
         Returns:
             The action to be taken.
         """
-        return self.predict(state)
+        return self.predict(state, deterministic)
 
     @abstractmethod
-    def predict(self, state: torch.Tensor) -> torch.Tensor:
+    def predict(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
         """
         Perform an action based on the current state.
 
         Args:
-            state: The current state of the environment.
+            state (torch.Tensor): The current state of the environment.
+            deterministic (bool): If True, the agent will select actions deterministically.
 
         Returns:
             The action to be taken.
@@ -77,7 +79,8 @@ class RandomAgent(BaseAgent):
         self.env_params = env_params
 
     def predict(self,
-                   state: torch.Tensor
+                   state: torch.Tensor,
+                   deterministic: bool = False
                    ) -> torch.Tensor:
         """
         Randomly samples an action from action space.
@@ -85,6 +88,9 @@ class RandomAgent(BaseAgent):
         Returns:
             TensorDict: Tensordict with the "action" key added
         """
+        if deterministic:
+            raise ValueError("RandomAgent does not support deterministic actions. Set deterministic=False to sample random actions.")
+        
         if isinstance(self.env_params, EnvParams):
             ashape = (state.shape[0], self.env_params.action_len)
             params = self.env_params

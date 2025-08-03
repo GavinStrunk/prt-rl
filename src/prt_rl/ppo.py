@@ -100,7 +100,7 @@ class PPO(BaseAgent):
     #     returns = advantages + values[:-1]  # TD(lambda) returns
     #     return advantages, returns
 
-    def predict(self, state):
+    def predict(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
         with torch.no_grad():
             return self.policy(state)  # Assuming policy has a forward method that returns action logits or actions directly
     

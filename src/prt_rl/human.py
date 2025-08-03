@@ -102,7 +102,7 @@ class GameControllerAgent(BaseAgent):
             self.lock = threading.Lock()
             self._start_listener()
 
-    def predict(self, state: torch.Tensor) -> torch.Tensor:
+    def predict(self, state: torch.Tensor, deterministic: bool = True) -> torch.Tensor:
         """
         Gets a game controller input and maps it to the action space.
 
@@ -112,6 +112,9 @@ class GameControllerAgent(BaseAgent):
         Returns:
             A TensorDict with the "action" key added.
         """
+        if not deterministic:
+            raise ValueError("GameControllerAgent does not support non-deterministic actions. Set deterministic=True.")
+        
         assert state.batch_size[0] == 1, "GameController only supports batch size 1 for now."
 
         # Get the data type for the action values
@@ -326,11 +329,15 @@ class KeyboardAgent(BaseAgent):
             self._start_listener()
 
     def predict(self,
-                   state: torch.Tensor
+                   state: torch.Tensor,
+                   deterministic: bool = True
                    ) -> torch.Tensor:
         """
         Gets a keyboard press and maps it to the action space.
         """
+        if not deterministic:
+            raise ValueError("KeyboardAgent does not support non-deterministic actions. Set deterministic=True.")
+        
         assert state.batch_size[0] == 1, "KeyboardPolicy Only supports batch size 1 for now."
 
         if self.blocking:
