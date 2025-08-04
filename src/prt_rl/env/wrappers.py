@@ -298,6 +298,10 @@ class GymnasiumWrapper(EnvironmentInterface):
         else:
             observation = torch.tensor(observation, device=self.device)
 
+        # If observation is float64 convert it to float32
+        if observation.dtype == torch.float64:
+            observation = observation.float()
+            
         return observation
 
     def _make_env_params(self,

@@ -95,6 +95,7 @@ class DAgger(BaseAgent):
               logging_freq: int = 1,              
               evaluator: Evaluator = Evaluator(),
               eval_freq: int = 1000,
+              show_progress: bool = True
               ) -> None:
         """
         Train the DAgger agent using the provided environment and expert policy.
@@ -111,7 +112,9 @@ class DAgger(BaseAgent):
             eval_freq (int): Frequency of evaluation during training.
         """
         logger = logger or Logger.create('blank')
-        progress_bar = ProgressBar(total_steps=total_steps)
+
+        if show_progress:
+            progress_bar = ProgressBar(total_steps=total_steps)
 
         # Resize the replay buffer with size: initial experience + total_steps
         experience_buffer.resize(new_capacity=experience_buffer.size + self.buffer_size)
@@ -158,7 +161,8 @@ class DAgger(BaseAgent):
                     torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=self.max_grad_norm)
                     self.optimizer.step()
             
-            progress_bar.update(num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}, "
+            if show_progress:
+                progress_bar.update(num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}, "
                                                                    f"Episode Length: {collector.previous_episode_length}, "
                                                                    f"Loss: {np.mean(losses):.4f},")
 

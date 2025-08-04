@@ -129,6 +129,7 @@ class DQN(BaseAgent):
               logging_freq: int = 1,
               evaluator: Evaluator = Evaluator(),
               eval_freq: int = 1000,
+              show_progress: bool = True
               ) -> None:
         """
         Train the DQN agent.
@@ -140,7 +141,9 @@ class DQN(BaseAgent):
             logging_freq (int, optional): Frequency of logging. Defaults to 1000.
         """
         logger = logger or Logger.create('blank')
-        progress_bar = ProgressBar(total_steps=total_steps)
+        if show_progress:
+            progress_bar = ProgressBar(total_steps=total_steps)
+
         collector = SequentialCollector(env, logger=logger, logging_freq=logging_freq)
         experience = {}
         num_steps = 0
@@ -158,7 +161,9 @@ class DQN(BaseAgent):
                 experience = collector.collect_experience(num_steps=1)
                 num_steps += experience["state"].shape[0]
                 self.replay_buffer.add(experience)
-                progress_bar.update(current_step=num_steps, desc="Collecting initial experience...")
+
+                if show_progress:
+                    progress_bar.update(current_step=num_steps, desc="Collecting initial experience...")
                 continue
             
             # Collect experience and add to replay buffer
@@ -208,7 +213,9 @@ class DQN(BaseAgent):
                         self.replay_buffer.update_priorities(batch_data["indices"], td_error)
 
                 training_steps += 1
-                progress_bar.update(current_step=num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}, "
+
+                if show_progress:
+                    progress_bar.update(current_step=num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}, "
                                                                    f"Episode Length: {collector.previous_episode_length}, "
                                                                    f"Loss: {np.mean(losses):.4f},")
 

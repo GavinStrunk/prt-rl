@@ -228,6 +228,7 @@ class TD3(BaseAgent):
               logging_freq: int = 1000,
               evaluator: Evaluator = Evaluator(),
               eval_freq: int = 1000,
+              show_progress: bool = True
               ) -> None:
         """
         Update the agent's knowledge based on the action taken and the received reward.
@@ -243,7 +244,8 @@ class TD3(BaseAgent):
             eval_freq: Frequency of evaluation.
         """
         logger = logger or Logger.create('blank')
-        progress_bar = ProgressBar(total_steps=total_steps)
+        if show_progress:
+            progress_bar = ProgressBar(total_steps=total_steps)
         num_steps = 0
         num_gradient_steps = 0
 
@@ -267,7 +269,8 @@ class TD3(BaseAgent):
 
             # Collect a minimum number of steps in the replay buffer before training
             if replay_buffer.get_size() < self.min_buffer_size:
-                progress_bar.update(current_step=num_steps, desc="Collecting initial experience...")
+                if show_progress:
+                    progress_bar.update(current_step=num_steps, desc="Collecting initial experience...")
                 continue
 
             for _ in range(self.gradient_steps):
@@ -320,4 +323,5 @@ class TD3(BaseAgent):
                     for i in range(self.policy.num_critics):
                         utils.polyak_update(self.policy.critic_target.critics[i], self.policy.critic.critics[i], tau=self.tau)
 
-            progress_bar.update(current_step=num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}")
+            if show_progress:
+                progress_bar.update(current_step=num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}")

@@ -111,7 +111,8 @@ class PPO(BaseAgent):
               logger: Optional[Logger] = None,
               logging_freq: int = 1000,
               evaluator: Evaluator = Evaluator(),
-              eval_freq: int = 1000
+              eval_freq: int = 1000,
+              show_progress: bool = True
               ) -> None:
         """
         Train the PPO agent.
@@ -126,7 +127,9 @@ class PPO(BaseAgent):
             eval_freq (int): Frequency of evaluation.
         """
         logger = logger or Logger.create('blank')
-        progress_bar = ProgressBar(total_steps=total_steps)
+        if show_progress:
+            progress_bar = ProgressBar(total_steps=total_steps)
+
         num_steps = 0
 
         # Make collector and do not flatten the experience so the shape is (N, T, ...)
@@ -205,7 +208,8 @@ class PPO(BaseAgent):
             rollout_buffer.clear()
 
             # Update progress bar
-            progress_bar.update(current_step=num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}, "
+            if show_progress:
+                progress_bar.update(current_step=num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}, "
                                                                    f"Episode Length: {collector.previous_episode_length}, "
                                                                    f"Loss: {np.mean(losses):.4f},")
             # Log metrics

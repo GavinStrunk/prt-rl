@@ -117,6 +117,7 @@ class SB3Agent(BaseAgent):
               logging_freq: int = 1000,
               evaluator: Evaluator = Evaluator(),
               eval_freq: int = 1000,
+              show_progress: bool = True
               ) -> None:
         raise NotImplementedError("The train method must be implemented by subclasses.")
       

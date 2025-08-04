@@ -81,7 +81,8 @@ class PolicyGradient(BaseAgent):
               logging_freq: int = 1,
               evaluator: Evaluator = Evaluator(),
               eval_freq: int = 1000,
-              seed: Optional[int] = None
+              seed: Optional[int] = None,
+              show_progress: bool = True
               ) -> None:
         """
         Train the PolicyGradient agent using the provided environment
@@ -96,7 +97,9 @@ class PolicyGradient(BaseAgent):
             eval_freq (int): Frequency of evaluation during training.
         """
         logger = logger or Logger.create('blank')
-        progress_bar = ProgressBar(total_steps=total_steps)
+
+        if show_progress:
+            progress_bar = ProgressBar(total_steps=total_steps)
 
         # Initialize collector without flattening so the experience shape is (N, T, ...)
         collector = SequentialCollector(env=env, logger=logger, logging_freq=logging_freq, seed=seed)
@@ -166,7 +169,8 @@ class PolicyGradient(BaseAgent):
                     critic_loss.backward()  # Backpropagate the critic loss
                     self.critic_optimizer.step()  # Update the critic parameters
                     
-            progress_bar.update(num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}, "
+            if show_progress:
+                progress_bar.update(num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}, "
                                                                    f"Episode Length: {collector.previous_episode_length}, "
                                                                    f"Loss: {save_loss:.4f},")
 
@@ -314,6 +318,7 @@ class PolicyGradientTrajectory(PolicyGradient):
               logging_freq: int = 1,
               evaluator: Evaluator = Evaluator(),
               eval_freq: int = 1000,
+              show_progress: bool = True
               ) -> None:
         """
         Train the PolicyGradient agent using the provided environment
@@ -328,7 +333,9 @@ class PolicyGradientTrajectory(PolicyGradient):
             eval_freq (int): Frequency of evaluation during training.
         """
         logger = logger or Logger.create('blank')
-        progress_bar = ProgressBar(total_steps=total_steps)
+
+        if show_progress:
+            progress_bar = ProgressBar(total_steps=total_steps)
 
         # Initialize collector without flattening so the experience shape is (N, T, ...)
         collector = SequentialCollector(env=env, logger=logger, logging_freq=logging_freq)
@@ -383,7 +390,8 @@ class PolicyGradientTrajectory(PolicyGradient):
                     critic_loss.backward()  # Backpropagate the critic loss
                     self.critic_optimizer.step()  # Update the critic parameters
                     
-            progress_bar.update(num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}, "
+            if show_progress:
+                progress_bar.update(num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}, "
                                                                    f"Episode Length: {collector.previous_episode_length}, "
                                                                    f"Loss: {loss:.4f},")
 

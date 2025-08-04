@@ -5,8 +5,10 @@ from typing import Callable, Dict, Any
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from sklearn.model_selection import ParameterGrid
 import multiprocessing
-from torch import mul
 from tqdm import tqdm
+import signal
+import psutil
+import os
 
 class HyperparameterTuner(ABC):
     """
@@ -184,33 +186,57 @@ class GridSearchTuner(HyperparameterTuner):
         grid = list(ParameterGrid(self._convert_parameters(parameters)))
         best_score = float('-inf') if self.maximize else float('inf')
         best_params = None
+        params = []
+        scores = []
+
+        # Custom signal handler
+        interrupted = False
+        def signal_handler(sig, frame):
+            nonlocal interrupted
+            print("\n🔴 Received Ctrl+C. Attempting to shut down gracefully...")
+            interrupted = True        
+
+        # Register the signal handler
+        signal.signal(signal.SIGINT, signal_handler)
 
         # Use process-based parallelism
-        with ProcessPoolExecutor(max_workers=self.num_jobs) as executor:
-            futures = {executor.submit(objective_fcn, params): params for params in grid}
+        try:
+            with ProcessPoolExecutor(max_workers=self.num_jobs) as executor:
+                futures = {executor.submit(objective_fcn, params): params for params in grid}
 
-            with tqdm(total=len(futures), desc="Grid Search", unit="trial", position=0) as pbar:
-                for future in as_completed(futures):
-                    params = futures[future]
-                    try:
-                        score = future.result()
-                        print(f"Trial finished - Params: {params}, Score: {score:.4f}")
+                with tqdm(total=len(futures), desc="Grid Search", unit="trial", position=0) as pbar:
+                    for future in as_completed(futures):
+                        # Handle Ctrl+C interruption to shutdown the current process and any queued tasks
+                        if interrupted:
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            self._kill_child_processes()
+                            raise KeyboardInterrupt("Grid search interrupted by user.")
+                        
+                        param_set = futures[future]
+                        params.append(param_set)
 
-                        is_better = (
-                            (self.maximize and score > best_score) or
-                            (not self.maximize and score < best_score)
-                        )
+                        try:
+                            score = future.result()
+                            scores.append(score)
 
-                        if is_better:
-                            best_score = score
-                            best_params = params
-                            print(f"🔥 New best trial! Score: {best_score:.4f}, Params: {best_params}")
-                    except Exception as e:
-                        print(f"❌ Trial failed for {params}: {e}")
-                    finally:
-                        pbar.update(1)
+                            is_better = (
+                                (self.maximize and score > best_score) or
+                                (not self.maximize and score < best_score)
+                            )
 
-        return best_params        
+                            if is_better:
+                                best_score = score
+                                best_params = param_set
+                                print(f"🔥 New best trial! Score: {best_score:.4f}, Params: {best_params}")
+                        except Exception as e:
+                            scores.append(None)
+                            print(f"❌ Trial failed for {params}: {e}")
+                        finally:
+                            pbar.update(1)
+        except KeyboardInterrupt:
+            raise KeyboardInterrupt("Grid search interrupted by user.")
+
+        return {'best_params': best_params, 'best_score': best_score, 'scores': scores, 'params': params}        
 
     @staticmethod
     def _convert_parameters(parameters: dict) -> Dict[str, Any]:
@@ -242,3 +268,11 @@ class GridSearchTuner(HyperparameterTuner):
             else:
                 raise ValueError(f"Unsupported parameter type: {value['type']}")
         return converted
+    
+    @staticmethod
+    def _kill_child_processes():
+        parent = psutil.Process(os.getpid())
+        children = parent.children(recursive=True)
+        for child in children:
+            child.terminate()
+        psutil.wait_procs(children, timeout=5)

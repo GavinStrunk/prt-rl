@@ -52,6 +52,7 @@ class BaseAgent(ABC):
               logging_freq: int = 1000,
               evaluator: Evaluator = Evaluator(),
               eval_freq: int = 1000,
+              show_progress: bool = True
               ) -> None:
         """
         Update the agent's knowledge based on the action taken and the received reward.
