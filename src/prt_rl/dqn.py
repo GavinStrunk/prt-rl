@@ -52,6 +52,7 @@ class DQN(BaseAgent):
                  replay_buffer: Optional[BaseBuffer] = None,
                  device: str = "cuda",
                  ) -> None:
+        super().__init__()
         self.env_params = env_params
         self.policy = policy
         self.alpha = alpha
@@ -119,16 +120,14 @@ class DQN(BaseAgent):
         Returns:
             torch.Tensor: Action to be taken.
         """
-        return self.policy(state)
+        return self.policy(state, deterministic=deterministic)
 
     def train(self,
               env: EnvironmentInterface,
               total_steps: int,
               schedulers: Optional[List[ParameterScheduler]] = None,
               logger: Optional[Logger] = None,
-              logging_freq: int = 1,
               evaluator: Evaluator = Evaluator(),
-              eval_freq: int = 1000,
               show_progress: bool = True
               ) -> None:
         """
@@ -138,13 +137,15 @@ class DQN(BaseAgent):
             total_steps (int): Total number of steps to train the agent.
             schedulers (List[ParameterScheduler], optional): List of schedulers to update during training. Defaults to None.
             logger (Logger, optional): Logger to log training metrics. Defaults to None.
-            logging_freq (int, optional): Frequency of logging. Defaults to 1000.
+            evaluator (Evaluator): Evaluator to evaluate the agent periodically.
+            show_progress (bool): If True, show a progress bar during training.            
         """
         logger = logger or Logger.create('blank')
+
         if show_progress:
             progress_bar = ProgressBar(total_steps=total_steps)
 
-        collector = SequentialCollector(env, logger=logger, logging_freq=logging_freq)
+        collector = SequentialCollector(env, logger=logger)
         experience = {}
         num_steps = 0
         training_steps = 0
@@ -228,18 +229,18 @@ class DQN(BaseAgent):
                     utils.polyak_update(target=self.target, network=self.policy, tau=self.polyak_tau)
                 
             # Log training metrics
-            if num_steps % logging_freq == 0 and training_steps > 0:
+            if logger.should_log(num_steps):
                 if schedulers is not None:
                     for scheduler in schedulers:
                         logger.log_scalar(name=scheduler.parameter_name, value=getattr(scheduler.obj, scheduler.parameter_name), iteration=num_steps)
                 logger.log_scalar(name="td_error", value=np.mean(td_errors), iteration=num_steps)
                 logger.log_scalar(name="loss", value=np.mean(losses), iteration=num_steps)
 
-            if num_steps % eval_freq == 0:
+            if evaluator is not None:
                 evaluator.evaluate(agent=self.policy, iteration=num_steps)
             
-
-        evaluator.close()
+        if evaluator is not None:
+            evaluator.close()
 
         # Clean up for saving the agent
         # Clear the replay buffer because it can be large

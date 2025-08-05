@@ -17,10 +17,27 @@ class PolicyGradient(BaseAgent):
     """
     Policy Gradient agent with step-wise optimization.
 
+    Args:
+        env_params (EnvParams): Environment parameters.
+        policy (Optional[DistributionPolicy]): The policy to be used by the agent. If None, a default policy will be created based on the environment parameters.
+        batch_size (int): Size of the batch for training. Default is 100.
+        learning_rate (float): Learning rate for the optimizer. Default is 1e-3.
+        gamma (float): Discount factor for future rewards. Default is 0.99.
+        gae_lambda (float): Lambda parameter for Generalized Advantage Estimation. Default is 0.95.
+        optim_steps (int): Number of optimization steps per training iteration. Default is 1.
+        reward_to_go (bool): Whether to use rewards-to-go instead of total discounted return. Default is False.
+        use_baseline (bool): Whether to use a baseline for advantage estimation. Default is False.
+        use_gae (bool): Whether to use Generalized Advantage Estimation. Default is False.
+        baseline_learning_rate (float): Learning rate for the baseline network if used. Default is 5e-3.
+        baseline_optim_steps (int): Number of optimization steps for the baseline network. Default is 5.
+        normalize_advantages (bool): Whether to normalize advantages before training. Default is True.
+        network_arch (List[int]): Architecture of the neural network for the policy. Default is [64, 64].
+        device (str): Device to run the agent on (e.g., 'cpu' or 'cuda'). Default is 'cpu'.
+
     """
     def __init__(self, 
                  env_params: EnvParams,
-                 policy = None,
+                 policy: DistributionPolicy | None,
                  batch_size: int = 100,
                  learning_rate: float = 1e-3,
                  gamma: float = 0.99,
@@ -35,10 +52,8 @@ class PolicyGradient(BaseAgent):
                  network_arch: List[int] = [64, 64],
                  device: str = 'cpu',
                  ) -> None:
-        # Construct the policy if not provided
+        super().__init__()
         policy = policy if policy is not None else DistributionPolicy(env_params=env_params, policy_kwargs={'network_arch': network_arch}, device=device)
-        super().__init__(policy=policy)
-
         self.env_params = env_params
         self.batch_size = batch_size
         self.learning_rate = learning_rate
@@ -70,18 +85,25 @@ class PolicyGradient(BaseAgent):
 
 
     def predict(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
+        """
+        Perform an action based on the current state using the policy.
+
+        Args:
+            state (torch.Tensor): Current state of the environment.
+            deterministic (bool): If True, use the deterministic action from the policy. Default is False.
+
+        Returns:
+            torch.Tensor: Action to be taken by the agent.
+        """
         with torch.no_grad():
-            return self.policy(state)  # Forward pass through the policy
+            return self.policy(state, deterministic=deterministic)  # Forward pass through the policy
     
     def train(self,
               env: EnvironmentInterface,
               total_steps: int,
               schedulers: List[ParameterScheduler] = [],
               logger: Optional[Logger] = None,
-              logging_freq: int = 1,
-              evaluator: Evaluator = Evaluator(),
-              eval_freq: int = 1000,
-              seed: Optional[int] = None,
+              evaluator: Optional[Evaluator] = None,
               show_progress: bool = True
               ) -> None:
         """
@@ -92,9 +114,8 @@ class PolicyGradient(BaseAgent):
             total_steps (int): Total number of training steps to perform.
             schedulers (List[ParameterScheduler]): List of parameter schedulers to update during training.
             logger (Optional[Logger]): Logger for logging training progress. If None, a default logger will be created.
-            logging_freq (int): Frequency of logging training progress.
             evaluator (Evaluator): Evaluator to evaluate the agent periodically.
-            eval_freq (int): Frequency of evaluation during training.
+            show_progress (bool): If True, show a progress bar during training.
         """
         logger = logger or Logger.create('blank')
 
@@ -102,7 +123,7 @@ class PolicyGradient(BaseAgent):
             progress_bar = ProgressBar(total_steps=total_steps)
 
         # Initialize collector without flattening so the experience shape is (N, T, ...)
-        collector = SequentialCollector(env=env, logger=logger, logging_freq=logging_freq, seed=seed)
+        collector = SequentialCollector(env=env, logger=logger)
 
         num_steps = 0
         while num_steps < total_steps:
@@ -175,19 +196,23 @@ class PolicyGradient(BaseAgent):
                                                                    f"Loss: {save_loss:.4f},")
 
             # Log the training progress
-            # if num_steps % logging_freq == 0:
             if logger.should_log(num_steps):
                 logger.log_scalar("policy_loss", save_loss, iteration=num_steps)
                 if self.critic is not None:
                     logger.log_scalar("critic_loss", np.mean(critic_losses), iteration=num_steps)
 
             # Evaluate the agent periodically
-            # if num_steps % eval_freq == 0:
-            evaluator.evaluate(agent=self.policy, iteration=num_steps)
+            if evaluator is not None:
+                evaluator.evaluate(agent=self.policy, iteration=num_steps)
         
-        evaluator.close()
+        if evaluator is not None:
+            evaluator.close()
 
-    def _compute_loss(self, advantages, log_probs, normalize):
+    def _compute_loss(self, 
+                      advantages, 
+                      log_probs, 
+                      normalize
+                      ) -> torch.Tensor:
         """
         Compute the loss for the policy gradient update.
 
@@ -206,7 +231,7 @@ class PolicyGradient(BaseAgent):
         return loss
 
     @staticmethod        
-    def _compute_trajectory_rewards(rewards: torch.Tensor, dones: torch.Tensor, gamma: float):
+    def _compute_trajectory_rewards(rewards: torch.Tensor, dones: torch.Tensor, gamma: float) -> torch.Tensor:
         """
         Compute the total discounted return G from a full trajectory.
 
@@ -315,9 +340,7 @@ class PolicyGradientTrajectory(PolicyGradient):
               total_steps: int,
               schedulers: List[ParameterScheduler] = [],
               logger: Optional[Logger] = None,
-              logging_freq: int = 1,
               evaluator: Evaluator = Evaluator(),
-              eval_freq: int = 1000,
               show_progress: bool = True
               ) -> None:
         """
@@ -328,9 +351,8 @@ class PolicyGradientTrajectory(PolicyGradient):
             total_steps (int): Total number of training steps to perform.
             schedulers (List[ParameterScheduler]): List of parameter schedulers to update during training.
             logger (Optional[Logger]): Logger for logging training progress. If None, a default logger will be created.
-            logging_freq (int): Frequency of logging training progress.
             evaluator (Evaluator): Evaluator to evaluate the agent periodically.
-            eval_freq (int): Frequency of evaluation during training.
+            show_progress (bool): If True, show a progress bar during training.
         """
         logger = logger or Logger.create('blank')
 
@@ -338,7 +360,7 @@ class PolicyGradientTrajectory(PolicyGradient):
             progress_bar = ProgressBar(total_steps=total_steps)
 
         # Initialize collector without flattening so the experience shape is (N, T, ...)
-        collector = SequentialCollector(env=env, logger=logger, logging_freq=logging_freq)
+        collector = SequentialCollector(env=env, logger=logger)
 
         num_steps = 0
         while num_steps < total_steps:
@@ -396,14 +418,15 @@ class PolicyGradientTrajectory(PolicyGradient):
                                                                    f"Loss: {loss:.4f},")
 
             # Log the training progress
-            if num_steps % logging_freq == 0:
+            if logger.should_log(num_steps):
                 pass
 
             # Evaluate the agent periodically
-            if num_steps % eval_freq == 0:
+            if evaluator is not None:
                 evaluator.evaluate(agent=self.policy, iteration=num_steps)
         
-        evaluator.close()
+        if evaluator is not None:
+            evaluator.close()
             
     def _compute_loss(self, advantages, log_probs, normalize):
 

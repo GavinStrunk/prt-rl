@@ -73,18 +73,6 @@ class StateActionCritic(torch.nn.Module):
 
         # Convert list to ModuleList for proper parameter management
         self.critics = torch.nn.ModuleList(self.critics)
-    # def to(self, device: str) -> 'StateActionCritic':
-    #     """
-    #     Move the critics to the specified device.
-
-    #     Args:
-    #         device: The device to move the critics to.
-
-    #     Returns:
-    #         self: The StateActionCritic instance with critics moved to the specified device.
-    #     """
-    #     self.critics = [critic.to(device) for critic in self.critics]
-    #     return self
 
     def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         """
@@ -179,7 +167,7 @@ class TD3(BaseAgent):
                  tau: float = 0.005,
                  device: str = 'cpu',
                  ) -> None:
-        super().__init__(policy=policy)
+        super().__init__()
         self.env_params = env_params
         self.buffer_size = buffer_size
         self.batch_size = batch_size
@@ -206,10 +194,11 @@ class TD3(BaseAgent):
         Perform an action based on the current state.
 
         Args:
-            state: The current state of the environment.
+            state (torch.Tensor): The current state of the environment.
+            deterministic (bool): If True, the agent will select actions deterministically.
 
         Returns:
-            The action to be taken.
+            torch.Tensor: The action to be taken.
         """
         with torch.no_grad():
             action = self.policy(state)
@@ -225,9 +214,7 @@ class TD3(BaseAgent):
               total_steps: int,
               schedulers: Optional[List[ParameterScheduler]] = None,
               logger: Optional[Logger] = None,
-              logging_freq: int = 1000,
-              evaluator: Evaluator = Evaluator(),
-              eval_freq: int = 1000,
+              evaluator: Optional[Evaluator] = None,
               show_progress: bool = True
               ) -> None:
         """
@@ -239,18 +226,19 @@ class TD3(BaseAgent):
             total_steps: Total number of steps to train the agent.
             schedulers: Optional list of parameter schedulers.
             logger: Optional logger for logging training progress.
-            logging_freq: Frequency of logging.
             evaluator: Evaluator for evaluating the agent's performance.
-            eval_freq: Frequency of evaluation.
+            show_progress: If True, show a progress bar during training.
         """
         logger = logger or Logger.create('blank')
+
         if show_progress:
             progress_bar = ProgressBar(total_steps=total_steps)
+
         num_steps = 0
         num_gradient_steps = 0
 
         # Make collector and flatten the experience so the shape is (N*T, ...)
-        collector = SequentialCollector(env=env, logger=logger, logging_freq=logging_freq)
+        collector = SequentialCollector(env=env, logger=logger)
         replay_buffer = ReplayBuffer(capacity=self.buffer_size, device=self.device)
 
         actor_losses = []
@@ -325,3 +313,12 @@ class TD3(BaseAgent):
 
             if show_progress:
                 progress_bar.update(current_step=num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}")
+
+            if logger.should_log(num_steps):
+                pass
+
+            if evaluator is not None:
+                evaluator.evaluate(agent=self.policy, num_steps=num_steps)
+
+        if evaluator is not None:
+            evaluator.close()

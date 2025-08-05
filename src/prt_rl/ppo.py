@@ -27,7 +27,7 @@ class PPO(BaseAgent):
     """
     def __init__(self,
                  env_params: EnvParams,
-                 policy: Optional[ActorCriticPolicy] = None,
+                 policy: ActorCriticPolicy | None,
                  gamma: float = 0.99,
                  epsilon: float = 0.1,
                  learning_rate: float = 3e-4,
@@ -40,7 +40,7 @@ class PPO(BaseAgent):
                  normalize_advantages: bool = False,
                  device: str = 'cpu',
                  ) -> None:
-        super().__init__(policy=policy)
+        super().__init__()
         self.env_params = env_params
         self.policy = policy if policy is not None else ActorCriticPolicy(env_params, device=device)
         self.gamma = gamma
@@ -58,60 +58,30 @@ class PPO(BaseAgent):
         self.policy.to(self.device)
         # Configure optimizers
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.learning_rate)
-    
-    # @staticmethod
-    # def compute_gae_and_returns(
-    #     rewards: torch.Tensor,  
-    #     values: torch.Tensor,            
-    #     dones: torch.Tensor,             
-    #     last_values: torch.Tensor,       
-    #     gamma: float = 0.99,
-    #     gae_lambda: float = 0.95,
-    # ):
-    #     """
-    #     Compute GAE and TD(lambda) returns for a batched rollout.
 
-    #     Args:
-    #         rewards (T, N, 1): Rewards from rollout
-    #         values (T, N, 1): Estimated state values
-    #         dones (T, N, 1): Done flags (1 if episode ended at step t, else 0)
-    #         last_values (N, 1): Value estimates for final state (bootstrap)
-    #         gamma (float): Discount factor
-    #         gae_lambda (float): GAE lambda
+    def predict(self, 
+                state: torch.Tensor, 
+                deterministic: bool = False
+                ) -> torch.Tensor:
+        """
+        Predict the action based on the current state.
 
-    #     Returns:
-    #         advantages (T, N): Estimated advantage values
-    #         returns (T, N): TD(lambda) returns
-    #     """
-    #     T, N, _ = rewards.shape
+        Args:
+            state (torch.Tensor): Current state of the environment.
+            deterministic (bool): If True, use the deterministic policy. Otherwise, sample from the policy.
 
-    #     # Concatenate last_values to get V(s_{t+1}) for final time step
-    #     values = torch.cat([values, last_values.unsqueeze(0)], dim=0)  # shape: (T+1, N, 1)
-
-    #     advantages = torch.zeros((T, N, 1), dtype=values.dtype, device=values.device)
-    #     last_gae_lam = torch.zeros((N, 1), dtype=values.dtype, device=values.device)
-
-    #     for t in reversed(range(T)):
-    #         not_done = 1.0 - dones[t].float()
-    #         delta = rewards[t] + gamma * values[t + 1] * not_done - values[t]
-    #         last_gae_lam = delta + gamma * gae_lambda * not_done * last_gae_lam
-    #         advantages[t] = last_gae_lam
-
-    #     returns = advantages + values[:-1]  # TD(lambda) returns
-    #     return advantages, returns
-
-    def predict(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
+        Returns:
+            torch.Tensor: Predicted action.
+        """
         with torch.no_grad():
-            return self.policy(state)  # Assuming policy has a forward method that returns action logits or actions directly
+            return self.policy(state, deterministic=deterministic)  # Assuming policy has a forward method that returns action logits or actions directly
     
     def train(self,
               env: EnvironmentInterface,
               total_steps: int,
               schedulers: Optional[List[ParameterScheduler]] = None,
               logger: Optional[Logger] = None,
-              logging_freq: int = 1000,
-              evaluator: Evaluator = Evaluator(),
-              eval_freq: int = 1000,
+              evaluator: Optional[Evaluator] = None,
               show_progress: bool = True
               ) -> None:
         """
@@ -122,18 +92,18 @@ class PPO(BaseAgent):
             total_steps (int): Total number of steps to train for.
             schedulers (Optional[List[ParameterScheduler]]): Learning rate schedulers.
             logger (Optional[Logger]): Logger for training metrics.
-            logging_freq (int): Frequency of logging.
             evaluator (Optional[Any]): Evaluator for performance evaluation.
-            eval_freq (int): Frequency of evaluation.
+            show_progress (bool): If True, show a progress bar during training.
         """
         logger = logger or Logger.create('blank')
+
         if show_progress:
             progress_bar = ProgressBar(total_steps=total_steps)
 
         num_steps = 0
 
         # Make collector and do not flatten the experience so the shape is (N, T, ...)
-        collector = ParallelCollector(env=env, logger=logger, logging_freq=logging_freq, flatten=False)
+        collector = ParallelCollector(env=env, logger=logger, flatten=False)
         rollout_buffer = RolloutBuffer(capacity=self.steps_per_batch, device=self.device)
 
         while num_steps < total_steps:
@@ -213,13 +183,20 @@ class PPO(BaseAgent):
                                                                    f"Episode Length: {collector.previous_episode_length}, "
                                                                    f"Loss: {np.mean(losses):.4f},")
             # Log metrics
-            logger.log_scalar('clip_loss', np.mean(clip_losses), num_steps)
-            logger.log_scalar('entropy_loss', np.mean(entropy_losses), num_steps)
-            logger.log_scalar('value_loss', np.mean(value_losses), num_steps)
-            logger.log_scalar('loss', np.mean(losses), num_steps)
-            logger.log_scalar('episode_reward', collector.previous_episode_reward, num_steps)
-            logger.log_scalar('episode_length', collector.previous_episode_length, num_steps)
+            if logger.should_log(num_steps):
+                logger.log_scalar('clip_loss', np.mean(clip_losses), num_steps)
+                logger.log_scalar('entropy_loss', np.mean(entropy_losses), num_steps)
+                logger.log_scalar('value_loss', np.mean(value_losses), num_steps)
+                logger.log_scalar('loss', np.mean(losses), num_steps)
+                logger.log_scalar('episode_reward', collector.previous_episode_reward, num_steps)
+                logger.log_scalar('episode_length', collector.previous_episode_length, num_steps)
 
+            if evaluator is not None:
+                # Evaluate the agent periodically
+                evaluator.evaluate(agent=self.policy, iteration=num_steps)
+
+        if evaluator is not None:
+            evaluator.close()
 
 
 

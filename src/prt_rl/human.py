@@ -1,9 +1,13 @@
 from enum import Enum, auto
 import threading
 import torch
-from typing import Dict, Tuple, Union
+from typing import Dict, Tuple, Union, Optional, List
 from prt_rl.env.interface import EnvParams
 from prt_rl.agent import BaseAgent
+from prt_rl.env.interface import EnvironmentInterface, EnvParams
+from prt_rl.common.schedulers import ParameterScheduler
+from prt_rl.common.loggers import Logger
+from prt_rl.common.evaluators import Evaluator
 
 class GameControllerAgent(BaseAgent):
     """
@@ -143,7 +147,14 @@ class GameControllerAgent(BaseAgent):
         state['action'] = action_val.unsqueeze(0)
         return state
 
-    def train(self, env, total_frames, schedulers = None, logger = None, logging_freq = 1000):
+    def train(self,
+              env: EnvironmentInterface,
+              total_steps: int,
+              schedulers: List[ParameterScheduler] = [],
+              logger: Optional[Logger] = None,
+              evaluator: Optional[Evaluator] = None,
+              show_progress: bool = True
+              ) -> None:
         raise NotImplementedError("GameControllerAgent does not support training. It is designed for interactive control only.")
 
     def _start_listener(self):
@@ -334,6 +345,13 @@ class KeyboardAgent(BaseAgent):
                    ) -> torch.Tensor:
         """
         Gets a keyboard press and maps it to the action space.
+
+        Args:
+            state (torch.Tensor): A tensor representing the current state of the environment.
+            deterministic (bool): If True, the policy will not sample random actions. Defaults to True.
+
+        Returns:
+            torch.Tensor: A tensor with the action value based on the key pressed.
         """
         if not deterministic:
             raise ValueError("KeyboardAgent does not support non-deterministic actions. Set deterministic=True.")
@@ -359,7 +377,14 @@ class KeyboardAgent(BaseAgent):
         state['action'] = torch.tensor([[action_val]])
         return state
     
-    def train(self, env, total_frames, schedulers = None, logger = None, logging_freq = 1000):
+    def train(self,
+              env: EnvironmentInterface,
+              total_steps: int,
+              schedulers: List[ParameterScheduler] = [],
+              logger: Optional[Logger] = None,
+              evaluator: Optional[Evaluator] = None,
+              show_progress: bool = True
+              ) -> None:
         raise NotImplementedError("KeyboardAgent does not support training. It is designed for interactive control only.")
 
     def _start_listener(self):
