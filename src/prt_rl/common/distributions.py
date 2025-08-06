@@ -28,6 +28,17 @@ class Distribution(ABC):
             torch.nn.Module: The last layer of the network that produces the parameters for this distribution.
         """
         raise NotImplementedError("This method should be implemented by subclasses to return the last layer of the network for this distribution.")
+    
+    @abstractmethod
+    def deterministic_action(self) -> torch.Tensor:
+        """
+        Returns a deterministic action based on the distribution parameters.
+        This is used for evaluation or inference where we want to select the most probable action.
+        
+        Returns:
+            torch.Tensor: A tensor representing the deterministic action.
+        """
+        raise NotImplementedError("This method should be implemented by subclasses to return a deterministic action.")
         
 
 class Categorical(Distribution, tdist.Categorical):
@@ -65,6 +76,26 @@ class Categorical(Distribution, tdist.Categorical):
             torch.nn.Linear(in_features=feature_dim, out_features=action_dim),
             torch.nn.Softmax(dim=-1)
         )
+    
+    def deterministic_action(self) -> torch.Tensor:
+        """
+        Returns a deterministic action based on the distribution parameters.
+        For Categorical, this is simply the index of the maximum probability.
+        
+        Returns:
+            torch.Tensor: A tensor representing the deterministic action.
+        """
+        return self.probs.argmax(dim=-1)
+    
+    def sample(self) -> torch.Tensor:
+        """
+        Samples an action from the Categorical distribution.
+        The output is a tensor with shape (batch_size, 1) where each element is the sampled action index.
+        
+        Returns:
+            torch.Tensor: A tensor containing the sampled actions with shape (batch_size, 1).
+        """
+        return super().sample().unsqueeze(-1)
 
 class Normal(Distribution, tdist.Normal):
     """
@@ -115,3 +146,13 @@ class Normal(Distribution, tdist.Normal):
         log_std = torch.nn.Parameter(torch.ones(action_dim) * log_std_init, requires_grad=True)
         
         return torch.nn.Linear(in_features=feature_dim, out_features=action_dim), log_std
+    
+    def deterministic_action(self) -> torch.Tensor:
+        """
+        Returns a deterministic action based on the distribution parameters.
+        For Normal, this is simply the mean of the distribution.
+        
+        Returns:
+            torch.Tensor: A tensor representing the deterministic action.
+        """
+        return self.mean

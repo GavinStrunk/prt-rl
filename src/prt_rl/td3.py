@@ -11,6 +11,7 @@ from prt_rl.common.evaluators import Evaluator
 import prt_rl.common.utils as utils
 
 import copy
+import numpy as np
 from prt_rl.common.collectors import SequentialCollector
 from prt_rl.common.buffers import ReplayBuffer
 from prt_rl.common.policies import BasePolicy
@@ -47,7 +48,6 @@ class Actor(torch.nn.Module):
         """
         action = self.policy_head(state)
         return action
-        # return action.clamp(self.env_params.action_min, self.env_params.action_max)
 
 
 class StateActionCritic(torch.nn.Module):
@@ -91,19 +91,23 @@ class StateActionCritic(torch.nn.Module):
         # Return a tuple of Q-values from each critic
         return tuple(critic(q_input) for critic in self.critics)
 
-    def forward_first(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+    def forward_indexed(self, index: int, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         """
         Forward pass through the first critic network.
 
         Args:
-            state: The current state of the environment.
-            action: The action taken in the current state.
+            index (int): The index of the critic to use.
+            state (torch.Tensor): The current state of the environment.
+            action (torch.Tensor): The action taken in the current state.
 
         Returns:
             The Q-value for the given state-action pair from the first critic.
         """
+        if index > self.num_critics:
+            raise ValueError(f"Index {index} exceeds the number of critics {self.num_critics}.")
+        
         q_input = torch.cat([state, action], dim=1)
-        return self.critics[0](q_input)
+        return self.critics[index](q_input)
 
 
 class TD3Policy(BasePolicy):
@@ -241,7 +245,6 @@ class TD3(BaseAgent):
         collector = SequentialCollector(env=env, logger=logger)
         replay_buffer = ReplayBuffer(capacity=self.buffer_size, device=self.device)
 
-        actor_losses = []
         while num_steps < total_steps:
             # Update Schedulers if provided
             if schedulers is not None:
@@ -261,6 +264,8 @@ class TD3(BaseAgent):
                     progress_bar.update(current_step=num_steps, desc="Collecting initial experience...")
                 continue
 
+            actor_losses = []
+            critics_losses = []
             for _ in range(self.gradient_steps):
                 num_gradient_steps += 1
 
@@ -287,10 +292,13 @@ class TD3(BaseAgent):
                 # Perform gradient step on critics
                 q_input = torch.cat([batch['state'].float(), batch['action']], dim=1)
                 
+                c_losses = []
                 for i in range(self.policy.num_critics):
                     # Compute critics loss
                     q_i = self.policy.critic.critics[i](q_input.detach())
                     critic_loss = F.mse_loss(y, q_i)
+                    c_losses.append(critic_loss.item())
+
                     self.critic_optimizers[i].zero_grad()
                     critic_loss.backward()
                     self.critic_optimizers[i].step()
@@ -298,7 +306,7 @@ class TD3(BaseAgent):
                 # Delayed policy update 
                 if num_gradient_steps % self.delay_freq == 0:
                     # Compute actor loss
-                    actor_loss = -self.policy.critic.forward_first(batch['state'].float(), self.policy.actor(batch['state'].float())).mean()
+                    actor_loss = -self.policy.critic.forward_indexed(index=0, state=batch['state'], action=self.policy.actor(batch['state'])).mean()
                     actor_losses.append(actor_loss.item())
 
                     # Take a gradient step on the actor
@@ -315,7 +323,9 @@ class TD3(BaseAgent):
                 progress_bar.update(current_step=num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}")
 
             if logger.should_log(num_steps):
-                pass
+                logger.log_scalar('actor_loss', np.mean(actor_losses), num_steps)
+                for i in range(self.policy.num_critics):
+                    logger.log_scalar(f'critic{i}_loss', np.mean(critics_losses[i]), num_steps)
 
             if evaluator is not None:
                 evaluator.evaluate(agent=self.policy, num_steps=num_steps)

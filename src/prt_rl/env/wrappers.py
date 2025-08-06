@@ -265,7 +265,7 @@ class GymnasiumWrapper(EnvironmentInterface):
         # Reshape the reward and done to be (# envs, 1)
         if self.num_envs == 1:
             reward = torch.tensor([[reward]], dtype=torch.float, device=self.device)
-            done = torch.tensor([[done]], dtype=torch.bool, device=self.device)
+            done = torch.tensor([[bool(done)]], dtype=torch.bool, device=self.device)
         else:
             reward = torch.tensor(reward, dtype=torch.float, device=self.device).unsqueeze(-1)
             done = torch.tensor(done, dtype=torch.bool, device=self.device).unsqueeze(-1)

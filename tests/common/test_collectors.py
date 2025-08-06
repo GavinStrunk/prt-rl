@@ -5,6 +5,7 @@ from prt_rl.env.wrappers import GymnasiumWrapper
 from prt_rl.common.collectors import SequentialCollector, ParallelCollector
 import prt_rl.common.collectors as collectors
 
+
 @pytest.fixture
 def mock_env():
     env = MagicMock()

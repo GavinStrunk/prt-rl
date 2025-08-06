@@ -3,7 +3,6 @@ from typing import Dict, Optional, List, Tuple
 from prt_rl.env.interface import EnvironmentInterface, EnvParams, MultiAgentEnvParams
 from prt_rl.common.loggers import Logger
 from prt_rl.common.policies import ActorCriticPolicy, DistributionPolicy, BasePolicy
-from prt_rl.agent import BaseAgent
 
 def random_action(env_params: EnvParams, state: torch.Tensor) -> torch.Tensor:
     """
@@ -125,7 +124,7 @@ class SequentialCollector:
         return action 
 
     def collect_experience(self,
-                           policy: BaseAgent | BasePolicy | None,
+                           policy: 'BaseAgent | BasePolicy | None' = None,
                            num_steps: int = 1
                            ) -> Dict[str, torch.Tensor]:
         """
@@ -200,7 +199,7 @@ class SequentialCollector:
         }
     
     def collect_trajectory(self, 
-                           policy: BaseAgent | BasePolicy | None,
+                           policy: 'BaseAgent | BasePolicy | None' = None,
                            num_trajectories: Optional[int] = None,
                            min_num_steps: Optional[int] = None
                            ) -> Tuple[Dict[str, torch.Tensor], int]:
@@ -245,7 +244,7 @@ class SequentialCollector:
         return trajectories, total_steps
 
     def _collect_single_trajectory(self, 
-                                   policy: BaseAgent | BasePolicy | None
+                                   policy: 'BaseAgent | BasePolicy | None' = None
                                    ) -> Dict[str, torch.Tensor]:
         """
         Collects a single trajectory from the environment using the provided policy.
@@ -343,7 +342,7 @@ class ParallelCollector:
         self.num_episodes = 0
 
     def collect_experience(self,
-                           policy: BaseAgent | BasePolicy | None,
+                           policy: 'BaseAgent | BasePolicy | None' = None,
                            num_steps: int = 1
                            ) -> Dict[str, torch.Tensor]:
         """
@@ -456,7 +455,7 @@ class ParallelCollector:
         return experience
     
     def collect_trajectory(self, 
-                        policy: BaseAgent | BasePolicy | None,
+                        policy: 'BaseAgent | BasePolicy | None' = None,
                         num_trajectories: int = 1,
                         ) -> Tuple[Dict[str, List[torch.Tensor]], int]:
         """

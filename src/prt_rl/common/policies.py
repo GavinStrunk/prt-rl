@@ -1,3 +1,17 @@
+"""
+Summary of Policy Architectures
+
+.. image:: /_static/qvaluepolicy.png
+    :alt: QValuePolicy Architecture
+    :width: 100%
+    :align: center
+
+.. image:: /_static/distributionpolicy.png
+    :alt: DistributionPolicy Architecture
+    :width: 100%
+    :align: center
+
+"""
 from abc import ABC, abstractmethod
 import copy
 import torch
@@ -14,7 +28,6 @@ class BasePolicy(torch.nn.Module, ABC):
 
     Args:
         env_params (EnvParams): Environment parameters.
-        device (str): The device to use.
     """
     def __init__(self,
                  env_params: EnvParams,
@@ -23,32 +36,51 @@ class BasePolicy(torch.nn.Module, ABC):
         self.env_params = env_params
 
     def __call__(self,
-                   state: torch.Tensor
+                   state: torch.Tensor,
+                   deterministic: bool = False
                    ) -> torch.Tensor:
-        return self.forward(state)
+        return self.forward(state, deterministic=deterministic)
 
     @abstractmethod
     def forward(self,
-                   state: torch.Tensor
+                   state: torch.Tensor,
+                   deterministic: bool = False
                    ) -> torch.Tensor:
         """
-        Chooses an action based on the current state. Expects the key "observation" in the state tensordict
-
+        Chooses an action based on the current state. 
         Args:
-            state (TensorDict): current state tensordict
+            state (torch.Tensor): Current state tensor.
+            deterministic (bool): If True, choose the action deterministically. Default is False.
 
         Returns:
-            TensorDict: tensordict with the "action" key added
+            torch.Tensor: Tensor with the chosen action.
         """
         raise NotImplementedError
 
 class QValuePolicy(BasePolicy):
     """
-    Base class for implementing discrete policies.
+    The QValuePolicy class implements a policy that uses a neural network to compute Q-values for discrete action spaces. It can optionally use an encoder network to process the input state before passing it to the policy head.
+
+    The architecture of the policy is as follows:
+        - Encoder Network (optional): Processes the input state.
+        - Policy Head: Computes Q-values for each action based on the latent state.
+        - Decision Function: Selects actions based on the Q-values.
+
+    .. note::
+        This policy is designed for discrete action spaces. For continuous action spaces, use a different policy class.
+
+    .. image:: /_static/qvaluepolicy.png
+        :alt: QValuePolicy Architecture
+        :width: 100%
+        :align: center
 
     Args:
         env_params (EnvParams): Environment parameters.
-        device (str): The device to use.
+        encoder_network (Optional[Type[BaseEncoder]]): Encoder network to process the input state. If None, the input state is used directly.
+        encoder_network_kwargs (Optional[dict]): Keyword arguments for the encoder network.
+        policy_head (Optional[Type[torch.nn.Module]]): Policy head network to compute Q-values. Default is MLP.
+        policy_head_kwargs (Optional[dict]): Keyword arguments for the policy head network.
+        decision_function (Optional[DecisionFunction]): Decision function to select actions based on Q-values. Default is EpsilonGreedy.
     """
     def __init__(self,
                  env_params: EnvParams,
@@ -91,20 +123,26 @@ class QValuePolicy(BasePolicy):
             self.decision_function = decision_function
 
     def forward(self,
-                   state: torch.Tensor
+                   state: torch.Tensor,
+                   deterministic: bool = False
                    ) -> torch.Tensor:
         """
         Chooses an action based on the current state. Expects the key "observation" in the state tensordict.
 
         Args:
             state (torch.Tensor): Current state tensor.
+            deterministic (bool): If True, choose the action deterministically. Default is False.
 
         Returns:
             torch.Tensor: Tensor with the chosen action.
         """
         q_vals = self.get_q_values(state)
+
         with torch.no_grad():
-            action = self.decision_function.select_action(q_vals)
+            if not deterministic:
+                action = self.decision_function.select_action(q_vals)
+            else:
+                action = torch.argmax(q_vals, dim=-1, keepdim=True)
         return action
     
     def get_q_values(self,
@@ -129,6 +167,25 @@ class QValuePolicy(BasePolicy):
 
 class DistributionPolicy(BasePolicy):
     """
+    The DistributionPolicy class implements a policy that uses a neural network to compute action distributions for both discrete and continuous action spaces. It can optionally use an encoder network to process the input state before passing it to the policy head.
+
+    The architecture of the policy is as follows:
+        - Encoder Network (optional): Processes the input state.
+        - Policy Head: Computes latent features from the encoded state.
+        - Distribution Layer: Maps the latent features to action distributions.
+
+    .. image:: /_static/distributionpolicy.png
+        :alt: DistributionPolicy Architecture
+        :width: 100%
+        :align: center
+
+    Args:
+        env_params (EnvParams): Environment parameters.
+        encoder_network (Optional[Union[Type[BaseEncoder], Dict[str, Type[BaseEncoder]]]]): Encoder network to process the input state. If None, the input state is used directly.
+        encoder_network_kwargs (Optional[dict]): Keyword arguments for the encoder network.
+        policy_head (Union[Type[torch.nn.Module], Dict[str, Type[torch.nn.Module]]]): Policy head network to compute latent features. Default is MLP.
+        policy_kwargs (Optional[dict]): Keyword arguments for the policy head network.
+        distribution (Optional[dist.Distribution]): Distribution to use for the policy. If None, defaults to Categorical for discrete action spaces and Normal for continuous action spaces.
     """
     def __init__(self,
                  env_params: EnvParams,
@@ -137,10 +194,8 @@ class DistributionPolicy(BasePolicy):
                  policy_head: Union[Type[torch.nn.Module], Dict[str, Type[torch.nn.Module]]] = MLP,
                  policy_kwargs: Optional[dict] = {},
                  distribution: Optional[dist.Distribution] = None,
-                 device: str = "cpu",
                  ) -> None:
         super().__init__(env_params=env_params)
-        self.device = torch.device(device)
         self.env_params = env_params
         self.encoder_network = None
 
@@ -197,21 +252,24 @@ class DistributionPolicy(BasePolicy):
             self.distribution_params = None
 
     def forward(self,
-                   state: torch.Tensor
+                   state: torch.Tensor,
+                   deterministic: bool = False
                    ) -> torch.Tensor:
         """
         Chooses an action based on the current state
 
         Args:
             state (torch.Tensor): Current state tensor.
+            deterministic (bool): If True, choose the action deterministically. Default is False.
         Returns:
             torch.Tensor: Tensor with the chosen action with shape (N, action_dim)
         """
-        action, _ = self.predict(state)
+        action, _ = self.predict(state, deterministic=deterministic)
         return action
     
     def predict(self,
-                   state: torch.Tensor
+                   state: torch.Tensor,
+                   deterministic: bool = False
                    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Chooses an action based on the current state. 
@@ -223,6 +281,7 @@ class DistributionPolicy(BasePolicy):
 
         Args:
             state (torch.Tensor): Current state tensor.
+            deterministic (bool): If True, choose the action deterministically. Default is False.
 
         Returns:
             torch.Tensor: Tensor with the chosen action. (N, action_dim), (N, # actions)
@@ -241,11 +300,10 @@ class DistributionPolicy(BasePolicy):
         else:
             distribution = self.distribution(dist_params)
 
-        action = distribution.sample()
-
-        # Categorical distribution returns an action with shape (Batch, )
-        if isinstance(distribution, dist.Categorical):
-            action = action.unsqueeze(-1)
+        if deterministic:
+            action = distribution.deterministic_action()
+        else:
+            action = distribution.sample()
 
         log_probs = distribution.log_prob(action)
         # Compute the total log probability for the action vector
