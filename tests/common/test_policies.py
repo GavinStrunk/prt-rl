@@ -1,11 +1,59 @@
 import pytest
 import torch
 import torch.nn as nn
+from typing import Tuple
 from prt_rl.env.interface import EnvParams
-from prt_rl.common.policies import QValuePolicy, ActorCriticPolicy, DistributionPolicy
+from prt_rl.common.policies import QValuePolicy, ActorCriticPolicy, DistributionPolicy, ContinuousPolicy, ValueCritic, StateActionCritic
 from prt_rl.common.networks import MLP, NatureCNNEncoder
 from prt_rl.common.decision_functions import EpsilonGreedy, Softmax
 from prt_rl.common.distributions import Categorical, Normal
+
+class DummyEnvParams:
+    def __init__(self,
+                 observation_shape: Tuple[int, ...],
+                 action_len: int,
+                 action_min: float,
+                 action_max: float,
+                 action_continuous: bool):
+        self.observation_shape = observation_shape
+        self.action_len = action_len
+        self.action_min = action_min
+        self.action_max = action_max
+        self.action_continuous = action_continuous
+
+class DummyEncoder(nn.Module):
+    def __init__(self, input_shape, features_dim=16):
+        super().__init__()
+        self.features_dim = features_dim
+        self.net = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(input_shape[0], features_dim)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+class DummyPolicyHead(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+        self.linear = nn.Linear(input_dim, output_dim)
+
+    def forward(self, x):
+        return self.linear(x)
+
+@pytest.fixture
+def dummy_env_params():
+    return DummyEnvParams(
+        observation_shape=(8,),
+        action_len=4,
+        action_min=-1.0,
+        action_max=1.0,
+        action_continuous=True
+    )
+
+@pytest.fixture
+def dummy_state():
+    return torch.randn(2, 8)  # Batch size 2
 
 def test_default_qvalue_policy_discrete_construction():
     # Discrete observation, discrete action
@@ -430,6 +478,9 @@ def test_actor_critic_default_distributions():
     policy = ActorCriticPolicy(env_params=params)
     assert policy.distribution is Normal
 
+# =========================
+# DistributionPolicy Tests
+# =========================
 def test_distribution_policy_default():
     params = EnvParams(
         action_len=1,
@@ -579,3 +630,206 @@ def test_distribution_policy_forward():
     action2 = policy.forward(state)
 
     assert torch.equal(action1, action2)  # Both methods should return the same action
+
+# =========================
+# ContinuousPolicy Tests
+# =========================
+def test_raises_on_discrete_action_space():
+    env_params = DummyEnvParams((8,), 4, -1.0, 1.0, action_continuous=False)
+    with pytest.raises(ValueError):
+        _ = ContinuousPolicy(env_params)
+
+def test_forward_without_encoder(dummy_env_params, dummy_state):
+    policy = ContinuousPolicy(
+        env_params=dummy_env_params,
+        encoder_network=None,
+        policy_head=DummyPolicyHead
+    )
+    action = policy(dummy_state)
+    assert action.shape == (2, dummy_env_params.action_len)
+    assert torch.all(action <= dummy_env_params.action_max)
+    assert torch.all(action >= dummy_env_params.action_min)
+
+def test_forward_with_encoder(dummy_env_params, dummy_state):
+    policy = ContinuousPolicy(
+        env_params=dummy_env_params,
+        encoder_network=DummyEncoder,
+        encoder_network_kwargs={"features_dim": 16},
+        policy_head=DummyPolicyHead
+    )
+    action = policy(dummy_state)
+    assert action.shape == (2, dummy_env_params.action_len)
+    assert torch.all(action <= dummy_env_params.action_max)
+    assert torch.all(action >= dummy_env_params.action_min)
+
+def test_policy_head_respects_encoder_output_dim():
+    # This test verifies that the policy head is constructed with the encoder's output dimension
+    dummy_params = DummyEnvParams((5,), 3, -1, 1, True)
+    encoder = DummyEncoder(input_shape=(5,), features_dim=7)
+    policy = ContinuousPolicy(
+        env_params=dummy_params,
+        encoder_network=DummyEncoder,
+        encoder_network_kwargs={"features_dim": 7},
+        policy_head=DummyPolicyHead
+    )
+    assert policy.policy_head.linear.in_features == 7
+    assert policy.policy_head.linear.out_features == 3
+
+# =========================
+# ValueCritic Tests
+# =========================
+class DummyVCEnvParams:
+    def __init__(self, observation_shape):
+        self.observation_shape = observation_shape
+
+class DummyVCEncoder(nn.Module):
+    def __init__(self, input_shape, features_dim=16):
+        super().__init__()
+        self.features_dim = features_dim
+        self.net = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(input_shape[0], features_dim)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+class DummyVCCriticHead(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+        self.linear = nn.Linear(input_dim, output_dim)
+
+    def forward(self, x):
+        return self.linear(x)
+
+@pytest.fixture
+def dummy_vc_env_params():
+    return DummyVCEnvParams(observation_shape=(8,))
+
+@pytest.fixture
+def dummy_vc_state():
+    return torch.randn(4, 8)  # batch of 4 states
+    
+def test_forward_without_encoder(dummy_vc_env_params, dummy_vc_state):
+    critic = ValueCritic(
+        env_params=dummy_vc_env_params,
+        encoder=None,
+        critic_head=DummyVCCriticHead
+    )
+    out = critic(dummy_vc_state)
+    assert out.shape == (4, 1)
+
+def test_forward_with_encoder(dummy_vc_env_params, dummy_vc_state):
+    critic = ValueCritic(
+        env_params=dummy_vc_env_params,
+        encoder=DummyVCEncoder((8,), features_dim=10),
+        critic_head=DummyVCCriticHead,
+        critic_head_kwargs={}  # override since encoder changes dim
+    )
+    out = critic(dummy_vc_state)
+    assert out.shape == (4, 1)
+
+def test_critic_head_output_matches_dim():
+    env_params = DummyVCEnvParams(observation_shape=(6,))
+    critic = ValueCritic(
+        env_params=env_params,
+        encoder=None,
+        critic_head=DummyVCCriticHead
+    )
+    assert critic.critic_head.linear.in_features == 6
+    assert critic.critic_head.linear.out_features == 1
+
+def test_critic_respects_encoder_output_dim(dummy_vc_state):
+    # Encoder with output dim 12 should feed into critic_head expecting 12
+    encoder = DummyVCEncoder((8,), features_dim=12)
+    env_params = DummyVCEnvParams(observation_shape=(8,))
+    critic = ValueCritic(
+        env_params=env_params,
+        encoder=encoder,
+        critic_head=DummyVCCriticHead,
+        critic_head_kwargs={}
+    )
+    out = critic(dummy_vc_state)
+    assert out.shape == (4, 1)
+
+# =========================
+# StateActionCritic Tests
+# =========================
+@pytest.fixture
+def dummy_action(dummy_env_params):
+    return torch.randn(4, dummy_env_params.action_len)  # Batch size 4
+
+def test_single_critic_forward_no_encoder(dummy_env_params, dummy_vc_state, dummy_action):
+    critic = StateActionCritic(
+        env_params=dummy_env_params,
+        num_critics=1,
+        encoder=None,
+        critic_head=DummyVCCriticHead
+    )
+    q = critic(dummy_vc_state, dummy_action)
+    assert isinstance(q, torch.Tensor)
+    assert q.shape == (4, 1)
+
+def test_single_critic_forward_with_encoder(dummy_env_params, dummy_vc_state, dummy_action):
+    encoder = DummyEncoder(dummy_env_params.observation_shape, features_dim=10)
+    critic = StateActionCritic(
+        env_params=dummy_env_params,
+        num_critics=1,
+        encoder=encoder,
+        critic_head=DummyVCCriticHead,
+        critic_head_kwargs={}
+    )
+    q = critic(dummy_vc_state, dummy_action)
+    assert isinstance(q, torch.Tensor)
+    assert q.shape == (4, 1)
+
+def test_multi_critic_forward_returns_tuple(dummy_env_params, dummy_vc_state, dummy_action):
+    critic = StateActionCritic(
+        env_params=dummy_env_params,
+        num_critics=3,
+        encoder=None,
+        critic_head=DummyVCCriticHead
+    )
+    q_values = critic(dummy_vc_state, dummy_action)
+    assert isinstance(q_values, tuple)
+    assert len(q_values) == 3
+    for q in q_values:
+        assert isinstance(q, torch.Tensor)
+        assert q.shape == (4, 1)
+
+def test_forward_indexed_returns_single_output(dummy_env_params, dummy_vc_state, dummy_action):
+    critic = StateActionCritic(
+        env_params=dummy_env_params,
+        num_critics=2,
+        encoder=None,
+        critic_head=DummyVCCriticHead
+    )
+    q0 = critic.forward_indexed(0, dummy_vc_state, dummy_action)
+    q1 = critic.forward_indexed(1, dummy_vc_state, dummy_action)
+
+    assert isinstance(q0, torch.Tensor)
+    assert q0.shape == (4, 1)
+    assert isinstance(q1, torch.Tensor)
+    assert q1.shape == (4, 1)
+
+def test_forward_indexed_out_of_bounds(dummy_env_params, dummy_vc_state, dummy_action):
+    critic = StateActionCritic(
+        env_params=dummy_env_params,
+        num_critics=2,
+        encoder=None,
+        critic_head=DummyVCCriticHead
+    )
+    with pytest.raises(ValueError):
+        _ = critic.forward_indexed(2, dummy_vc_state, dummy_action)
+
+def test_encoder_is_shared_across_critics(dummy_env_params):
+    encoder = DummyEncoder(dummy_env_params.observation_shape, features_dim=10)
+    critic = StateActionCritic(
+        env_params=dummy_env_params,
+        num_critics=2,
+        encoder=encoder,
+        critic_head=DummyVCCriticHead,
+        critic_head_kwargs={}
+    )
+    assert critic.encoder is encoder
+    assert all(isinstance(c, DummyVCCriticHead) for c in critic.critics)
