@@ -1,3 +1,6 @@
+"""
+Twin Delayed Deep Deterministic Policy Gradient (TD3)
+"""
 from calendar import c
 import torch
 import torch.nn.functional as F
@@ -14,157 +17,193 @@ import copy
 import numpy as np
 from prt_rl.common.collectors import SequentialCollector
 from prt_rl.common.buffers import ReplayBuffer
-from prt_rl.common.policies import BasePolicy
+from prt_rl.common.policies import BasePolicy, ContinuousPolicy, StateActionCritic
 from prt_rl.common.networks import MLP, BaseEncoder
 from typing import Union, Dict, Type
 
 
-class Actor(torch.nn.Module):
-    def __init__(self,
-                 env_params: EnvParams,
-                 actor_head: Union[Type[torch.nn.Module], Dict[str, Type[torch.nn.Module]]] = MLP,
-                 actor_head_kwargs: Optional[dict] = {"network_arch": [400, 300]},
-                 ) -> None:
-        super().__init__()
-        self.env_params = env_params
+# class Actor(torch.nn.Module):
+#     def __init__(self,
+#                  env_params: EnvParams,
+#                  actor_head: Union[Type[torch.nn.Module], Dict[str, Type[torch.nn.Module]]] = MLP,
+#                  actor_head_kwargs: Optional[dict] = {"network_arch": [400, 300]},
+#                  ) -> None:
+#         super().__init__()
+#         self.env_params = env_params
 
-        # Construct the policy head network
-        self.policy_head = actor_head(
-            input_dim=self.env_params.observation_shape[0],
-            output_dim=self.env_params.action_len,
-            **actor_head_kwargs
-        )
-
-
-    def forward(self, state: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass through the actor network.
-
-        Args:
-            state: The current state of the environment.
-
-        Returns:
-            The action to be taken.
-        """
-        action = self.policy_head(state)
-        return action
+#         # Construct the policy head network
+#         self.policy_head = actor_head(
+#             input_dim=self.env_params.observation_shape[0],
+#             output_dim=self.env_params.action_len,
+#             **actor_head_kwargs
+#         )
 
 
-class StateActionCritic(torch.nn.Module):
-    def __init__(self, 
-                 env_params: EnvParams, 
-                 num_critics: int = 2,
-                 critic_head: Type[torch.nn.Module] = MLP,
-                 critic_head_kwargs: Optional[dict] = {"network_arch": [400, 300]},
-                 ) -> None:
-        super(StateActionCritic, self).__init__()
-        self.env_params = env_params
-        self.num_critics = num_critics
+#     def forward(self, state: torch.Tensor) -> torch.Tensor:
+#         """
+#         Forward pass through the actor network.
 
-        # Initialize critics here
-        self.critics = []
-        for _ in range(num_critics):
-            critic = critic_head(
-                input_dim=self.env_params.observation_shape[0] + self.env_params.action_len,
-                output_dim=1,
-                **critic_head_kwargs
-            )
-            self.critics.append(critic)
+#         Args:
+#             state: The current state of the environment.
 
-        # Convert list to ModuleList for proper parameter management
-        self.critics = torch.nn.ModuleList(self.critics)
+#         Returns:
+#             The action to be taken.
+#         """
+#         action = self.policy_head(state)
+#         return action
 
-    def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass through the critic network.
 
-        Args:
-            state: The current state of the environment.
-            action: The action taken in the current state.
+# class StateActionCritic(torch.nn.Module):
+#     def __init__(self, 
+#                  env_params: EnvParams, 
+#                  num_critics: int = 2,
+#                  critic_head: Type[torch.nn.Module] = MLP,
+#                  critic_head_kwargs: Optional[dict] = {"network_arch": [400, 300]},
+#                  ) -> None:
+#         super(StateActionCritic, self).__init__()
+#         self.env_params = env_params
+#         self.num_critics = num_critics
 
-        Returns:
-            The Q-value for the given state-action pair.
-        """
-        # Stack the state and action tensors
-        q_input = torch.cat([state, action], dim=1)
+#         # Initialize critics here
+#         self.critics = []
+#         for _ in range(num_critics):
+#             critic = critic_head(
+#                 input_dim=self.env_params.observation_shape[0] + self.env_params.action_len,
+#                 output_dim=1,
+#                 **critic_head_kwargs
+#             )
+#             self.critics.append(critic)
 
-        # Return a tuple of Q-values from each critic
-        return tuple(critic(q_input) for critic in self.critics)
+#         # Convert list to ModuleList for proper parameter management
+#         self.critics = torch.nn.ModuleList(self.critics)
 
-    def forward_indexed(self, index: int, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass through the first critic network.
+#     def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+#         """
+#         Forward pass through the critic network.
 
-        Args:
-            index (int): The index of the critic to use.
-            state (torch.Tensor): The current state of the environment.
-            action (torch.Tensor): The action taken in the current state.
+#         Args:
+#             state: The current state of the environment.
+#             action: The action taken in the current state.
 
-        Returns:
-            The Q-value for the given state-action pair from the first critic.
-        """
-        if index > self.num_critics:
-            raise ValueError(f"Index {index} exceeds the number of critics {self.num_critics}.")
+#         Returns:
+#             The Q-value for the given state-action pair.
+#         """
+#         # Stack the state and action tensors
+#         q_input = torch.cat([state, action], dim=1)
+
+#         # Return a tuple of Q-values from each critic
+#         return tuple(critic(q_input) for critic in self.critics)
+
+#     def forward_indexed(self, index: int, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+#         """
+#         Forward pass through the first critic network.
+
+#         Args:
+#             index (int): The index of the critic to use.
+#             state (torch.Tensor): The current state of the environment.
+#             action (torch.Tensor): The action taken in the current state.
+
+#         Returns:
+#             The Q-value for the given state-action pair from the first critic.
+#         """
+#         if index > self.num_critics:
+#             raise ValueError(f"Index {index} exceeds the number of critics {self.num_critics}.")
         
-        q_input = torch.cat([state, action], dim=1)
-        return self.critics[index](q_input)
+#         q_input = torch.cat([state, action], dim=1)
+#         return self.critics[index](q_input)
 
 
 class TD3Policy(BasePolicy):
     """
-    Placeholder for TD3 policy class.
-    This should be implemented with the actual policy logic.
+    TD3 Policy
 
+    This class implements the TD3 policy, which consists of an actor network and multiple critic networks.
+    The actor network is used to select actions, while the critic networks are used to evaluate the actions.
+    The policy can share the encoder with the actor and critic networks if specified.
+
+    Args:
+        env_params (EnvParams): Environment parameters.
+        num_critics (int): Number of critic networks to use. Default is 2.
+        actor (Optional[ContinuousPolicy]): Custom actor network. If None, a default actor will be created.
+        critic (Optional[StateActionCritic]): Custom critic network. If None, a default critic will be created.
+        share_encoder (bool): Whether to share the encoder between actor and critic networks. Default is True.
+        device (str): Device to run the policy on ('cpu' or 'cuda'). Default is 'cpu'.
     """
     def __init__(self, 
                  env_params: EnvParams, 
                  num_critics: int = 2,
-                 actor: Optional[Actor] = None,
+                 actor: Optional[ContinuousPolicy] = None,
                  critic: Optional[StateActionCritic] = None,
+                 share_encoder: bool = True,
                  device: str='cpu'
                  ) -> None:
         super().__init__(env_params=env_params)
         self.num_critics = num_critics
+        self.share_encoder = share_encoder
         self.device = torch.device(device)
 
         # Create actor and target actor networks
-        self.actor = actor if actor is not None else Actor(env_params=env_params)
+        self.actor = actor if actor is not None else ContinuousPolicy(env_params=env_params)
         self.actor.to(self.device)
+        actor_encoder = self.actor.get_encoder()
+        if not self.share_encoder and actor_encoder is not None:
+            actor_encoder = copy.deepcopy(actor_encoder)
+
         self.target_actor = copy.deepcopy(self.actor)
         self.target_actor.to(self.device)
 
-        self.critic = critic if critic is not None else StateActionCritic(env_params=env_params, num_critics=num_critics)
+        self.critic = critic if critic is not None else StateActionCritic(env_params=env_params, num_critics=num_critics, encoder=actor_encoder)
         self.critic.to(self.device)
         self.critic_target = copy.deepcopy(self.critic)
         self.critic_target.to(self.device)
 
-    def forward(self, state: torch.Tensor) -> torch.Tensor:
+    def forward(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
         """
         Forward pass through the policy network.
 
         Args:
-            state: The current state of the environment.
+            state (torch.Tensor): The current state of the environment.
+            deterministic (bool): If True, the action will be selected deterministically.
 
         Returns:
             The action to be taken.
         """
-        return self.actor(state)
+        return self.actor(state, deterministic=deterministic)
 
 class TD3(BaseAgent):
     """
     Twin Delayed Deep Deterministic Policy Gradient (TD3)
 
+    This class implements the TD3 algorithm, which is an off-policy actor-critic algorithm for continuous action spaces.
+
+    Args:
+        env_params (EnvParams): Environment parameters.
+        policy (TD3Policy | None): Custom TD3 policy. If None, a default TD3 policy will be created.
+        buffer_size (int): Size of the replay buffer. Default is 100000.
+        min_buffer_size (int): Minimum size of the replay buffer before training starts. Default is 1000.
+        steps_per_batch (int): Number of steps to collect per batch. Default is 1.
+        mini_batch_size (int): Size of the mini-batch sample for each gradient update. Default is 256.
+        gradient_steps (int): Number of gradient steps to take per training iteration. Default is 1.
+        learning_rate (float): Learning rate for the optimizer. Default is 1e-3.
+        gamma (float): Discount factor for future rewards. Default is 0.99.
+        exploration_noise (float): Standard deviation of Gaussian noise added to actions for exploration. Default is 0.1.
+        policy_noise (float): Standard deviation of noise added to the target policy's actions. Default is 0.2.
+        noise_clip (float): Maximum absolute value of noise added to the target policy's actions. Default is 0.5.
+        delay_freq (int): Frequency of delayed policy updates. Default is 2.
+        tau (float): Polyak averaging factor for target networks. Default is 0.005.
+        device (str): Device to run the agent on ('cpu' or 'cuda'). Default is 'cpu'.
     """
     def __init__(self,
                  env_params: EnvParams,
-                 policy: Optional[TD3Policy] = None,
+                 policy: TD3Policy | None = None,
                  buffer_size: int = 100000,
-                 batch_size: int = 256,
                  min_buffer_size: int = 1000,
-                 gradient_steps: int = 1,
+                 steps_per_batch: int = 1,
                  mini_batch_size: int = 256,
+                 gradient_steps: int = 1,
                  learning_rate: float = 1e-3,
                  gamma: float = 0.99,
+                 exploration_noise: float = 0.1,
                  policy_noise: float = 0.2,
                  noise_clip: float = 0.5,
                  delay_freq: int = 2,
@@ -174,12 +213,13 @@ class TD3(BaseAgent):
         super().__init__()
         self.env_params = env_params
         self.buffer_size = buffer_size
-        self.batch_size = batch_size
+        self.steps_per_batch = steps_per_batch
         self.min_buffer_size = min_buffer_size
         self.gradient_steps = gradient_steps
         self.mini_batch_size = mini_batch_size
         self.learning_rate = learning_rate
         self.gamma = gamma
+        self.exploration_noise = exploration_noise
         self.policy_noise = policy_noise
         self.noise_clip = noise_clip
         self.delay_freq = delay_freq
@@ -208,7 +248,7 @@ class TD3(BaseAgent):
             action = self.policy(state)
             if not deterministic:
                 # Add noise to the action for exploration
-                noise = utils.gaussian_noise(mean=0, std=0.1, shape=action.shape, device=self.device)
+                noise = utils.gaussian_noise(mean=0, std=self.exploration_noise, shape=action.shape, device=self.device)
                 action = action + noise
                 # action = action.clamp(self.env_params.action_min, self.env_params.action_max)
         return action
@@ -252,7 +292,7 @@ class TD3(BaseAgent):
                     scheduler.update(current_step=num_steps)
 
             # Collect experience dictionary with shape (B, ...)
-            experience = collector.collect_experience(policy=self.policy, num_steps=self.batch_size)
+            experience = collector.collect_experience(policy=self.policy, num_steps=self.steps_per_batch)
             num_steps += experience['state'].shape[0]
 
             # Store experience in replay buffer

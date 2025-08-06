@@ -11,6 +11,18 @@ class Evaluator(ABC):
     Base class for all evaluators in the PRT-RL framework.
     This class provides a common interface for evaluating agents in different environments.
     """
+    def __init__(self,
+                 eval_freq: int = 1,
+                ) -> None:
+        """
+        Initialize the evaluator with the evaluation frequency.
+
+        Args:
+            eval_freq (int): Frequency of evaluation in terms of steps, iterations, or optimization steps.
+        """
+        self.eval_freq = eval_freq
+        self.last_evaluation_iteration = 0
+
     def evaluate(self, agent, iteration: int) -> None:
         """
         Evaluate the agent's performance in the given environment.
@@ -30,6 +42,30 @@ class Evaluator(ABC):
         This method can be overridden by subclasses if needed.
         """
         pass
+
+    def _should_evaluate(self, iteration: int) -> bool:
+        """
+        Determine if the evaluation should be performed based on the iteration number.
+
+        Returns True if:
+        - The current iteration is a multiple of eval_freq, or
+        - The current iteration is the last one and it was not evaluated due to non-divisibility.
+
+        Args:
+            iteration (int): The current iteration number.
+
+        Returns:
+            bool: True if evaluation should be performed, False otherwise.
+        """
+        iteration = iteration + 1  # Adjust for 0-based indexing
+
+        current_interval = iteration // self.eval_freq
+        last_interval = self.last_evaluation_iteration // self.eval_freq
+        if current_interval > last_interval:
+            self.last_evaluation_iteration = iteration
+            return True
+
+        return False    
 
 class RewardEvaluator(Evaluator):
     """
@@ -54,42 +90,17 @@ class RewardEvaluator(Evaluator):
                  eval_freq: int = 1,
                  deterministic: bool = False
                  ) -> None:
+        super().__init__(eval_freq=eval_freq)
         self.env = env
         self.num_env = env.num_envs
         self.num_episodes = num_episodes
         self.logger = logger
         self.keep_best = keep_best
-        self.eval_freq = eval_freq
         self.deterministic = deterministic
-        self.last_evaluation_iteration = 0
         self.best_reward = float("-inf")
         self.best_agent = None
 
         self.collector = ParallelCollector(env)
-
-    def _should_evaluate(self, iteration: int) -> bool:
-        """
-        Determine if the evaluation should be performed based on the iteration number.
-
-        Returns True if:
-        - The current iteration is a multiple of eval_freq, or
-        - The current iteration is the last one and it was not evaluated due to non-divisibility.
-
-        Args:
-            iteration (int): The current iteration number.
-
-        Returns:
-            bool: True if evaluation should be performed, False otherwise.
-        """
-        iteration = iteration + 1  # Adjust for 0-based indexing
-
-        current_interval = iteration // self.eval_freq
-        last_interval = self.last_evaluation_iteration // self.eval_freq
-        if current_interval > last_interval:
-            self.last_evaluation_iteration = iteration
-            return True
-
-        return False
 
     def evaluate(self, 
                  agent,
@@ -134,3 +145,76 @@ class RewardEvaluator(Evaluator):
         """
         if self.keep_best and self.best_agent is not None and self.logger is not None:
             self.logger.save_agent(self.best_agent, "agent-best.pt")
+
+class NumberOfStepsEvaluator(Evaluator):
+    """
+    Evaluator that evaluates the agent's performance based on timesteps.
+
+    Args:
+        env (EnvironmentInterface): The environment to evaluate the agent in.
+        num_timesteps (int): The number of timesteps to run for evaluation.
+        logger (Optional[Logger]): Logger for evaluation metrics.
+        keep_best (bool): Whether to keep the best agent based on evaluation performance.
+        eval_freq (int): Frequency of evaluation in terms of steps, iterations, or optimization steps.
+        deterministic (bool): Whether to use a deterministic policy during evaluation.
+    """
+    def __init__(self,
+                 env: EnvironmentInterface,
+                 max_reward: float,
+                 num_epsisodes: int = 1,
+                 logger: Optional[Logger] = None,
+                 keep_best: bool = False,
+                 eval_freq: int = 1,
+                 deterministic: bool = False
+                 ) -> None:
+        super().__init__(eval_freq=eval_freq)
+        self.env = env
+        self.max_reward = max_reward
+        self.num_episodes = num_epsisodes
+        self.logger = logger
+        self.keep_best = keep_best
+        self.deterministic = deterministic
+        self.best_agent = None
+        self.best_timestep = int("inf")
+
+        self.collector = ParallelCollector(env)
+
+    def evaluate(self,
+                 agent,
+                 iteration: int,
+                 is_last: bool = False
+                 ) -> None:
+        """
+        Evaluate the agent's performance in the given environment based on timesteps.
+
+        Args:
+            agent: The agent to be evaluated.
+            iteration (int): The current iteration number.
+            is_last (bool): Whether this is the last evaluation.
+
+        Returns:
+            None
+        """
+        # Check if evaluation should be performed
+        if not is_last and not self._should_evaluate(iteration):
+            return
+        
+        trajectories = self.collector.collect_trajectory(agent, num_trajectories=self.num_episodes)
+        rewards = [t['rewards'] for t in trajectories]
+
+        avg_reward = np.mean(rewards)
+        if avg_reward >= self.max_reward:
+            self.best_timestep = iteration
+
+            if self.keep_best:
+                self.best_agent = copy.deepcopy(agent)
+
+        if self.logger is not None:
+            self.logger.log_scalar("evaluation_numsteps", self.best_timestep, iteration=iteration)
+        
+    def close(self) -> None:
+        """
+        Close the evaluator and release any resources.
+        """
+        if self.keep_best and self.best_agent is not None and self.logger is not None:
+            self.logger.save_agent(self.best_agent, "agent-best.pt")        

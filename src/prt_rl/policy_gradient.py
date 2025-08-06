@@ -37,7 +37,7 @@ class PolicyGradient(BaseAgent):
     """
     def __init__(self, 
                  env_params: EnvParams,
-                 policy: DistributionPolicy | None,
+                 policy: DistributionPolicy | None = None,
                  batch_size: int = 100,
                  learning_rate: float = 1e-3,
                  gamma: float = 0.99,

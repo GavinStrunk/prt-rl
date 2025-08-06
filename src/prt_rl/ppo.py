@@ -42,7 +42,6 @@ class PPO(BaseAgent):
                  ) -> None:
         super().__init__()
         self.env_params = env_params
-        self.policy = policy if policy is not None else ActorCriticPolicy(env_params, device=device)
         self.gamma = gamma
         self.epsilon = epsilon
         self.learning_rate = learning_rate
@@ -55,7 +54,9 @@ class PPO(BaseAgent):
         self.normalize_advantages = normalize_advantages
         self.device = torch.device(device)
 
+        self.policy = policy if policy is not None else ActorCriticPolicy(env_params, device=device)
         self.policy.to(self.device)
+
         # Configure optimizers
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.learning_rate)
 
@@ -74,7 +75,7 @@ class PPO(BaseAgent):
             torch.Tensor: Predicted action.
         """
         with torch.no_grad():
-            return self.policy(state, deterministic=deterministic)  # Assuming policy has a forward method that returns action logits or actions directly
+            return self.policy(state, deterministic=deterministic)  
     
     def train(self,
               env: EnvironmentInterface,

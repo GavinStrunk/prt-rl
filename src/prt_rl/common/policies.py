@@ -336,6 +336,39 @@ class DistributionPolicy(BasePolicy):
 
         return action, log_probs
     
+    def evaluate_actions(self,
+                         state: torch.Tensor,
+                         action: torch.Tensor
+                         ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Evaluates the log probability and entropy of the given action under the policy.
+
+        Args:
+            state (torch.Tensor): Current state tensor.
+            action (torch.Tensor): Action tensor to evaluate.
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: A tuple containing the log probability of the action and the entropy of the distribution. Both tensors have shape (B, 1).
+        """
+        if self.encoder_network is not None:
+            latent_state = self.encoder_network(state)
+        else:
+            latent_state = state
+        
+        latent_features = self.policy_head(latent_state)
+        dist_params = self.distribution_layer(latent_features)
+
+        # If the distribution has parameters, we use them to create the distribution
+        if self.distribution_params is not None:
+            distribution = self.distribution(dist_params, self.distribution_params)
+        else:
+            distribution = self.distribution(dist_params)
+
+        # Compute log probabilities and entropy for the entire action vector
+        entropy = distribution.entropy().sum(dim=-1, keepdim=True)
+        log_probs = distribution.log_prob(action.squeeze()).sum(dim=-1, keepdim=True)
+
+        return log_probs, entropy
+    
     def get_logits(self,
                         state: torch.Tensor
                     ) -> torch.Tensor:
@@ -441,6 +474,14 @@ class ContinuousPolicy(BasePolicy):
 
         action = self.policy_head(state)
         return action.clamp(self.env_params.action_min, self.env_params.action_max)
+    
+    def get_encoder(self) -> Optional[BaseEncoder]:
+        """
+        Returns the encoder network used by the policy. 
+        Returns:
+            Optional[BaseEncoder]: The encoder network if it exists, otherwise None.
+        """
+        return self.encoder
 
 class ValueCritic(torch.nn.Module):
     """
@@ -598,212 +639,131 @@ class StateActionCritic(torch.nn.Module):
 
 class ActorCriticPolicy(BasePolicy):
     """
-    
-    This policy assumes if you provide a single encoder network, it will be shared between the actor and critic. It also assumes if a single network is provided for the actor and critic heads, it will be shared between them. If you want to use different networks for the actor and critic, you can provide them separately.
-    The policy head network should only define up to the last feature layer of the network. The specific distribution initializes the final layer of the network to ensure it is compatible.
+    ActorCriticPolicy is a policy that combines an actor and a critic network. It can optionally use an encoder network to process the input state before passing it to the actor and critic heads.
 
+    The ActorCriticPolicy is a combination of a DistributionPolicy for the actor and a ValueCritic for the critic. It can handle both discrete and continuous action spaces.
+    
+    The architecture of the policy is as follows:
+        - Encoder Network (optional): Processes the input state.
+        - Actor Head: Computes actions based on the latent state.
+        - Critic Head: Computes the value for the given state.
+
+    .. image:: /_static/actorcriticpolicy.png
+        :alt: ActorCriticPolicy Architecture
+        :width: 100%
+        :align: center
+
+    Args:
+        env_params (EnvParams): Environment parameters.
+        encoder (BaseEncoder | None): Encoder network to process the input state. If None, the input state is used directly.
+        actor (DistributionPolicy | None): Actor network to compute actions. If None, a default DistributionPolicy is created.
+        critic (ValueCritic | None): Critic network to compute values. If None, a default ValueCritic is created.
+        share_encoder (bool): If True, share the encoder between actor and critic. Default is False.
     """
     def __init__(self,
                  env_params: EnvParams,
-                 encoder_network: Optional[Union[Type[BaseEncoder], Dict[str, Type[BaseEncoder]]]] = None,
-                 encoder_network_kwargs: Optional[dict] = {},
-                 actor_critic_head: Union[Type[torch.nn.Module], Dict[str, Type[torch.nn.Module]]] = MLP,
-                 actor_critic_head_kwargs: Optional[dict] = {},
-                 distribution: Optional[dist.Distribution] = None,
-                 device: str = "cpu",
+                 encoder: BaseEncoder | None = None,
+                 actor: DistributionPolicy | None = None,
+                 critic: ValueCritic | None = None,
+                 share_encoder: bool = False,
                  ) -> None:
         super().__init__(env_params=env_params)
-        self.device = device
         self.env_params = env_params
-
-        self._build_encoder(encoder_network, encoder_network_kwargs)
-        self.actor_feature_dim = self._build_actor_critic_head(actor_critic_head, actor_critic_head_kwargs)
-        self._build_distribution(distribution)
-
-            
-    def _build_encoder(self, 
-                       encoder_network: Union[Type[BaseEncoder], Dict[str, Type[BaseEncoder]], None], 
-                       encoder_network_kwargs: dict
-                       ) -> None:
-        """
-        Builds the encoder network for the policy.
-        Args:
-            encoder_network (torch.nn.Module or Dict[str, torch.nn.Module]): The encoder network or a dictionary of encoder networks for actor and critic.
-            encoder_network_kwargs (dict): Keyword arguments for the encoder network.
-        """
-        # Initialize Type 1: No Encoder Network
-        if encoder_network is None:
-            self.actor_encoder_network = None
-            self.critic_encoder_network = None
-            self.actor_latent_dim = self.env_params.observation_shape[0]
-            self.critic_latent_dim = self.env_params.observation_shape[0]
-
-        # Initialize Type 3: Construct encoder networks when they are separate
-        elif isinstance(encoder_network, dict):
-            if 'actor' not in encoder_network or 'critic' not in encoder_network:
-                raise ValueError("If encoder_network is a dictionary, it must contain keys 'actor' and 'critic'.")
-            
-            if 'actor' not in encoder_network_kwargs or 'critic' not in encoder_network_kwargs:
-                raise ValueError("If encoder_network is a dictionary, encoder_network_kwargs must contain keys 'actor' and 'critic'.")
-            
-            self.actor_encoder_network = encoder_network['actor'](
-                    input_shape=self.env_params.observation_shape,
-                    **encoder_network_kwargs['actor']
-                )
-            self.critic_encoder_network = encoder_network['critic'](
-                    input_shape=self.env_params.observation_shape,
-                    **encoder_network_kwargs['critic']
-                )
-            self.actor_latent_dim = self.actor_encoder_network.features_dim
-            self.critic_latent_dim = self.critic_encoder_network.features_dim
-
-        # Initialize Type 3: Construct encoder networks when they are shared
-        elif issubclass(encoder_network, BaseEncoder):
-            self.actor_encoder_network = encoder_network(
-                    input_shape=self.env_params.observation_shape,
-                    **encoder_network_kwargs
-                )
-            self.critic_encoder_network = self.actor_encoder_network
-            self.actor_latent_dim = self.actor_encoder_network.features_dim
-            self.critic_latent_dim = self.actor_encoder_network.features_dim
-        else:
-            raise ValueError("encoder_network must be either None, a BaseEncoder, or a dictionary with keys 'actor' and 'critic'.")
-    
-    def _build_actor_critic_head(self,
-                                 actor_critic_head: Union[Type[torch.nn.Module], Dict[str, Type[torch.nn.Module]]],
-                                 actor_critic_head_kwargs: dict,
-                                 ) -> None:
-        """
-        Builds the actor and critic heads for the policy.
-        Args:
-            actor_critic_head (torch.nn.Module or Dict[str, torch.nn.Module]): The actor and critic heads or a dictionary of actor and critic heads.
-            actor_critic_head_kwargs (dict): Keyword arguments for the actor and critic heads.
-        """
-        # Initialize Type 1: Construct separate actor and critic heads
-        if isinstance(actor_critic_head, dict):
-            if 'actor' not in actor_critic_head or 'critic' not in actor_critic_head:
-                raise ValueError("If actor_critic_head is a dictionary, it must contain keys 'actor' and 'critic'.")
-            if 'actor' not in actor_critic_head_kwargs or 'critic' not in actor_critic_head_kwargs:
-                raise ValueError("If actor_critic_head is a dictionary, actor_critic_head_kwargs must contain keys 'actor' and 'critic'.")
-            
-            self.actor_head = actor_critic_head['actor'](
-                input_dim=self.actor_latent_dim,
-                **actor_critic_head_kwargs['actor']
-            )
-            self.critic_head = actor_critic_head['critic'](
-                input_dim=self.critic_latent_dim,
-                output_dim=1,
-                **actor_critic_head_kwargs['critic']
-            )
+        self.encoder = encoder
+        self.critic_encoder = None
+        self.share_encoder = share_encoder
         
-        # Initialize Type 2: Construct the same network for actor and critic heads
-        elif issubclass(actor_critic_head, torch.nn.Module):
-            self.actor_head = actor_critic_head(
-                input_dim=self.actor_latent_dim,
-                **actor_critic_head_kwargs
+        # If no actor is provided, create a default DistributionPolicy without an encoder
+        if actor is None:
+            self.actor = DistributionPolicy(
+                env_params=env_params,
             )
-
-            # Set the 'output_dim' key to 1 for the critic head
-            self.critic_head = actor_critic_head(
-                input_dim=self.critic_latent_dim,
-                output_dim=1,
-                **actor_critic_head_kwargs
-            )   
         else:
-            raise ValueError("actor_critic_head must be either a torch.nn.Module, or a dictionary with keys 'actor' and 'critic'.")                              
-        
-        # Last layer is an activation so we can get the feature dimension from the second to last linear layer
-        return self.actor_head.layers[-2].out_features
+            self.actor = actor
 
-    def _build_distribution(self,
-                           distribution: dist.Distribution,
-                           ) -> None:
-        """
-        Builds the distribution for the policy.
-
-        Args:
-            distribution (dist.Distribution): The distribution to use for the policy.
-        """
-        # Default distributions for discrete and continuous action spaces
-        if distribution is None:
-            if self.env_params.action_continuous:
-                self.distribution = dist.Normal
-            else:
-                self.distribution = dist.Categorical
+        # If no critic is provided, create a default ValueCritic without an encoder
+        if critic is None:
+            self.critic = ValueCritic(
+                env_params=env_params,
+            )
         else:
-            self.distribution = distribution
+            self.critic = critic
 
-        action_dim = self.distribution.get_action_dim(self.env_params)
-        self.actor_distribution_layer = self.distribution.last_network_layer(feature_dim=self.actor_feature_dim, action_dim=action_dim)
-
+        # If the encoder is not shared, but one exists then make a copy for the critic
+        if not share_encoder and self.encoder is not None:
+            self.critic_encoder = copy.deepcopy(self.encoder)  
 
     def forward(self,
-                   state: torch.Tensor
+                   state: torch.Tensor,
+                   deterministic: bool = False
                    ) -> torch.Tensor:
         """
-        Chooses an action based on the current state. Expects the key "observation" in the state tensordict
+        Chooses an action based on the current state and computes the value of the state.
 
         Args:
-            state (TensorDict): current state tensordict
+            state (torch.Tensor): Current state tensor.
+            deterministic (bool): If True, choose the action deterministically. Default is False.
 
         Returns:
-            TensorDict: tensordict with the "action" key added
+            torch.Tensor: The chosen action and the value of the state.
         """
-        action, _, _ = self.predict(state)
+        action, _, _ = self.predict(state, deterministic=deterministic)
         return action
-
+    
     def predict(self,
-                state: torch.Tensor
-                ) -> torch.Tensor:
-        # Run Actor
-        if self.actor_encoder_network is None:
-            action_encoding = state
+                   state: torch.Tensor,
+                   deterministic: bool = False
+                   ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Chooses an action based on the current state and computes the value of the state.
+
+        Args:
+            state (torch.Tensor): Current state tensor.
+            deterministic (bool): If True, choose the action deterministically. Default is False.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the chosen action, value_estimate, and aciton log probability.
+        """
+        if self.encoder is not None:
+            latent_state = self.encoder(state)
         else:
-            action_encoding = self.actor_encoder_network(state)
+            latent_state = state
 
-        latent_features = self.actor_head(action_encoding)
-        action_params = self.actor_distribution_layer(latent_features)
-        distribution = self.distribution(action_params)
-        action = distribution.sample()
-        log_probs = distribution.log_prob(action)
+        action, log_probs = self.actor.predict(latent_state, deterministic=deterministic)
 
-        # Convert the action and log probabilities to the correct shape (N, ) -> (N, 1)
-        action = action.unsqueeze(-1)
-        log_probs = log_probs.unsqueeze(-1)
-
-        # Run Critic
-        if self.critic_encoder_network is None:
-            critic_features = state
+        if self.critic_encoder is not None:
+            critic_latent_state = self.critic_encoder(state)
         else:
-            critic_features = self.critic_encoder_network(state)
-            
-        value_est = self.critic_head(critic_features)
+            critic_latent_state = latent_state
 
-        return action, value_est, log_probs
+        value = self.critic(critic_latent_state) 
+        return action, value, log_probs
     
     def evaluate_actions(self,
                          state: torch.Tensor,
                          action: torch.Tensor
-                         ) -> torch.Tensor:
-        # Run Actor
-        if self.actor_encoder_network is None:
-            action_encoding = state
+                        ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Evaluates the value, log probability and entropy of the given action under the policy.
+        Args:
+            state (torch.Tensor): Current state tensor.
+            action (torch.Tensor): Action tensor to evaluate.
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the value estimate, log probability, and entropy. All tensors have shape (B, 1).
+        """
+        if self.encoder is not None:
+            latent_state = self.encoder(state)
         else:
-            action_encoding = self.actor_encoder_network(state)
+            latent_state = state
+        
+        log_probs, entropy = self.actor.evaluate_actions(latent_state, action)
 
-        latent_features = self.actor_head(action_encoding)
-        action_params = self.actor_distribution_layer(latent_features)
-        distribution = self.distribution(action_params)
-        entropy = distribution.entropy().unsqueeze(-1)
-        log_probs = distribution.log_prob(action.squeeze()).unsqueeze(-1)
-
-        # Run Critic
-        if self.critic_encoder_network is None:
-            critic_features = state
+        if self.critic_encoder is not None:
+            critic_latent_state = self.critic_encoder(state)
         else:
-            critic_features = self.critic_encoder_network(state)
+            critic_latent_state = latent_state
+        
+        value = self.critic(critic_latent_state)
 
-        value_est = self.critic_head(critic_features)
-
-        return value_est, log_probs, entropy
+        return value, log_probs, entropy
 
