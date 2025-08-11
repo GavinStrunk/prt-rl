@@ -466,60 +466,142 @@ class ParallelCollector:
             num_trajectories (int): The total number of complete trajectories to collect.
 
         Returns:
-            Tuple[Dict[str, List[torch.Tensor]], int]: A dictionary where each key maps to a list of per-trajectory tensors,
-                                                    and the total number of steps collected.
+            Tuple[Dict[str, List[torch.Tensor]], int]: 
+                - A dictionary where each key maps to a list of per-trajectory tensors (each tensor has shape (T_i, ...)).
+                Keys: 'state','action','next_state','reward','done' and optionally 'value_est','log_prob','length'.
+                - The total number of steps collected across all returned trajectories.
         """
         N = self.env.get_num_envs()
-        per_env_buffers = [
-            {
-                "state": [], "action": [], "next_state": [],
-                "reward": [], "done": [], "value_est": [], "log_prob": []
-            }
-            for _ in range(N)
-        ]
-        complete_trajectories = {
-            "state": [], "action": [], "next_state": [],
-            "reward": [], "done": [], "value_est": [], "log_prob": []
+
+        # --- Establish starting states for all envs (respect previous_experience if present) ---
+        if self.previous_experience is None:
+            state, _ = self.env.reset()
+        else:
+            # Continue from where we left off, but reset finished envs
+            state = self.previous_experience["next_state"]
+            prev_done = self.previous_experience["done"]
+            # ensure prev_done is 1D bool-like over envs
+            if prev_done.ndim > 1 and prev_done.shape[-1] == 1:
+                prev_done = prev_done.squeeze(-1)
+            for i in range(N):
+                if bool(prev_done[i].item() if torch.is_tensor(prev_done[i]) else prev_done[i]):
+                    reset_state, _ = self.env.reset_index(i)
+                    state[i] = reset_state
+
+        # --- Per-env rolling buffers (lists of per-step tensors) ---
+        per_env_buffers = []
+        for _ in range(N):
+            per_env_buffers.append({
+                "state": [],
+                "action": [],
+                "next_state": [],
+                "reward": [],
+                "done": [],
+                "value_est": [],
+                "log_prob": [],
+            })
+
+        # --- Outputs: lists of completed trajectories (each a tensor of length T_i) ---
+        out: Dict[str, List[torch.Tensor]] = {
+            "state": [],
+            "action": [],
+            "next_state": [],
+            "reward": [],
+            "done": [],
+            # Optional keys will be appended only if present
+            "value_est": [],
+            "log_prob": [],
+            "length": [],  # store as 1D tensor per-trajectory for convenience
         }
 
-        trajectories_collected = 0
+        episodes_collected = 0
         total_steps = 0
 
-        state, _ = self.env.reset()
-        done = torch.zeros(N, 1, dtype=torch.bool)
+        # Policy eval/no_grad for deterministic eval (feel free to remove eval() if you manage outside)
+        policy_cm = torch.no_grad() if policy is not None else nullcontext()
+        with policy_cm:
+            while episodes_collected < num_trajectories:
+                # --- Act ---
+                action, value_estimate, log_prob = get_action_from_policy(policy, state, self.env_params)
 
-        while trajectories_collected < num_trajectories:
-            action, value_est, log_prob = get_action_from_policy(policy, state, self.env_params)
-            next_state, reward, next_done, _ = self.env.step(action)
+                # --- Step ---
+                next_state, reward, done, _ = self.env.step(action)
 
-            for i in range(N):
-                # Add current transition to buffer
-                per_env_buffers[i]["state"].append(state[i].unsqueeze(0))
-                per_env_buffers[i]["action"].append(action[i].unsqueeze(0))
-                per_env_buffers[i]["next_state"].append(next_state[i].unsqueeze(0))
-                per_env_buffers[i]["reward"].append(reward[i].unsqueeze(0))
-                per_env_buffers[i]["done"].append(next_done[i].unsqueeze(0))
-                if value_est is not None:
-                    per_env_buffers[i]["value_est"].append(value_est[i].unsqueeze(0))
-                if log_prob is not None:
-                    per_env_buffers[i]["log_prob"].append(log_prob[i].unsqueeze(0))
+                # Normalize shapes for indexing
+                done_view = done
+                if done_view.ndim > 1 and done_view.shape[-1] == 1:
+                    done_view = done_view.squeeze(-1)
 
-                total_steps += 1
+                # --- Append this step to each env's buffer ---
+                for i in range(N):
+                    per_env_buffers[i]["state"].append(state[i])
+                    per_env_buffers[i]["action"].append(action[i])
+                    per_env_buffers[i]["next_state"].append(next_state[i])
+                    per_env_buffers[i]["reward"].append(reward[i])
+                    per_env_buffers[i]["done"].append(done[i])
+                    if value_estimate is not None:
+                        per_env_buffers[i]["value_est"].append(value_estimate[i])
+                    if log_prob is not None:
+                        per_env_buffers[i]["log_prob"].append(log_prob[i])
+                    total_steps += 1
 
-                # When the environment is done, finalize trajectory
-                if next_done[i] and trajectories_collected < num_trajectories:
-                    for key in complete_trajectories.keys():
-                        items = per_env_buffers[i][key]
-                        if items:
-                            complete_trajectories[key].append(torch.cat(items, dim=0))
-                        else:
-                            complete_trajectories[key].append(None)
-                    # Clear buffer and reset environment
-                    per_env_buffers[i] = {k: [] for k in per_env_buffers[i]}
-                    reset_state, _ = self.env.reset_index(i)
-                    next_state[i] = reset_state
-                    trajectories_collected += 1
+                # --- Finalize any episodes that ended on this step ---
+                for i in range(N):
+                    if bool(done_view[i].item() if torch.is_tensor(done_view[i]) else done_view[i]):
+                        buf = per_env_buffers[i]
 
-            state = next_state
+                        # Stack lists into (T_i, ...) tensors
+                        traj_state = torch.stack(buf["state"], dim=0)
+                        traj_action = torch.stack(buf["action"], dim=0)
+                        traj_next_state = torch.stack(buf["next_state"], dim=0)
+                        traj_reward = torch.stack(buf["reward"], dim=0)
+                        traj_done = torch.stack(buf["done"], dim=0)
+                        T_i = traj_reward.shape[0]
 
-        return complete_trajectories, total_steps  
+                        out["state"].append(traj_state)
+                        out["action"].append(traj_action)
+                        out["next_state"].append(traj_next_state)
+                        out["reward"].append(traj_reward)
+                        out["done"].append(traj_done)
+                        out["length"].append(torch.as_tensor(T_i))
+
+                        if len(buf["value_est"]) > 0:
+                            out["value_est"].append(torch.stack(buf["value_est"], dim=0))
+                        if len(buf["log_prob"]) > 0:
+                            out["log_prob"].append(torch.stack(buf["log_prob"], dim=0))
+
+                        episodes_collected += 1
+
+                        # Clear buffer for this env (it may start a new episode immediately)
+                        per_env_buffers[i] = {
+                            "state": [],
+                            "action": [],
+                            "next_state": [],
+                            "reward": [],
+                            "done": [],
+                            "value_est": [],
+                            "log_prob": [],
+                        }
+
+                        # If we still need more episodes, reset this env so it can keep collecting
+                        if episodes_collected < num_trajectories:
+                            reset_state, _ = self.env.reset_index(i)
+                            next_state[i] = reset_state  # ensure we start next ep from reset state
+
+                # Prepare for next loop and update previous_experience
+                self.previous_experience = {
+                    "state": state,
+                    "action": action,
+                    "next_state": next_state,
+                    "reward": reward,
+                    "done": done,
+                }
+                state = next_state
+
+        # Remove optional keys if none were collected (cleaner downstream)
+        if len(out["value_est"]) == 0:
+            out.pop("value_est")
+        if len(out["log_prob"]) == 0:
+            out.pop("log_prob")
+
+        return out, total_steps

@@ -238,6 +238,16 @@ def test_gymnasium_wrapper_with_render():
     next_state, reward, done, info = env.step(action)
     assert info['rgb_array'].shape == (1, 400, 600, 3)
 
+def test_gymnasium_mujoco_types():
+    env = wrappers.GymnasiumWrapper(
+        gym_name="InvertedPendulum-v5",
+        render_mode=None,
+    )
+
+    state, info = env.reset()
+    assert state.shape == (1, 4)
+    assert state.dtype == torch.float32
+
 def test_vmas_wrapper():
     num_envs = 2
     env = wrappers.VmasWrapper(

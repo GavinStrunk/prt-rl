@@ -53,7 +53,6 @@ class PolicyGradient(BaseAgent):
                  device: str = 'cpu',
                  ) -> None:
         super().__init__()
-        policy = policy if policy is not None else DistributionPolicy(env_params=env_params, policy_kwargs={'network_arch': network_arch}, device=device)
         self.env_params = env_params
         self.batch_size = batch_size
         self.learning_rate = learning_rate
@@ -69,6 +68,7 @@ class PolicyGradient(BaseAgent):
         self.network_arch = network_arch
         self.device = torch.device(device)
 
+        self.policy = policy if policy is not None else DistributionPolicy(env_params=env_params, policy_kwargs={'network_arch': network_arch})
         self.policy.to(self.device)
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.learning_rate)
 

@@ -3,6 +3,7 @@ from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.common.recorders import Recorder
 from prt_rl.common.visualizers import Visualizer
 from prt_rl.agent import BaseAgent
+from prt_rl.common.policies import BasePolicy
 from prt_rl.common.collectors import get_action_from_policy
 
 
@@ -11,13 +12,19 @@ class Runner:
     A runner executes a policy in an environment. It simplifies the process of evaluating policies that have been trained.
 
     The runner assumes the rgb_array is in the info dictioanary and has shape (num_envs, channel, height, width).
+
+    .. note::
+        To use the visualizer, the environment wrapper render mode must be set to 'rgb_array'.
+    
     Args:
         env (EnvironmentInterface): the environment to run the policy in
-        policy (Policy): the policy to run
+        policy (BaseAgent | BasePolicy): Agent or policy to be executed in the environment
+        recorders (Optional[List[Recorder]]): List of recorders to record the experience and info during the run
+        visualizer (Optional[Visualizer]): Visualizer to show the environment frames during the run
     """
     def __init__(self,
                  env: EnvironmentInterface,
-                 policy: BaseAgent,
+                 policy: BaseAgent | BasePolicy,
                  recorders: Optional[List[Recorder]] = None,
                  visualizer: Optional[Visualizer] = None,
                  ) -> None:

@@ -1,15 +1,19 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 import copy
+import math
 from typing import Optional
 import numpy as np
 from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.common.loggers import Logger
-from prt_rl.common.collectors import get_action_from_policy, ParallelCollector
+from prt_rl.common.collectors import ParallelCollector
 
 class Evaluator(ABC):
     """
     Base class for all evaluators in the PRT-RL framework.
-    This class provides a common interface for evaluating agents in different environments.
+    This class provides a common interface for evaluating agents in different environments with different objectives.
+
+    Args:
+        eval_freq (int): Frequency of evaluation in terms of steps, iterations, or optimization steps.
     """
     def __init__(self,
                  eval_freq: int = 1,
@@ -23,13 +27,14 @@ class Evaluator(ABC):
         self.eval_freq = eval_freq
         self.last_evaluation_iteration = 0
 
-    def evaluate(self, agent, iteration: int) -> None:
+    def evaluate(self, agent, iteration: int, is_last: bool = False) -> None:
         """
         Evaluate the agent's performance in the given environment.
 
         Args:
             agent: The agent to be evaluated.
             iteration (int): The current iteration number.
+            is_last (bool): Whether this is the last evaluation.
 
         Returns:
             None
@@ -112,18 +117,15 @@ class RewardEvaluator(Evaluator):
 
         Args:
             agent: The agent to be evaluated.
-            env: The environment in which to evaluate the agent.
-            num_episodes: The number of episodes to run for evaluation.
-
-        Returns:
-            A dictionary containing evaluation metrics.
+            iteration (int): The current iteration number.
+            is_last (bool): Whether this is the last evaluation.
         """
         # Check if evaluation should be performed
         if not is_last and not self._should_evaluate(iteration):
             return
         
         trajectories = self.collector.collect_trajectory(agent, num_trajectories=self.num_episodes)
-        rewards = [t['rewards'] for t in trajectories]
+        rewards = [t['reward'] for t in trajectories]
 
         avg_reward = np.mean(rewards)
         if avg_reward >= self.best_reward:
@@ -148,11 +150,12 @@ class RewardEvaluator(Evaluator):
 
 class NumberOfStepsEvaluator(Evaluator):
     """
-    Evaluator that evaluates the agent's performance based on timesteps.
+    Evaluator that evaluates the agent's performance to reach a minimum reward threshold within the lowest number of steps. This evaluator is intended to be used when an agent is able to achieve a maximum desired reward and you want to evaluate which agent learns the fastest.
 
     Args:
         env (EnvironmentInterface): The environment to evaluate the agent in.
-        num_timesteps (int): The number of timesteps to run for evaluation.
+        reward_threshold (float): The minimum reward threshold to achieve.
+        num_episodes (int): The number of episodes to run for evaluation.
         logger (Optional[Logger]): Logger for evaluation metrics.
         keep_best (bool): Whether to keep the best agent based on evaluation performance.
         eval_freq (int): Frequency of evaluation in terms of steps, iterations, or optimization steps.
@@ -160,8 +163,8 @@ class NumberOfStepsEvaluator(Evaluator):
     """
     def __init__(self,
                  env: EnvironmentInterface,
-                 max_reward: float,
-                 num_epsisodes: int = 1,
+                 reward_threshold: float,
+                 num_episodes: int = 1,
                  logger: Optional[Logger] = None,
                  keep_best: bool = False,
                  eval_freq: int = 1,
@@ -169,13 +172,13 @@ class NumberOfStepsEvaluator(Evaluator):
                  ) -> None:
         super().__init__(eval_freq=eval_freq)
         self.env = env
-        self.max_reward = max_reward
-        self.num_episodes = num_epsisodes
+        self.reward_threshold = reward_threshold
+        self.num_episodes = num_episodes
         self.logger = logger
         self.keep_best = keep_best
         self.deterministic = deterministic
         self.best_agent = None
-        self.best_timestep = int("inf")
+        self.best_timestep = math.inf
 
         self.collector = ParallelCollector(env)
 
@@ -200,10 +203,12 @@ class NumberOfStepsEvaluator(Evaluator):
             return
         
         trajectories = self.collector.collect_trajectory(agent, num_trajectories=self.num_episodes)
-        rewards = [t['rewards'] for t in trajectories]
+
+        # @todo sum the rewards properly for each trajectory
+        rewards = [t['reward'] for t in trajectories]
 
         avg_reward = np.mean(rewards)
-        if avg_reward >= self.max_reward:
+        if avg_reward >= self.reward_threshold and iteration < self.best_timestep:
             self.best_timestep = iteration
 
             if self.keep_best:
