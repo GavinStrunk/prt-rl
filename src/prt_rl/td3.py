@@ -1,7 +1,6 @@
 """
 Twin Delayed Deep Deterministic Policy Gradient (TD3)
 """
-from calendar import c
 import torch
 import torch.nn.functional as F
 from typing import Optional, List
@@ -18,99 +17,6 @@ import numpy as np
 from prt_rl.common.collectors import SequentialCollector
 from prt_rl.common.buffers import ReplayBuffer
 from prt_rl.common.policies import BasePolicy, ContinuousPolicy, StateActionCritic
-from prt_rl.common.networks import MLP, BaseEncoder
-from typing import Union, Dict, Type
-
-
-# class Actor(torch.nn.Module):
-#     def __init__(self,
-#                  env_params: EnvParams,
-#                  actor_head: Union[Type[torch.nn.Module], Dict[str, Type[torch.nn.Module]]] = MLP,
-#                  actor_head_kwargs: Optional[dict] = {"network_arch": [400, 300]},
-#                  ) -> None:
-#         super().__init__()
-#         self.env_params = env_params
-
-#         # Construct the policy head network
-#         self.policy_head = actor_head(
-#             input_dim=self.env_params.observation_shape[0],
-#             output_dim=self.env_params.action_len,
-#             **actor_head_kwargs
-#         )
-
-
-#     def forward(self, state: torch.Tensor) -> torch.Tensor:
-#         """
-#         Forward pass through the actor network.
-
-#         Args:
-#             state: The current state of the environment.
-
-#         Returns:
-#             The action to be taken.
-#         """
-#         action = self.policy_head(state)
-#         return action
-
-
-# class StateActionCritic(torch.nn.Module):
-#     def __init__(self, 
-#                  env_params: EnvParams, 
-#                  num_critics: int = 2,
-#                  critic_head: Type[torch.nn.Module] = MLP,
-#                  critic_head_kwargs: Optional[dict] = {"network_arch": [400, 300]},
-#                  ) -> None:
-#         super(StateActionCritic, self).__init__()
-#         self.env_params = env_params
-#         self.num_critics = num_critics
-
-#         # Initialize critics here
-#         self.critics = []
-#         for _ in range(num_critics):
-#             critic = critic_head(
-#                 input_dim=self.env_params.observation_shape[0] + self.env_params.action_len,
-#                 output_dim=1,
-#                 **critic_head_kwargs
-#             )
-#             self.critics.append(critic)
-
-#         # Convert list to ModuleList for proper parameter management
-#         self.critics = torch.nn.ModuleList(self.critics)
-
-#     def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-#         """
-#         Forward pass through the critic network.
-
-#         Args:
-#             state: The current state of the environment.
-#             action: The action taken in the current state.
-
-#         Returns:
-#             The Q-value for the given state-action pair.
-#         """
-#         # Stack the state and action tensors
-#         q_input = torch.cat([state, action], dim=1)
-
-#         # Return a tuple of Q-values from each critic
-#         return tuple(critic(q_input) for critic in self.critics)
-
-#     def forward_indexed(self, index: int, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-#         """
-#         Forward pass through the first critic network.
-
-#         Args:
-#             index (int): The index of the critic to use.
-#             state (torch.Tensor): The current state of the environment.
-#             action (torch.Tensor): The action taken in the current state.
-
-#         Returns:
-#             The Q-value for the given state-action pair from the first critic.
-#         """
-#         if index > self.num_critics:
-#             raise ValueError(f"Index {index} exceeds the number of critics {self.num_critics}.")
-        
-#         q_input = torch.cat([state, action], dim=1)
-#         return self.critics[index](q_input)
 
 
 class TD3Policy(BasePolicy):

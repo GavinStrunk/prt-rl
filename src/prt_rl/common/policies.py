@@ -17,6 +17,7 @@ Summary of Policy Architectures
     :align: center
 
 Critic Architectures
+
 .. image:: /_static/valuecritic.png
     :alt: ValueCritic Architecture
     :width: 100%
@@ -37,6 +38,161 @@ from prt_rl.common.networks import MLP, BaseEncoder
 import prt_rl.common.distributions as dist
 
 
+class ValueCritic(torch.nn.Module):
+    """
+    ValueCritic is a critic network that estimates the value of a given state.
+
+    The architecture of the critic is as follows:
+        - Encoder Network (optional): Processes the input state.
+        - Critic Head: Computes the value for the given state.
+
+    .. image:: /_static/valuecritic.png
+        :alt: ValueCritic Architecture
+        :width: 100%
+        :align: center
+    
+    Args:
+        env_params (EnvParams): Environment parameters.
+        encoder (torch.nn.Module | None): Encoder network to process the input state. If None, the input state is used directly.
+        critic_head (torch.nn.Module): Critic head network to compute values. Default is MLP.
+        critic_head_kwargs (Optional[dict]): Keyword arguments for the critic head network.
+    """
+    def __init__(self,
+                 env_params: EnvParams,
+                 encoder: torch.nn.Module | None = None,
+                 critic_head: torch.nn.Module = MLP,
+                 critic_head_kwargs: Optional[dict] = {},                 
+                 ) -> None:
+        super().__init__()
+        self.env_params = env_params
+        self.encoder = encoder
+
+        if self.encoder is not None:
+            latent_dim = self.encoder.features_dim
+        else:
+            latent_dim = self.env_params.observation_shape[0]
+
+        self.critic_head = critic_head(
+            input_dim=latent_dim,
+            output_dim=1,
+            **critic_head_kwargs
+        )
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass through the critic network.
+
+        Args:
+            state (torch.Tensor): The current state of the environment.
+
+        Returns:
+            torch.Tensor: The estimated value for the given state.
+        """
+        if self.encoder is not None:
+            state = self.encoder(state)
+
+        return self.critic_head(state)
+    
+
+class StateActionCritic(torch.nn.Module):
+    """
+    StateActionCritic is a critic network that takes both state and action as input and outputs the Q-value for the given state-action pair. It can handle multiple critics for ensemble methods.
+
+    .. note::
+        If multiple critics are used and an encoder is provided, the encoder will be shared across all critics. If no encoder is provided, the input state is used directly.
+
+    The architecture of the critic is as follows:
+        - Encoder Network (optional): Processes the input state.
+        - Critic Head: Computes Q-values for the given state-action pair.
+
+    .. image:: /_static/stateactioncritic.png
+        :alt: StateActionCritic Architecture
+        :width: 100%
+        :align: center
+    
+    Args:
+        env_params (EnvParams): Environment parameters.
+        num_critics (int): Number of critics to use. Default is 1.
+        encoder (torch.nn.Module | None): Encoder network to process the input state. If None, the input state is used directly.
+        critic_head (torch.nn.Module): Critic head network to compute Q-values. Default is MLP.
+        critic_head_kwargs (Optional[dict]): Keyword arguments for the critic head network.
+    """
+    def __init__(self, 
+                 env_params: EnvParams, 
+                 num_critics: int = 1,
+                 encoder: torch.nn.Module | None = None,
+                 critic_head: torch.nn.Module = MLP,
+                 critic_head_kwargs: Optional[dict] = {},
+                 ) -> None:
+        super(StateActionCritic, self).__init__()
+        self.env_params = env_params
+        self.num_critics = num_critics
+        self.encoder = encoder
+
+        if self.encoder is not None:
+            latent_dim = self.encoder.features_dim
+        else:
+            latent_dim = self.env_params.observation_shape[0]
+
+        # Initialize critics here
+        self.critics = []
+        for _ in range(num_critics):
+            critic = critic_head(
+                input_dim=latent_dim + self.env_params.action_len,
+                output_dim=1,
+                **critic_head_kwargs
+            )
+            self.critics.append(critic)
+
+        # Convert list to ModuleList for proper parameter management
+        self.critics = torch.nn.ModuleList(self.critics)
+
+    def forward(self, state: torch.Tensor, action: torch.Tensor) -> Tuple[torch.Tensor] | torch.Tensor:
+        """
+        Forward pass through the critic network.
+
+        Args:
+            state: The current state of the environment.
+            action: The action taken in the current state.
+
+        Returns:
+            A tuple of Q-values for the given state-action pair for all critics.
+        """
+        if self.encoder is not None:
+            state = self.encoder(state)
+
+        # Stack the state and action tensors
+        q_input = torch.cat([state, action], dim=1)
+
+        # Return a tuple of Q-values from each critic or a single tensor if only one critic is used
+        if self.num_critics == 1:
+            return self.critics[0](q_input)
+        else:
+            return tuple(critic(q_input) for critic in self.critics)
+
+    def forward_indexed(self, index: int, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass through the critic network at the index provided.
+
+        Args:
+            index (int): The index of the critic to use.
+            state (torch.Tensor): The current state of the environment.
+            action (torch.Tensor): The action taken in the current state.
+
+        Returns:
+            The Q-value for the given state-action pair from the first critic.
+        """
+        if index > self.num_critics - 1:
+            raise ValueError(f"Index {index} exceeds the number of critics {self.num_critics}.")
+        
+        if self.encoder is not None:
+            state = self.encoder(state)
+
+        # Stack the state and action tensors
+        q_input = torch.cat([state, action], dim=1)
+        return self.critics[index](q_input)
+    
+
 class BasePolicy(torch.nn.Module, ABC):
     """
     Base class for implementing policies.
@@ -56,19 +212,40 @@ class BasePolicy(torch.nn.Module, ABC):
                    ) -> torch.Tensor:
         return self.forward(state, deterministic=deterministic)
 
-    @abstractmethod
     def forward(self,
                    state: torch.Tensor,
                    deterministic: bool = False
                    ) -> torch.Tensor:
         """
         Chooses an action based on the current state. 
+
         Args:
             state (torch.Tensor): Current state tensor.
             deterministic (bool): If True, choose the action deterministically. Default is False.
 
         Returns:
             torch.Tensor: Tensor with the chosen action.
+        """
+        action, _, _ = self.predict(state, deterministic=deterministic)
+        return action
+    
+    @abstractmethod
+    def predict(self,
+                state: torch.Tensor,
+                deterministic: bool = False
+                ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Chooses an action based on the current state and returns the action, value estimate, and log probability.
+        
+        Args:
+            state (torch.Tensor): Current state tensor.
+            deterministic (bool): If True, choose the action deterministically. Default is False.
+            
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the chosen action, value estimate, and action log probability.
+                - action (torch.Tensor): Tensor with the chosen action. Shape (B, action_dim)
+                - value_estimate (torch.Tensor): Tensor with the estimated value of the state. Shape (B, 1)
+                - log_prob (torch.Tensor): Tensor with the log probability of the chosen action. Shape (B, 1)
         """
         raise NotImplementedError
 
@@ -91,19 +268,19 @@ class QValuePolicy(BasePolicy):
 
     Args:
         env_params (EnvParams): Environment parameters.
-        encoder_network (Optional[Type[BaseEncoder]]): Encoder network to process the input state. If None, the input state is used directly.
+        encoder_network (BaseEncoder | None): Encoder network to process the input state. If None, the input state is used directly.
         encoder_network_kwargs (Optional[dict]): Keyword arguments for the encoder network.
-        policy_head (Optional[Type[torch.nn.Module]]): Policy head network to compute Q-values. Default is MLP.
+        policy_head (torch.nn.Module): Policy head network to compute Q-values. Default is MLP.
         policy_head_kwargs (Optional[dict]): Keyword arguments for the policy head network.
-        decision_function (Optional[DecisionFunction]): Decision function to select actions based on Q-values. Default is EpsilonGreedy.
+        decision_function (DecisionFunction | None): Decision function to select actions based on Q-values. Default is EpsilonGreedy.
     """
     def __init__(self,
                  env_params: EnvParams,
-                 encoder_network: Optional[Type[BaseEncoder]] = None,
+                 encoder_network: BaseEncoder | None = None,
                  encoder_network_kwargs: Optional[dict] = {},
-                 policy_head: Optional[Type[torch.nn.Module]] = MLP,
+                 policy_head: torch.nn.Module = MLP,
                  policy_head_kwargs: Optional[dict] = {},
-                 decision_function: Optional[DecisionFunction] = None,
+                 decision_function: DecisionFunction | None = None,
                  ) -> None:
         super().__init__(env_params)
 
@@ -136,29 +313,32 @@ class QValuePolicy(BasePolicy):
             self.decision_function = EpsilonGreedy(epsilon=1.0)
         else:
             self.decision_function = decision_function
-
-    def forward(self,
-                   state: torch.Tensor,
-                   deterministic: bool = False
-                   ) -> torch.Tensor:
+    
+    def predict(self, 
+                state: torch.Tensor, 
+                deterministic = False
+                ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Chooses an action based on the current state. Expects the key "observation" in the state tensordict.
+        Chooses an action based on the current state and returns the action, value estimate, and log probability.
 
         Args:
             state (torch.Tensor): Current state tensor.
             deterministic (bool): If True, choose the action deterministically. Default is False.
 
         Returns:
-            torch.Tensor: Tensor with the chosen action.
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the chosen action, value estimate, and action log probability.
+                - action (torch.Tensor): Tensor with the chosen action. Shape (B, action_dim)
+                - value_estimate (torch.Tensor): Tensor with the estimated value of the state. Shape (B, 1)
+                - log_prob (torch.Tensor): None
         """
-        q_vals = self.get_q_values(state)
+        value_est = self.get_q_values(state)
 
         with torch.no_grad():
             if not deterministic:
-                action = self.decision_function.select_action(q_vals)
+                action = self.decision_function.select_action(value_est)
             else:
-                action = torch.argmax(q_vals, dim=-1, keepdim=True)
-        return action
+                action = torch.argmax(value_est, dim=-1, keepdim=True)
+        return action, value_est, None
     
     def get_q_values(self,
                         state: torch.Tensor
@@ -205,19 +385,19 @@ class DistributionPolicy(BasePolicy):
 
     Args:
         env_params (EnvParams): Environment parameters.
-        encoder_network (Optional[Union[Type[BaseEncoder], Dict[str, Type[BaseEncoder]]]]): Encoder network to process the input state. If None, the input state is used directly.
+        encoder_network (BaseEncoder | None): Encoder network to process the input state. If None, the input state is used directly.
         encoder_network_kwargs (Optional[dict]): Keyword arguments for the encoder network.
-        policy_head (Union[Type[torch.nn.Module], Dict[str, Type[torch.nn.Module]]]): Policy head network to compute latent features. Default is MLP.
+        policy_head (torch.nn.Module): Policy head network to compute latent features. Default is MLP.
         policy_kwargs (Optional[dict]): Keyword arguments for the policy head network.
-        distribution (Optional[dist.Distribution]): Distribution to use for the policy. If None, defaults to Categorical for discrete action spaces and Normal for continuous action spaces.
+        distribution (dist.Distribution | None): Distribution to use for the policy. If None, defaults to Categorical for discrete action spaces and Normal for continuous action spaces.
     """
     def __init__(self,
                  env_params: EnvParams,
-                 encoder_network: Optional[Union[Type[BaseEncoder], Dict[str, Type[BaseEncoder]]]] = None,
+                 encoder_network: BaseEncoder | None = None,
                  encoder_network_kwargs: Optional[dict] = {},
-                 policy_head: Union[Type[torch.nn.Module], Dict[str, Type[torch.nn.Module]]] = MLP,
+                 policy_head: torch.nn.Module = MLP,
                  policy_kwargs: Optional[dict] = {},
-                 distribution: Optional[dist.Distribution] = None,
+                 distribution: dist.Distribution | None = None,
                  ) -> None:
         super().__init__(env_params=env_params)
         self.env_params = env_params
@@ -274,27 +454,11 @@ class DistributionPolicy(BasePolicy):
         else:
             self.distribution_layer = dist_layer
             self.distribution_params = None
-
-    def forward(self,
-                   state: torch.Tensor,
-                   deterministic: bool = False
-                   ) -> torch.Tensor:
-        """
-        Chooses an action based on the current state
-
-        Args:
-            state (torch.Tensor): Current state tensor.
-            deterministic (bool): If True, choose the action deterministically. Default is False.
-        Returns:
-            torch.Tensor: Tensor with the chosen action with shape (N, action_dim)
-        """
-        action, _ = self.predict(state, deterministic=deterministic)
-        return action
     
     def predict(self,
                    state: torch.Tensor,
                    deterministic: bool = False
-                   ) -> Tuple[torch.Tensor, torch.Tensor]:
+                   ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Chooses an action based on the current state. 
 
@@ -308,7 +472,10 @@ class DistributionPolicy(BasePolicy):
             deterministic (bool): If True, choose the action deterministically. Default is False.
 
         Returns:
-            torch.Tensor: Tensor with the chosen action. (N, action_dim), (N, # actions)
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the chosen action, value estimate, and action log probability.
+                - action (torch.Tensor): Tensor with the chosen action. Shape (B, action_dim)
+                - value_estimate (torch.Tensor): None
+                - log_prob (torch.Tensor): Tensor with the log probability of the chosen action. Shape (B, 1)
         """
         if self.encoder_network is not None:
             latent_state = self.encoder_network(state)
@@ -334,7 +501,7 @@ class DistributionPolicy(BasePolicy):
         # Compute the total log probability for the action vector
         log_probs = log_probs.sum(dim=-1, keepdim=True)
 
-        return action, log_probs
+        return action, None, log_probs
     
     def evaluate_actions(self,
                          state: torch.Tensor,
@@ -346,8 +513,11 @@ class DistributionPolicy(BasePolicy):
         Args:
             state (torch.Tensor): Current state tensor.
             action (torch.Tensor): Action tensor to evaluate.
+
         Returns:
-            Tuple[torch.Tensor, torch.Tensor]: A tuple containing the log probability of the action and the entropy of the distribution. Both tensors have shape (B, 1).
+            Tuple[torch.Tensor, torch.Tensor]: A tuple containing the log probability of the action and the entropy of the distribution. 
+                - log_prob (torch.Tensor): Tensor with the log probability of the given action. Shape (B, 1)
+                - entropy (torch.Tensor): Tensor with the entropy of the distribution. Shape (B, 1)
         """
         if self.encoder_network is not None:
             latent_state = self.encoder_network(state)
@@ -422,16 +592,16 @@ class ContinuousPolicy(BasePolicy):
 
     Args:
         env_params (EnvParams): Environment parameters.
-        encoder_network (Optional[Union[Type[BaseEncoder], Dict[str, Type[BaseEncoder]]]]): Encoder network to process the input state. If None, the input state is used directly.
+        encoder_network (BaseEncoder | None): Encoder network to process the input state. If None, the input state is used directly.
         encoder_network_kwargs (Optional[dict]): Keyword arguments for the encoder network.
-        policy_head (Type[torch.nn.Module]): Policy head network to compute actions. Default is MLP.
+        policy_head (torch.nn.Module): Policy head network to compute actions. Default is MLP.
         policy_head_kwargs (Optional[dict]): Keyword arguments for the policy head network.
     """
     def __init__(self,
                  env_params: EnvParams,
-                 encoder_network: Optional[Union[Type[BaseEncoder], Dict[str, Type[BaseEncoder]]]] = None,
+                 encoder_network: BaseEncoder | None = None,
                  encoder_network_kwargs: Optional[dict] = {},                 
-                 policy_head: Type[torch.nn.Module] = MLP,
+                 policy_head: torch.nn.Module = MLP,
                  policy_head_kwargs: Optional[dict] = {},
                  ) -> None:
         super().__init__(env_params)
@@ -453,27 +623,31 @@ class ContinuousPolicy(BasePolicy):
             output_dim=env_params.action_len,
            **policy_head_kwargs
         )        
-
-
-    def forward(self,
-                   state: torch.Tensor,
-                   deterministic: bool = False
-                   ) -> torch.Tensor:
+    
+    def predict(self, 
+                state: torch.Tensor, 
+                deterministic: bool = False
+                ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Chooses an action based on the current state.
+        Chooses an action based on the current state and returns the action, value estimate, and log probability.
 
         Args:
             state (torch.Tensor): Current state tensor.
             deterministic (bool): This value is ignored as the policy always returns a deterministic action.
 
         Returns:
-            torch.Tensor: Tensor with the chosen action.
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the chosen action, value estimate, and action log probability.
+                - action (torch.Tensor): Tensor with the chosen action. Shape (B, action_dim)
+                - value_estimate (torch.Tensor): None
+                - log_prob (torch.Tensor): None
         """
         if self.encoder is not None:
             state = self.encoder(state)
 
         action = self.policy_head(state)
-        return action.clamp(self.env_params.action_min, self.env_params.action_max)
+        action = action.clamp(self.env_params.action_min, self.env_params.action_max)
+        return action, None, None
+
     
     def get_encoder(self) -> Optional[BaseEncoder]:
         """
@@ -483,159 +657,6 @@ class ContinuousPolicy(BasePolicy):
         """
         return self.encoder
 
-class ValueCritic(torch.nn.Module):
-    """
-    ValueCritic is a critic network that estimates the value of a given state.
-
-    The architecture of the critic is as follows:
-        - Encoder Network (optional): Processes the input state.
-        - Critic Head: Computes the value for the given state.
-
-    .. image:: /_static/valuecritic.png
-        :alt: ValueCritic Architecture
-        :width: 100%
-        :align: center
-    
-    Args:
-        env_params (EnvParams): Environment parameters.
-        encoder (torch.nn.Module | None): Encoder network to process the input state. If None, the input state is used directly.
-        critic_head (Type[torch.nn.Module]): Critic head network to compute values. Default is MLP.
-        critic_head_kwargs (Optional[dict]): Keyword arguments for the critic head network.
-    """
-    def __init__(self,
-                 env_params: EnvParams,
-                 encoder: torch.nn.Module | None = None,
-                 critic_head: Type[torch.nn.Module] = MLP,
-                 critic_head_kwargs: Optional[dict] = {},                 
-                 ) -> None:
-        super().__init__()
-        self.env_params = env_params
-        self.encoder = encoder
-
-        if self.encoder is not None:
-            latent_dim = self.encoder.features_dim
-        else:
-            latent_dim = self.env_params.observation_shape[0]
-
-        self.critic_head = critic_head(
-            input_dim=latent_dim,
-            output_dim=1,
-            **critic_head_kwargs
-        )
-
-    def forward(self, state: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass through the critic network.
-
-        Args:
-            state (torch.Tensor): The current state of the environment.
-
-        Returns:
-            torch.Tensor: The estimated value for the given state.
-        """
-        if self.encoder is not None:
-            state = self.encoder(state)
-
-        return self.critic_head(state)
-
-
-class StateActionCritic(torch.nn.Module):
-    """
-    StateActionCritic is a critic network that takes both state and action as input and outputs the Q-value for the given state-action pair. It can handle multiple critics for ensemble methods.
-
-    .. note::
-        If multiple critics are used and an encoder is provided, the encoder will be shared across all critics. If no encoder is provided, the input state is used directly.
-
-    The architecture of the critic is as follows:
-        - Encoder Network (optional): Processes the input state.
-        - Critic Head: Computes Q-values for the given state-action pair.
-
-    .. image:: /_static/stateactioncritic.png
-        :alt: StateActionCritic Architecture
-        :width: 100%
-        :align: center
-    
-    Args:
-        env_params (EnvParams): Environment parameters.
-        num_critics (int): Number of critics to use. Default is 1.
-        encoder (torch.nn.Module | None): Encoder network to process the input state. If None, the input state is used directly.
-        critic_head (Type[torch.nn.Module]): Critic head network to compute Q-values. Default is MLP.
-        critic_head_kwargs (Optional[dict]): Keyword arguments for the critic head network.
-    """
-    def __init__(self, 
-                 env_params: EnvParams, 
-                 num_critics: int = 1,
-                 encoder: torch.nn.Module | None = None,
-                 critic_head: Type[torch.nn.Module] = MLP,
-                 critic_head_kwargs: Optional[dict] = {},
-                 ) -> None:
-        super(StateActionCritic, self).__init__()
-        self.env_params = env_params
-        self.num_critics = num_critics
-        self.encoder = encoder
-
-        if self.encoder is not None:
-            latent_dim = self.encoder.features_dim
-        else:
-            latent_dim = self.env_params.observation_shape[0]
-
-        # Initialize critics here
-        self.critics = []
-        for _ in range(num_critics):
-            critic = critic_head(
-                input_dim=latent_dim + self.env_params.action_len,
-                output_dim=1,
-                **critic_head_kwargs
-            )
-            self.critics.append(critic)
-
-        # Convert list to ModuleList for proper parameter management
-        self.critics = torch.nn.ModuleList(self.critics)
-
-    def forward(self, state: torch.Tensor, action: torch.Tensor) -> Tuple[torch.Tensor] | torch.Tensor:
-        """
-        Forward pass through the critic network.
-
-        Args:
-            state: The current state of the environment.
-            action: The action taken in the current state.
-
-        Returns:
-            A tuple of Q-values for the given state-action pair for all critics.
-        """
-        if self.encoder is not None:
-            state = self.encoder(state)
-
-        # Stack the state and action tensors
-        q_input = torch.cat([state, action], dim=1)
-
-        # Return a tuple of Q-values from each critic or a single tensor if only one critic is used
-        if self.num_critics == 1:
-            return self.critics[0](q_input)
-        else:
-            return tuple(critic(q_input) for critic in self.critics)
-
-    def forward_indexed(self, index: int, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass through the critic network at the index provided.
-
-        Args:
-            index (int): The index of the critic to use.
-            state (torch.Tensor): The current state of the environment.
-            action (torch.Tensor): The action taken in the current state.
-
-        Returns:
-            The Q-value for the given state-action pair from the first critic.
-        """
-        if index > self.num_critics - 1:
-            raise ValueError(f"Index {index} exceeds the number of critics {self.num_critics}.")
-        
-        if self.encoder is not None:
-            state = self.encoder(state)
-
-        # Stack the state and action tensors
-        q_input = torch.cat([state, action], dim=1)
-        return self.critics[index](q_input)
 
 class ActorCriticPolicy(BasePolicy):
     """
@@ -692,23 +713,6 @@ class ActorCriticPolicy(BasePolicy):
         # If the encoder is not shared, but one exists then make a copy for the critic
         if not share_encoder and self.encoder is not None:
             self.critic_encoder = copy.deepcopy(self.encoder)  
-
-    def forward(self,
-                   state: torch.Tensor,
-                   deterministic: bool = False
-                   ) -> torch.Tensor:
-        """
-        Chooses an action based on the current state and computes the value of the state.
-
-        Args:
-            state (torch.Tensor): Current state tensor.
-            deterministic (bool): If True, choose the action deterministically. Default is False.
-
-        Returns:
-            torch.Tensor: The chosen action and the value of the state.
-        """
-        action, _, _ = self.predict(state, deterministic=deterministic)
-        return action
     
     def predict(self,
                    state: torch.Tensor,
@@ -729,7 +733,7 @@ class ActorCriticPolicy(BasePolicy):
         else:
             latent_state = state
 
-        action, log_probs = self.actor.predict(latent_state, deterministic=deterministic)
+        action, _, log_probs = self.actor.predict(latent_state, deterministic=deterministic)
 
         if self.critic_encoder is not None:
             critic_latent_state = self.critic_encoder(state)
@@ -766,4 +770,3 @@ class ActorCriticPolicy(BasePolicy):
         value = self.critic(critic_latent_state)
 
         return value, log_probs, entropy
-

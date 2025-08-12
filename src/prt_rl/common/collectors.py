@@ -1,18 +1,27 @@
+"""
+Collectors gather experience from environments using the provided policy/agent.
+"""
+import contextlib
 import torch
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple, Any
 from prt_rl.env.interface import EnvironmentInterface, EnvParams, MultiAgentEnvParams
 from prt_rl.common.loggers import Logger
-from prt_rl.common.policies import ActorCriticPolicy, DistributionPolicy, BasePolicy
+from prt_rl.common.policies import BasePolicy
 
 def random_action(env_params: EnvParams, state: torch.Tensor) -> torch.Tensor:
     """
     Randomly samples an action from action space.
+
     Args:
         env_params (EnvParams): The environment parameters containing action space information.
         state (torch.Tensor): The current state of the environment.
+
     Returns:
         torch.Tensor: A tensor containing the sampled action.
     """
+    device = state.device
+    dtype = state.dtype
+
     if isinstance(env_params, EnvParams):
         ashape = (state.shape[0], env_params.action_len)
         params = env_params
@@ -21,21 +30,35 @@ def random_action(env_params: EnvParams, state: torch.Tensor) -> torch.Tensor:
         params = env_params.agent
     else:
         raise ValueError("env_params must be a EnvParams or MultiAgentEnvParams")
+    
     if not params.action_continuous:
         # Add 1 to the high value because randint samples between low and 1 less than the high: [low,high)
         action = torch.randint(low=params.action_min, high=params.action_max + 1,
-                               size=ashape)
+                               size=ashape, dtype=torch.long, device=device)
     else:
-        action = torch.rand(size=ashape)
+        action = torch.rand(size=ashape, dtype=dtype, device=device)
         # Scale the random [0,1] actions to the action space [min,max]
         max_actions = torch.tensor(params.action_max).unsqueeze(0)
         min_actions = torch.tensor(params.action_min).unsqueeze(0)
         action = action * (max_actions - min_actions) + min_actions
+
     return action 
 
-def get_action_from_policy(policy, state: torch.Tensor, env_params: EnvParams = None) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
+def get_action_from_policy(
+        policy, 
+        state: torch.Tensor, 
+        env_params: EnvParams = None,
+        deterministic: bool = False,
+        inference_mode: bool = False,
+        ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Get an action from the policy given the state.
+
+    Unified policy interface:
+      - If `policy` implements .predict(obs, deterministic=False) -> (action, value, log_prob),
+        we call that.
+      - If `policy` is None: fall back to random_action(...).
+      - Else: treat it as a callable that returns only the action.
     
     Args:
         policy: The policy to get the action from.
@@ -44,26 +67,132 @@ def get_action_from_policy(policy, state: torch.Tensor, env_params: EnvParams = 
     
     Returns:
         Tuple: 
-            - action (torch.Tensor): The action to take.
-            - value_estimate (Optional[torch.Tensor]): The value estimate from the policy, if applicable.
-            - log_prob (Optional[torch.Tensor]): The log probability of the action, if applicable.
+            - action (torch.Tensor): The action to take. Shape (B, action_dim)
+            - value_estimate (torch.Tensor): The value estimate from the policy. Shape (B, 1) if applicable otherwise None.
+            - log_prob (torch.Tensor): The log probability of the action. Shape (B, 1) if applicable otherwise None.
     """
-    value_estimate = None
-    log_prob = None 
-
-    if policy is None:
-        if env_params is not None:
-            action = random_action(env_params, state)
+    ctx = torch.no_grad() if inference_mode else contextlib.nullcontext()
+    with ctx:
+        if policy is None:
+            return random_action(env_params, state), None, None
         else:
-            raise ValueError("env_params must be provided if policy is None")
-    elif isinstance(policy, ActorCriticPolicy):
-        action, value_estimate, log_prob = policy.predict(state)
-    elif isinstance(policy, DistributionPolicy):
-        action, log_prob = policy.predict(state)
-    else:
-        action = policy(state)
+            return policy.predict(state, deterministic=deterministic)
+
+class MetricsTracker:
+    """
+    Tracks collection metrics and logs ONLY when episodes finish. Counts are in env-steps: one vectorized step across N envs adds N.
+
+    Args:
+        num_envs (int): The number of environments being tracked.
+        logger (Logger | None): Optional logger for logging metrics. If None, no logging is performed.
+    """
+    def __init__(self, 
+                 num_envs: int, 
+                 logger: "Logger | None" = None
+                 ) -> None:
+        self.num_envs = int(num_envs)
+        self.logger = logger
+
+        # Global counters
+        self.collected_steps: int = 0           # env-steps
+        self.cumulative_reward: float = 0.0
+        self.episode_count: int = 0
+        self.last_episode_reward: float = 0.0
+        self.last_episode_length: int = 0
+
+        # Per-env episode accumulators
+        self._cur_reward = torch.zeros(self.num_envs, dtype=torch.float32)
+        self._cur_length = torch.zeros(self.num_envs, dtype=torch.int64)
+
+    def reset(self) -> None:
+        """
+        Reset all counters and accumulators.
+        """
+        self.collected_steps = 0
+        self.cumulative_reward = 0.0
+        self.episode_count = 0
+        self.last_episode_reward = 0.0
+        self.last_episode_length = 0
+        self._cur_reward.zero_()
+        self._cur_length.zero_()
+
+    def update(self, reward: torch.Tensor, done: torch.Tensor) -> None:
+        """
+        Update metrics for a single environment step (vectorized over N).
+
+        Args:
+            reward: Tensor shaped (N, 1) or (…,) whose trailing dims will be summed per env.
+            done:   Tensor shaped (N,) or (N,1) or scalar/bool-like per env; True indicates episode end.
+        """
+        r_env = self._sum_per_env(reward)   # (N,)
+        d_env = self._to_done_mask(done)    # (N,)
+
+        # Count env-steps (one vector step increments by N)
+        n = int(r_env.shape[0])
+        self.collected_steps += n
+
+        # Accumulate current episodes per env
+        self._cur_reward += r_env.to(self._cur_reward.dtype)
+        self._cur_length += 1
+
+        # Global cumulative reward
+        self.cumulative_reward += float(r_env.sum().item())
+
+        # Log & reset for any envs that finished this step
+        if d_env.any():
+            finished = torch.nonzero(d_env, as_tuple=False).view(-1).tolist()
+            for i in finished:
+                ep_r = float(self._cur_reward[i].item())
+                ep_L = int(self._cur_length[i].item())
+
+                self.episode_count += 1
+                self.last_episode_reward = ep_r
+                self.last_episode_length = ep_L
+
+                if self.logger is not None:
+                    step = self.collected_steps
+                    self.logger.log_scalar("episode_reward", ep_r, iteration=step)
+                    self.logger.log_scalar("episode_length", ep_L, iteration=step)
+                    self.logger.log_scalar("cumulative_reward", float(self.cumulative_reward), iteration=step)
+                    self.logger.log_scalar("episode_number", float(self.episode_count), iteration=step)
+
+                # Clear accumulators for that env
+                self._cur_reward[i] = 0.0
+                self._cur_length[i] = 0
     
-    return action, value_estimate, log_prob
+    @staticmethod
+    def _to_done_mask(done: torch.Tensor) -> torch.Tensor:
+        """
+        Convert done flags to a boolean mask.
+
+        Args:
+            done (torch.Tensor): The done flags, can be a scalar, 1D tensor, or 2D tensor with last dim of size 1.
+        Returns:
+            torch.Tensor: A boolean mask indicating which environments are done.
+        """
+        d = torch.as_tensor(done)
+        if d.ndim == 0:
+            d = d.view(1)
+        if d.ndim > 1 and d.shape[-1] == 1:
+            d = d.squeeze(-1)
+        return d.bool()
+
+    @staticmethod
+    def _sum_per_env(x: torch.Tensor) -> torch.Tensor:
+        """
+        Sum over trailing dimensions so each environment gets a scalar; returns shape (N,).
+
+        Args:
+            x (torch.Tensor): The input tensor to sum over.
+        Returns:
+            torch.Tensor: A tensor with shape (N,) where N is the number of environments.
+        """
+        t = torch.as_tensor(x)
+        if t.ndim == 0:
+            t = t.view(1)
+        if t.ndim > 1:
+            t = t.sum(dim=tuple(range(1, t.ndim)))
+        return t    
 
 class SequentialCollector:
     """
@@ -82,65 +211,31 @@ class SequentialCollector:
         self.env = env
         self.env_params = env.get_parameters()
         self.logger = logger or Logger.create('blank')
+        self.metric = MetricsTracker(num_envs=1, logger=self.logger)
         self.previous_experience = None
-        self.collected_steps = 0
-        self.previous_episode_reward = 0
-        self.previous_episode_length = 0
-        self.current_episode_reward = 0
-        self.current_episode_length = 0
-        self.cumulative_reward = 0
-        self.num_episodes = 0
-
-    def _random_action(self, state: torch.Tensor) -> torch.Tensor:
-        """
-        Randomly samples an action from action space.
-
-        Args:
-            state (torch.Tensor): The current state of the environment.
-        Returns:
-            torch.Tensor: A tensor containing the sampled action.
-        """
-        if isinstance(self.env_params, EnvParams):
-            ashape = (state.shape[0], self.env_params.action_len)
-            params = self.env_params
-        elif isinstance(self.env_params, MultiAgentEnvParams):
-            ashape = (state.shape[0], self.env_params.num_agents, self.env_params.agent.action_len)
-            params = self.env_params.agent
-        else:
-            raise ValueError("env_params must be a EnvParams or MultiAgentEnvParams")
-
-        if not params.action_continuous:
-            # Add 1 to the high value because randint samples between low and 1 less than the high: [low,high)
-            action = torch.randint(low=params.action_min, high=params.action_max + 1,
-                                   size=ashape)
-        else:
-            action = torch.rand(size=ashape)
-
-            # Scale the random [0,1] actions to the action space [min,max]
-            max_actions = torch.tensor(params.action_max).unsqueeze(0)
-            min_actions = torch.tensor(params.action_min).unsqueeze(0)
-            action = action * (max_actions - min_actions) + min_actions
-
-        return action 
 
     def collect_experience(self,
                            policy: 'BaseAgent | BasePolicy | None' = None,
                            num_steps: int = 1
                            ) -> Dict[str, torch.Tensor]:
         """
-        Collects the given number of experiences from the environment using the provided policy. Returns experience with shape (T, ...).
+        Collects the given number of experiences from the environment using the provided policy. 
+        
+        Since the experiences are collected sequentially, the output shape is (B, ...) where the batch size is the number of steps collected.
+
         Args:
             policy (BaseAgent | BasePolicy | None): An agent or policy that takes a state and returns an action.
             num_steps (int): The number of steps to collect experience for. Defaults to 1.
+
         Returns:
             Dict[str, torch.Tensor]: A dictionary containing the collected experience with keys:
-                - 'state': The states collected.
-                - 'action': The actions taken.
-                - 'next_state': The next states after taking the actions.
-                - 'reward': The rewards received.
-                - 'done': The done flags indicating if the episode has ended.
-                - 'value_est' (optional): The value estimates from the policy, if applicable.
-                - 'log_prob' (optional): The log probabilities of the actions, if applicable.
+                - 'state': The states collected. Shape (T, state_dim)
+                - 'action': The actions taken. Shape (T, action_dim)
+                - 'next_state': The next states after taking the actions. Shape (T, state_dim)
+                - 'reward': The rewards received. Shape (T, 1)
+                - 'done': The done flags indicating if the episode has ended. Shape (T, 1)
+                - 'value_est' (optional): The value estimates from the policy, if applicable. Shape (T, 1)
+                - 'log_prob' (optional): The log probabilities of the actions, if applicable. Shape (T, 1)
         """
         states = []
         actions = []
@@ -159,23 +254,14 @@ class SequentialCollector:
 
             next_state, reward, done, _ = self.env.step(action)
 
+            # Update the Metrics tracker and logging
+            self.metric.update(reward, done)
+
             states.append(state.squeeze(0))
             actions.append(action.squeeze(0))
             next_states.append(next_state.squeeze(0))
             rewards.append(reward.squeeze(0))
             dones.append(done.squeeze(0))
-
-            self.collected_steps += 1
-            self.current_episode_reward += reward.sum().item()
-            self.current_episode_length += 1
-            self.cumulative_reward += reward.sum().item()
-
-            if done:
-                self.previous_episode_reward = self.current_episode_reward
-                self.previous_episode_length = self.current_episode_length
-                self.current_episode_reward = 0
-                self.current_episode_length = 0
-                self.num_episodes += 1
 
             self.previous_experience = {
                 "state": state,
@@ -184,11 +270,6 @@ class SequentialCollector:
                 "reward": reward,
                 "done": done,
             }
-
-        self.logger.log_scalar(name='episode_reward', value=self.previous_episode_reward, iteration=self.collected_steps)
-        self.logger.log_scalar(name='episode_length', value=self.previous_episode_length, iteration=self.collected_steps)
-        self.logger.log_scalar(name='cumulative_reward', value=self.cumulative_reward, iteration=self.collected_steps)
-        self.logger.log_scalar(name='episode_number', value=self.num_episodes, iteration=self.collected_steps)
 
         return {
             "state": torch.stack(states, dim=0),
@@ -249,7 +330,16 @@ class SequentialCollector:
         """
         Collects a single trajectory from the environment using the provided policy.
 
-        Returns a trajectory with the shape (T, ...), where T is the number of steps in the trajectory.
+        Args:
+            policy (BaseAgent | BasePolicy | None): An agent or policy that takes a state and returns an action.
+
+        Returns:
+            Dict[str, torch.Tensor]: A dictionary containing the collected trajectory with keys:
+                - 'state': The states collected. Shape (T, state_dim)
+                - 'action': The actions taken. Shape (T, action_dim)
+                - 'next_state': The next states after taking the actions. Shape (T, state_dim)
+                - 'reward': The rewards received. Shape (T, 1)
+                - 'done': The done flags indicating if the episode has ended. Shape (T, 1)
         """
         states = []
         actions = []
@@ -267,6 +357,9 @@ class SequentialCollector:
 
             next_state, reward, done, _ = self.env.step(action)
 
+            # Update the Metrics tracker and logging
+            self.metric.update(reward, done)
+
             states.append(state)
             actions.append(action)
             next_states.append(next_state)
@@ -280,23 +373,7 @@ class SequentialCollector:
             # Update the state
             state = next_state
 
-            self.collected_steps += 1
-            self.current_episode_reward += reward.sum().item()
-            self.current_episode_length += 1
-            self.cumulative_reward += reward.sum().item()
-
             if done:
-                self.previous_episode_reward = self.current_episode_reward
-                self.previous_episode_length = self.current_episode_length
-                self.current_episode_reward = 0
-                self.current_episode_length = 0
-                self.num_episodes += 1
-
-                self.logger.log_scalar(name='episode_reward', value=self.previous_episode_reward, iteration=self.collected_steps)
-                self.logger.log_scalar(name='episode_length', value=self.previous_episode_length, iteration=self.collected_steps)
-                self.logger.log_scalar(name='cumulative_reward', value=self.cumulative_reward, iteration=self.collected_steps)
-                self.logger.log_scalar(name='episode_number', value=self.num_episodes, iteration=self.collected_steps)
-
                 break
 
         trajectory = {
@@ -310,6 +387,7 @@ class SequentialCollector:
             trajectory['value_est'] = torch.cat(value_estimates, dim=0)
         if log_probs:
             trajectory['log_prob'] = torch.cat(log_probs, dim=0)
+
         return trajectory
 
 
@@ -332,14 +410,8 @@ class ParallelCollector:
         self.env_params = env.get_parameters()
         self.flatten = flatten
         self.logger = logger or Logger.create('blank')
+        self.metric = MetricsTracker(num_envs=self.env.get_num_envs(), logger=self.logger) 
         self.previous_experience = None
-        self.collected_steps = 0
-        self.previous_episode_reward = 0
-        self.previous_episode_length = 0
-        self.current_episode_reward = 0
-        self.current_episode_length = 0
-        self.cumulative_reward = 0
-        self.num_episodes = 0
 
     def collect_experience(self,
                            policy: 'BaseAgent | BasePolicy | None' = None,
@@ -393,6 +465,9 @@ class ParallelCollector:
 
             # Step the environment with the action
             next_state, reward, done, _ = self.env.step(action)
+
+            # Update the Metrics tracker and logging
+            self.metric.update(reward, done)
 
             # Save the previous experience for the next step
             self.previous_experience = {

@@ -15,10 +15,7 @@ it is built on, it should be done in this package.
 The fundamental problem we are trying to solve is:
 ```{math}
 \begin{align}
-    x(y) &= 5\sum{y} \\
-    y &\geq 0
+    \theta^* &= arg \max_\theta \mathbb{E}_{\tau \sim p_\theta(\tau)}\left[ \sum_t r(s_t,a_t)\right] \\
+    p_\theta(s_1, a_1, ..., s_T, a_T) &= p(s_1) \prod_{t=1}^T \pi_\theta(a_t | s_t) p(s_{t+1}| s_t, a_t)
 \end{align}
 ```
-
-
-# Notation

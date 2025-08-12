@@ -24,6 +24,20 @@ class PPO(BaseAgent):
     """
     Proximal Policy Optimization (PPO)
 
+    Args:
+        env_params (EnvParams): Environment parameters.
+        policy (ActorCriticPolicy | None): Policy to use. If None, a default ActorCriticPolicy will be created.
+        gamma (float): Discount factor for future rewards.
+        epsilon (float): Clipping parameter for PPO.
+        learning_rate (float): Learning rate for the optimizer.
+        gae_lambda (float): Lambda parameter for Generalized Advantage Estimation.
+        entropy_coef (float): Coefficient for the entropy term in the loss function.
+        value_coef (float): Coefficient for the value loss term in the loss function.
+        num_optim_steps (int): Number of optimization steps per batch.
+        mini_batch_size (int): Size of mini-batches for optimization.
+        steps_per_batch (int): Number of steps to collect per batch.
+        normalize_advantages (bool): Whether to normalize advantages.
+        device (str): Device to run the computations on ('cpu' or 'cuda').
     """
     def __init__(self,
                  env_params: EnvParams,

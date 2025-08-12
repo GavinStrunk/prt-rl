@@ -65,7 +65,7 @@ class DummyActor(nn.Module):
     def predict(self, state, deterministic=False):
         self.called_predict = True
         B = state.size(0)
-        return torch.ones(B, 2), torch.zeros(B, 1)
+        return torch.ones(B, 2), None, torch.zeros(B, 1)
 
     def evaluate_actions(self, state, action):
         self.called_eval = True
@@ -309,7 +309,7 @@ def test_distribution_policy_predict_action_and_log_probs(discrete_env_params):
     policy = DistributionPolicy(env_params=discrete_env_params)
     state = torch.tensor([[0.0, 0.0, 0.0]])
     
-    action, log_probs = policy.predict(state)
+    action, _, log_probs = policy.predict(state)
     
     assert action.shape == (1, 1)  # Action shape should match the action_len of 1
     assert log_probs.shape == (1, 1)  # Log probabilities for 3 discrete actions
@@ -319,7 +319,7 @@ def test_distribution_policy_predict_action_and_log_probs_continuous(continuous_
     policy = DistributionPolicy(env_params=continuous_env_params)
     state = torch.tensor([[0.0, 0.0, 0.0]])
     
-    action, log_probs = policy.predict(state)
+    action, _, log_probs = policy.predict(state)
     
     assert action.shape == (1, 2)  # Action shape should match the action_len of 2
     assert log_probs.shape == (1, 1)  # Log probabilities for continuous actions
@@ -381,7 +381,7 @@ def test_forward_continuous_policy_without_encoder(dummy_env_params, dummy_state
         policy_head=DummyPolicyHead
     )
     action = policy(dummy_state)
-    assert action.shape == (2, dummy_env_params.action_len)
+    assert action.shape == (4, dummy_env_params.action_len)
     assert torch.all(action <= dummy_env_params.action_max)
     assert torch.all(action >= dummy_env_params.action_min)
 
@@ -393,7 +393,7 @@ def test_forward_continuous_policy_with_encoder(dummy_env_params, dummy_state):
         policy_head=DummyPolicyHead
     )
     action = policy(dummy_state)
-    assert action.shape == (2, dummy_env_params.action_len)
+    assert action.shape == (4, dummy_env_params.action_len)
     assert torch.all(action <= dummy_env_params.action_max)
     assert torch.all(action >= dummy_env_params.action_min)
 
@@ -413,113 +413,113 @@ def test_policy_head_respects_encoder_output_dim():
 # =========================
 # ValueCritic Tests
 # =========================   
-def test_forward_without_encoder(dummy_vc_env_params, dummy_vc_state):
+def test_forward_without_encoder(dummy_env_params, dummy_state):
     critic = ValueCritic(
-        env_params=dummy_vc_env_params,
+        env_params=dummy_env_params,
         encoder=None,
-        critic_head=DummyVCCriticHead
+        critic_head=DummyCriticHead
     )
-    out = critic(dummy_vc_state)
+    out = critic(dummy_state)
     assert out.shape == (4, 1)
 
-def test_forward_with_encoder(dummy_vc_env_params, dummy_vc_state):
+def test_forward_with_encoder(dummy_env_params, dummy_state):
     critic = ValueCritic(
-        env_params=dummy_vc_env_params,
-        encoder=DummyVCEncoder((8,), features_dim=10),
-        critic_head=DummyVCCriticHead,
+        env_params=dummy_env_params,
+        encoder=DummyEncoder((8,), features_dim=10),
+        critic_head=DummyCriticHead,
         critic_head_kwargs={}  # override since encoder changes dim
     )
-    out = critic(dummy_vc_state)
+    out = critic(dummy_state)
     assert out.shape == (4, 1)
 
 def test_critic_head_output_matches_dim():
-    env_params = DummyVCEnvParams(observation_shape=(6,))
+    env_params = DummyEnvParams(observation_shape=(6,))
     critic = ValueCritic(
         env_params=env_params,
         encoder=None,
-        critic_head=DummyVCCriticHead
+        critic_head=DummyCriticHead
     )
     assert critic.critic_head.linear.in_features == 6
     assert critic.critic_head.linear.out_features == 1
 
-def test_critic_respects_encoder_output_dim(dummy_vc_state):
+def test_critic_respects_encoder_output_dim(dummy_state):
     # Encoder with output dim 12 should feed into critic_head expecting 12
-    encoder = DummyVCEncoder((8,), features_dim=12)
-    env_params = DummyVCEnvParams(observation_shape=(8,))
+    encoder = DummyEncoder((8,), features_dim=12)
+    env_params = DummyEnvParams(observation_shape=(8,))
     critic = ValueCritic(
         env_params=env_params,
         encoder=encoder,
-        critic_head=DummyVCCriticHead,
+        critic_head=DummyCriticHead,
         critic_head_kwargs={}
     )
-    out = critic(dummy_vc_state)
+    out = critic(dummy_state)
     assert out.shape == (4, 1)
 
 # =========================
 # StateActionCritic Tests
 # =========================
-def test_single_critic_forward_no_encoder(dummy_env_params, dummy_vc_state, dummy_action):
+def test_single_critic_forward_no_encoder(dummy_env_params, dummy_state, dummy_action):
     critic = StateActionCritic(
         env_params=dummy_env_params,
         num_critics=1,
         encoder=None,
-        critic_head=DummyVCCriticHead
+        critic_head=DummyCriticHead
     )
-    q = critic(dummy_vc_state, dummy_action)
+    q = critic(dummy_state, dummy_action)
     assert isinstance(q, torch.Tensor)
     assert q.shape == (4, 1)
 
-def test_single_critic_forward_with_encoder(dummy_env_params, dummy_vc_state, dummy_action):
+def test_single_critic_forward_with_encoder(dummy_env_params, dummy_state, dummy_action):
     encoder = DummyEncoder(dummy_env_params.observation_shape, features_dim=10)
     critic = StateActionCritic(
         env_params=dummy_env_params,
         num_critics=1,
         encoder=encoder,
-        critic_head=DummyVCCriticHead,
+        critic_head=DummyCriticHead,
         critic_head_kwargs={}
     )
-    q = critic(dummy_vc_state, dummy_action)
+    q = critic(dummy_state, dummy_action)
     assert isinstance(q, torch.Tensor)
     assert q.shape == (4, 1)
 
-def test_multi_critic_forward_returns_tuple(dummy_env_params, dummy_vc_state, dummy_action):
+def test_multi_critic_forward_returns_tuple(dummy_env_params, dummy_state, dummy_action):
     critic = StateActionCritic(
         env_params=dummy_env_params,
         num_critics=3,
         encoder=None,
-        critic_head=DummyVCCriticHead
+        critic_head=DummyCriticHead
     )
-    q_values = critic(dummy_vc_state, dummy_action)
+    q_values = critic(dummy_state, dummy_action)
     assert isinstance(q_values, tuple)
     assert len(q_values) == 3
     for q in q_values:
         assert isinstance(q, torch.Tensor)
         assert q.shape == (4, 1)
 
-def test_forward_indexed_returns_single_output(dummy_env_params, dummy_vc_state, dummy_action):
+def test_forward_indexed_returns_single_output(dummy_env_params, dummy_state, dummy_action):
     critic = StateActionCritic(
         env_params=dummy_env_params,
         num_critics=2,
         encoder=None,
-        critic_head=DummyVCCriticHead
+        critic_head=DummyCriticHead
     )
-    q0 = critic.forward_indexed(0, dummy_vc_state, dummy_action)
-    q1 = critic.forward_indexed(1, dummy_vc_state, dummy_action)
+    q0 = critic.forward_indexed(0, dummy_state, dummy_action)
+    q1 = critic.forward_indexed(1, dummy_state, dummy_action)
 
     assert isinstance(q0, torch.Tensor)
     assert q0.shape == (4, 1)
     assert isinstance(q1, torch.Tensor)
     assert q1.shape == (4, 1)
 
-def test_forward_indexed_out_of_bounds(dummy_env_params, dummy_vc_state, dummy_action):
+def test_forward_indexed_out_of_bounds(dummy_env_params, dummy_state, dummy_action):
     critic = StateActionCritic(
         env_params=dummy_env_params,
         num_critics=2,
         encoder=None,
-        critic_head=DummyVCCriticHead
+        critic_head=DummyCriticHead
     )
     with pytest.raises(ValueError):
-        _ = critic.forward_indexed(2, dummy_vc_state, dummy_action)
+        _ = critic.forward_indexed(2, dummy_state, dummy_action)
 
 def test_encoder_is_shared_across_critics(dummy_env_params):
     encoder = DummyEncoder(dummy_env_params.observation_shape, features_dim=10)
@@ -527,11 +527,11 @@ def test_encoder_is_shared_across_critics(dummy_env_params):
         env_params=dummy_env_params,
         num_critics=2,
         encoder=encoder,
-        critic_head=DummyVCCriticHead,
+        critic_head=DummyCriticHead,
         critic_head_kwargs={}
     )
     assert critic.encoder is encoder
-    assert all(isinstance(c, DummyVCCriticHead) for c in critic.critics)
+    assert all(isinstance(c, DummyCriticHead) for c in critic.critics)
 
 # =========================
 # ActorCriticPolicy Tests

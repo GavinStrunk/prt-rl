@@ -44,7 +44,6 @@ class DAgger(BaseAgent):
                  ) -> None:
         super(DAgger, self).__init__()
         self.env_params = env_params
-        self.policy = policy if policy is not None else DistributionPolicy(env_params=env_params)
         self.expert_policy = expert_policy
         self.experience_buffer = experience_buffer
         self.buffer_size = buffer_size
@@ -53,6 +52,8 @@ class DAgger(BaseAgent):
         self.mini_batch_size = mini_batch_size
         self.max_grad_norm = max_grad_norm
         self.device = torch.device(device)
+
+        self.policy = policy if policy is not None else DistributionPolicy(env_params=env_params)
         self.policy.to(self.device)
 
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.learning_rate)
