@@ -1,3 +1,35 @@
+"""
+Policy Gradient algorithm
+=========================
+
+Example Usage:
+--------------
+This example demonstrates how to initialize a Policy Gradient agent with a custom policy.
+
+.. code-block:: python
+
+    from prt_rl import PolicyGradient
+    from prt_rl.common.policies import DistributionPolicy
+    from prt_rl.common.networks import MLP
+    from prt_rl.common.distributions import Normal
+
+    env = ...  # Initialize your environment here
+    agent = PolicyGradient(
+        env_params=env.get_env_params(),
+        policy=DistributionPolicy(
+            env_params=env.get_env_params(),
+            encoder_network=None,
+            encoder_kwargs={},
+            policy_head=MLP,
+            policy_kwargs={'network_arch': [64, 64]},
+            distribution=Normal
+            ),
+        learning_rate=1e-3,
+        ...
+        )
+
+    agent.train(env, total_steps=10000)
+"""
 import numpy as np
 import torch
 from typing import Optional, List
@@ -102,8 +134,8 @@ class PolicyGradient(BaseAgent):
               env: EnvironmentInterface,
               total_steps: int,
               schedulers: List[ParameterScheduler] = [],
-              logger: Optional[Logger] = None,
-              evaluator: Optional[Evaluator] = None,
+              logger: Logger | None = None,
+              evaluator: Evaluator | None = None,
               show_progress: bool = True
               ) -> None:
         """
@@ -331,6 +363,23 @@ class PolicyGradientTrajectory(PolicyGradient):
     
     This class extends the PolicyGradient class to handle trajectory-based training.
     It collects trajectories and computes advantages based on the collected data.
+
+    Args:
+        env_params (EnvParams): Environment parameters.
+        policy (Optional[DistributionPolicy]): The policy to be used by the agent. If None, a default policy will be created based on the environment parameters.
+        batch_size (int): Size of the batch for training. Default is 100.
+        learning_rate (float): Learning rate for the optimizer. Default is 1e-3.
+        gamma (float): Discount factor for future rewards. Default is 0.99.
+        gae_lambda (float): Lambda parameter for Generalized Advantage Estimation. Default is 0.95.
+        optim_steps (int): Number of optimization steps per training iteration. Default is 1.
+        reward_to_go (bool): Whether to use rewards-to-go instead of total discounted return. Default is False.
+        use_baseline (bool): Whether to use a baseline for advantage estimation. Default is False.
+        use_gae (bool): Whether to use Generalized Advantage Estimation. Default is False.
+        baseline_learning_rate (float): Learning rate for the baseline network if used. Default is 5e-3.
+        baseline_optim_steps (int): Number of optimization steps for the baseline network. Default is 5.
+        normalize_advantages (bool): Whether to normalize advantages before training. Default is True.
+        network_arch (List[int]): Architecture of the neural network for the policy. Default is [64, 64].
+        device (str): Device to run the agent on (e.g., 'cpu' or 'cuda'). Default is 'cpu'.    
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -339,8 +388,8 @@ class PolicyGradientTrajectory(PolicyGradient):
               env: EnvironmentInterface,
               total_steps: int,
               schedulers: List[ParameterScheduler] = [],
-              logger: Optional[Logger] = None,
-              evaluator: Evaluator = Evaluator(),
+              logger: Logger | None = None,
+              evaluator: Evaluator | None = None,
               show_progress: bool = True
               ) -> None:
         """
