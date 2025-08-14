@@ -462,6 +462,15 @@ class SequentialCollector:
         # Update the Metrics tracker and logging
         self.metric_tracker.update(reward, done)
 
+        # Save the step for the next step
+        self.previous_experience = {
+            "state": state,
+            "action": action,
+            "next_state": next_state,
+            "reward": reward,
+            "done": done,
+        }
+
         # Convert tensors from shape (1, ...) to (...)
         state = state.squeeze(0)
         action = action.squeeze(0)
@@ -473,36 +482,31 @@ class SequentialCollector:
         if log_prob is not None:
             log_prob = log_prob.squeeze(0)
 
-        # Save the step for the next step
-        self.previous_experience = {
-            "state": state,
-            "action": action,
-            "next_state": next_state,
-            "reward": reward,
-            "done": done,
-        }
-
         return state, action, next_state, reward, done, value_est, log_prob
 
 class ParallelCollector:
     """
     The Parallel Collector collects experience from multiple environments in parallel.
-    It resets the environments when the previous experience is done.
+
+    The parallel collector can collect experiences which returns a specific number of environment steps or specific number of trajectories. If you are collecting experience and the environment is done, but the number of steps is not reached, the environment is reset and continues collecting.
+
+    .. note::
+        Do not collect trajectories with an environment that never ends (i.e. done is never True) as the collector will never return. In this case collect experiences instead.
 
     Args:
         env (EnvironmentInterface): The environment to collect experience from.
+        logger (Logger | None): Optional logger for logging information. Defaults to a new Logger instance.
         flatten (bool): Whether to flatten the collected experience. If flattened the output shape will be (N*T, ...), but if not flattened it will be (N, T, ...). Defaults to True.
-        logger (Optional[Logger]): Optional logger for logging information. Defaults to a new Logger instance.
     """
     def __init__(self,
                  env: EnvironmentInterface,
+                 logger: Logger | None = None,
                  flatten: bool = True,
-                 logger: Optional[Logger] = None,
                  ) -> None:
         self.env = env
         self.env_params = env.get_parameters()
         self.flatten = flatten
-        self.logger = logger or Logger.create('blank')
+        self.logger = logger if logger is not None else Logger.create('blank')
         self.metric = MetricsTracker(num_envs=self.env.get_num_envs(), logger=self.logger) 
         self.previous_experience = None
 
@@ -513,9 +517,12 @@ class ParallelCollector:
         """
         Collects the given number of experiences from the environment using the provided policy.
 
+        The experiences are collected across all environments, so the actual number of steps is ceil(num_steps / N) where N is the number of environments. The output shape is (T, N, ...) if not flattened, or (N*T, ...) if flattened. 
+        
         Args:
             policy (BaseAgent | BasePolicy | None): An agent or policy that takes a state and returns an action.
             num_steps (int): The number of steps to collect experience for. Defaults to 1.
+
         Returns:
             Dict[str, torch.Tensor]: A dictionary containing the collected experience with keys:
                 - 'state': The states collected. Shape (T, N, ...), or (N*T, ...) if flattened.
@@ -523,8 +530,8 @@ class ParallelCollector:
                 - 'next_state': The next states after taking the actions. Shape (T, N, ...), or (N*T, ...) if flattened.
                 - 'reward': The rewards received. Shape (T, N, 1), or (N*T, 1) if flattened.
                 - 'done': The done flags indicating if the episode has ended. Shape (T, N, 1), or (N*T, 1) if flattened.
-                - 'value_est' (optional): The value estimates from the policy, if applicable.
-                - 'log_prob' (optional): The log probabilities of the actions, if applicable.
+                - 'value_est' (optional): The value estimates from the policy, if applicable. Shape (T, N, 1), or (N*T, 1) if flattened.
+                - 'log_prob' (optional): The log probabilities of the actions, if applicable. Shape (T, N, 1), or (N*T, 1) if flattened.
                 - 'last_value_est' (optional): The last value estimate for bootstrapping, if applicable. (N, 1)
         """
         # Get the number of steps to take per environment to get at least `num_steps`
@@ -539,37 +546,11 @@ class ParallelCollector:
         dones = []
         value_estimates = []
         log_probs = []
+        last_value_estimate = None
 
         for _ in range(T):
-            # Reset the environment if no previous state
-            if self.previous_experience is None:
-                state, _ = self.env.reset()
-            else:
-                # Only reset the environments that are done
-                state = self.previous_experience["next_state"]
-                for i in range(self.previous_experience["done"].shape[0]):
-                    if self.previous_experience["done"][i]:
-                        # Reset the environment for this index
-                        reset_state, _ = self.env.reset_index(i)
-                        # Update the previous experience for this index
-                        state[i] = reset_state
-
-            action, value_estimate, log_prob = get_action_from_policy(policy, state, self.env_params)
-
-            # Step the environment with the action
-            next_state, reward, done, _ = self.env.step(action)
-
-            # Update the Metrics tracker and logging
-            self.metric.update(reward, done)
-
-            # Save the previous experience for the next step
-            self.previous_experience = {
-                "state": state,
-                "action": action,
-                "next_state": next_state,
-                "reward": reward,
-                "done": done,
-            }
+            # Collect a single step
+            state, action, next_state, reward, done, value_estimate, log_prob = self._collect_step(policy)
 
             # Append the tensors to the lists with shape (N, ...)
             states.append(state)
@@ -577,8 +558,6 @@ class ParallelCollector:
             next_states.append(next_state)
             rewards.append(reward)
             dones.append(done) 
-
-            # If the policy provides value estimates or log probabilities, append them to the lists
             if value_estimate is not None:
                 value_estimates.append(value_estimate)
             if log_prob is not None:
@@ -603,173 +582,263 @@ class ParallelCollector:
             value_estimates = torch.stack(value_estimates, dim=0) if value_estimates else None
             log_probs = torch.stack(log_probs, dim=0) if log_probs else None
 
-        experience = {
+        # If the last step was not done in any environment and value estimates are available, then compute the last value estimate for bootstrapping
+        if not self.previous_experience['done'].any() and value_estimates is not None:
+            _, last_value_estimate, _ = get_action_from_policy(policy, self.previous_experience['next_state'], self.env_params)
+        
+        return {
             "state": states,
             "action": actions,
             "next_state": next_states,
             "reward": rewards,
             "done": dones,
+            "value_est": value_estimates if value_estimates is not None else None,
+            "log_prob": log_probs if log_probs is not None else None,
+            "last_value_est": last_value_estimate if value_estimates is not None else None
         }
-        if value_estimates is not None:
-            experience['value_est'] = value_estimates
-
-            # Compute the last value estimate for boostrapping
-            _, last_value_estimate, _ = get_action_from_policy(policy, self.previous_experience['next_state'], self.env_params)
-            experience['last_value_est'] = last_value_estimate  
-
-        if log_probs is not None:
-            experience['log_prob'] = log_probs
-        
-        return experience
     
     def collect_trajectory(self, 
                         policy: 'BaseAgent | BasePolicy | None' = None,
-                        num_trajectories: int = 1,
+                        num_trajectories: int | None = None,
+                        min_num_steps: int | None = None
                         ) -> Tuple[Dict[str, List[torch.Tensor]], int]:
         """
         Collects full trajectories in parallel from the environment using the provided policy.
 
+        If the number of trajectories specified matches the number of environments, it will collect one trajectory from each environment. 
+        If the number of trajectories is less than the number of environments, it will collect the specified number of trajectories from the first N environments. 
+        If the number of trajectories is greater than the number of environments, it will collect num_trajectories // N trajectories from each environment, where N is the number of environments, 
+        and then get the remaining trajectories from whichiever environments complete first. 
+
+        The output is a dictionary with keys (state, action, next_state, reward, done) where each key contains a tensor with the first dimension (B, ...) where B is the sum of each trajectories timesteps T.
+
         Args:
             policy (BaseAgent | BasePolicy | None): The policy or agent to use.
-            num_trajectories (int): The total number of complete trajectories to collect.
+            num_trajectories (int | None): The total number of complete trajectories to collect.
+            min_num_steps (int | None): The minimum number of steps to collect before completing the trajectories. If specified, will collect until the minimum number of steps is reached, then complete the last trajectory.
 
         Returns:
-            Tuple[Dict[str, List[torch.Tensor]], int]: 
-                - A dictionary where each key maps to a list of per-trajectory tensors (each tensor has shape (T_i, ...)).
-                Keys: 'state','action','next_state','reward','done' and optionally 'value_est','log_prob','length'.
-                - The total number of steps collected across all returned trajectories.
+            Dict[str, torch.Tensor]: A dictionary containing the collected experience with keys:
+                - state: The current state of the environment. Shape (B, state_dim)
+                - action: The action taken by the policy. Shape (B, action_dim)
+                - next_state: The next state after taking the action. Shape (B, state_dim)
+                - reward: The reward received from the environment. Shape (B, 1)
+                - done: The done flag indicating if the episode has ended. Shape (B, 1)
+                - value_estimate: The value estimate from the policy, if applicable. Shape (B, 1) or None.
+                - log_prob: The log probability of the action, if applicable. Shape (B, 1) or None.
         """
-        N = self.env.get_num_envs()
+        if num_trajectories is None and min_num_steps is None:
+            num_trajectories = 1
+        if num_trajectories is not None and min_num_steps is not None:
+            raise ValueError("Only one of num_trajectories or min_num_steps should be provided, not both.")
 
-        # --- Establish starting states for all envs (respect previous_experience if present) ---
+
+        N = int(self.env.get_num_envs())
+        state_dim = tuple(self.env_params.observation_shape)
+        action_len = int(self.env_params.action_len)
+
+        # Force fresh full episodes
+        self.previous_experience = None
+
+        # Step-wise accumulators (N-first); we'll stack to (T, N, ...) once.
+        states_steps, actions_steps, next_states_steps = [], [], []
+        rewards_steps, dones_steps = [], []
+        value_steps, logp_steps = [], []
+
+        # Incremental stopping bookkeeping (so we don't over-collect too far)
+        completed_traj = 0
+
+        # For min_num_steps: track per-env current episode length, and add to the
+        # completed-steps sum when that env finishes.
+        cur_ep_len = torch.zeros(N, dtype=torch.long)
+        completed_steps_sum = 0
+
+        with torch.inference_mode():
+            while True:
+                state, action, next_state, reward, done, value_est, log_prob = self._collect_step(policy)
+
+                # Append step
+                states_steps.append(state)           # (N, *state_dim)
+                actions_steps.append(action)         # (N, action_len)
+                next_states_steps.append(next_state) # (N, *state_dim)
+                rewards_steps.append(reward)         # (N, 1)
+                dones_steps.append(done)             # (N, 1) bool
+                if value_est is not None:
+                    value_steps.append(value_est)    # (N, 1)
+                if log_prob is not None:
+                    logp_steps.append(log_prob)      # (N, 1)
+
+                # Update stopping criteria
+                done_bool = done.view(N) if done.ndim == 2 else done
+                done_count = int(done_bool.sum().item())
+                completed_traj += done_count
+
+                # Update completed-steps sum for min_num_steps
+                cur_ep_len += 1
+                if done_count > 0:
+                    finished_idx = (done_bool.nonzero(as_tuple=False).view(-1))
+                    completed_steps_sum += int(cur_ep_len[finished_idx].sum().item())
+                    cur_ep_len[finished_idx] = 0
+
+                # Check stop
+                if num_trajectories is not None:
+                    if completed_traj >= int(num_trajectories):
+                        break
+                else:
+                    if completed_steps_sum >= int(min_num_steps):
+                        break
+
+        # If nothing recorded (edge case), return empty dict
+        if len(states_steps) == 0:
+            return {
+                "state":      torch.empty((0, *state_dim), dtype=torch.float32),
+                "action":     torch.empty((0, action_len),   dtype=torch.float32),
+                "next_state": torch.empty((0, *state_dim),   dtype=torch.float32),
+                "reward":     torch.empty((0, 1),            dtype=torch.float32),
+                "done":       torch.empty((0, 1),            dtype=torch.bool),
+                "value_est":  None,
+                "log_prob":   None,
+            }
+
+        # Stack to (T, N, ...)
+        states_TN      = torch.stack(states_steps,      dim=0)  # (T,N,*state_dim)
+        actions_TN     = torch.stack(actions_steps,     dim=0)  # (T,N,action_len)
+        next_states_TN = torch.stack(next_states_steps, dim=0)  # (T,N,*state_dim)
+        rewards_TN     = torch.stack(rewards_steps,     dim=0)  # (T,N,1)
+        dones_TN       = torch.stack(dones_steps,       dim=0)  # (T,N,1) bool
+
+        values_TN = torch.stack(value_steps, dim=0) if value_steps else None
+        logp_TN   = torch.stack(logp_steps,  dim=0) if logp_steps else None
+
+        # ---- Vector "cut": produce episode segments per env, ordered by completion time ----
+        T = states_TN.shape[0]
+        done_mask = dones_TN.squeeze(-1)  # (T,N) bool
+
+        segments = []  # list of tuples: (end_t, env_idx, start_t, end_t_incl, length)
+        for env_i in range(N):
+            # Get the time indices where this env is done
+            done_idx = torch.nonzero(done_mask[:, env_i], as_tuple=False).flatten()
+
+            # If no done indices, skip this env
+            if done_idx.numel() == 0:
+                continue
+
+            prev_end = -1
+            # Convert the done indices to trajectory segments
+            for t_end in done_idx.tolist():
+                start = prev_end + 1
+                length = t_end - start + 1
+                segments.append((t_end, env_i, start, t_end, length))
+                prev_end = t_end
+
+        # Order segments by completion time to respect "earliest episodes" semantics
+        segments.sort(key=lambda x: x[0])  # sort by end_t
+
+        # Select which segments to keep (either by count or min steps)
+        selected = []
+        if num_trajectories is not None:
+            K = int(num_trajectories)
+            selected = segments[:K]
+        else:
+            need = int(min_num_steps)
+            acc = 0
+            for seg in segments:
+                selected.append(seg)
+                acc += seg[4]
+                if acc >= need:
+                    break
+
+        # Concatenate selected segments into (B, ...) batch
+        cat_states, cat_actions, cat_next_states = [], [], []
+        cat_rewards, cat_dones = [], []
+        cat_values, cat_logp = [], []
+
+        for (_, env_i, t0, t1, _len) in selected:
+            # Slice [t0:t1+1, env_i]
+            cat_states.append(states_TN[t0:t1+1, env_i, ...])
+            cat_actions.append(actions_TN[t0:t1+1, env_i, ...])
+            cat_next_states.append(next_states_TN[t0:t1+1, env_i, ...])
+            cat_rewards.append(rewards_TN[t0:t1+1, env_i, ...])
+            cat_dones.append(dones_TN[t0:t1+1, env_i, ...])
+
+            if values_TN is not None:
+                cat_values.append(values_TN[t0:t1+1, env_i, ...])
+            if logp_TN is not None:
+                cat_logp.append(logp_TN[t0:t1+1, env_i, ...])
+
+        if len(cat_states) == 0:
+            # No completed episodes made it into 'selected'
+            return {
+                "state":      torch.empty((0, *state_dim), dtype=states_TN.dtype, device=states_TN.device),
+                "action":     torch.empty((0, action_len),  dtype=actions_TN.dtype, device=actions_TN.device),
+                "next_state": torch.empty((0, *state_dim),  dtype=next_states_TN.dtype, device=next_states_TN.device),
+                "reward":     torch.empty((0, 1),           dtype=rewards_TN.dtype, device=rewards_TN.device),
+                "done":       torch.empty((0, 1),           dtype=dones_TN.dtype,   device=dones_TN.device),
+                "value_est":  None,
+                "log_prob":   None,
+            }
+
+        out = {
+            "state":      torch.cat(cat_states,      dim=0),
+            "action":     torch.cat(cat_actions,     dim=0),
+            "next_state": torch.cat(cat_next_states, dim=0),
+            "reward":     torch.cat(cat_rewards,     dim=0),
+            "done":       torch.cat(cat_dones,       dim=0),
+        }
+        out["value_est"] = torch.cat(cat_values, dim=0) if len(cat_values) > 0 else None
+        out["log_prob"]  = torch.cat(cat_logp,   dim=0) if len(cat_logp)   > 0 else None
+
+        return out     
+
+    
+    def _collect_step(self,
+                      policy: 'BaseAgent | BasePolicy | None' = None
+                      ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]: 
+        """
+        Collects a single step from the environment using the provided policy.
+        
+        Args:
+            policy (BaseAgent | BasePolicy | None): An agent or policy that takes a state and returns an action.
+        
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
+                - state: The current state of the environment. Shape (N, state_dim)
+                - action: The action taken by the policy. Shape (N, action_dim)
+                - next_state: The next state after taking the action. Shape (N, state_dim)
+                - reward: The reward received from the environment. Shape (N, 1)
+                - done: The done flag indicating if the episode has ended. Shape (N, 1)
+                - value_estimate: The value estimate from the policy, if applicable. Shape (N, 1) or None.
+                - log_prob: The log probability of the action, if applicable. Shape (N, 1) or None.
+        """
+        # Reset the environment if no previous state
         if self.previous_experience is None:
             state, _ = self.env.reset()
         else:
-            # Continue from where we left off, but reset finished envs
+            # Only reset the environments that are done
             state = self.previous_experience["next_state"]
-            prev_done = self.previous_experience["done"]
-            # ensure prev_done is 1D bool-like over envs
-            if prev_done.ndim > 1 and prev_done.shape[-1] == 1:
-                prev_done = prev_done.squeeze(-1)
-            for i in range(N):
-                if bool(prev_done[i].item() if torch.is_tensor(prev_done[i]) else prev_done[i]):
+            for i in range(self.previous_experience["done"].shape[0]):
+                if self.previous_experience["done"][i]:
+                    # Reset the environment for this index
                     reset_state, _ = self.env.reset_index(i)
+                    # Update the previous experience for this index
                     state[i] = reset_state
 
-        # --- Per-env rolling buffers (lists of per-step tensors) ---
-        per_env_buffers = []
-        for _ in range(N):
-            per_env_buffers.append({
-                "state": [],
-                "action": [],
-                "next_state": [],
-                "reward": [],
-                "done": [],
-                "value_est": [],
-                "log_prob": [],
-            })
+        action, value_est, log_prob = get_action_from_policy(policy, state, self.env_params)
 
-        # --- Outputs: lists of completed trajectories (each a tensor of length T_i) ---
-        out: Dict[str, List[torch.Tensor]] = {
-            "state": [],
-            "action": [],
-            "next_state": [],
-            "reward": [],
-            "done": [],
-            # Optional keys will be appended only if present
-            "value_est": [],
-            "log_prob": [],
-            "length": [],  # store as 1D tensor per-trajectory for convenience
+        # Step the environment with the action
+        next_state, reward, done, _ = self.env.step(action)
+
+        # Update the Metrics tracker and logging
+        self.metric.update(reward, done)
+
+        # Save the previous experience for the next step
+        self.previous_experience = {
+            "state": state,
+            "action": action,
+            "next_state": next_state,
+            "reward": reward,
+            "done": done,
         }
 
-        episodes_collected = 0
-        total_steps = 0
-
-        # Policy eval/no_grad for deterministic eval (feel free to remove eval() if you manage outside)
-        policy_cm = torch.no_grad() if policy is not None else nullcontext()
-        with policy_cm:
-            while episodes_collected < num_trajectories:
-                # --- Act ---
-                action, value_estimate, log_prob = get_action_from_policy(policy, state, self.env_params)
-
-                # --- Step ---
-                next_state, reward, done, _ = self.env.step(action)
-
-                # Normalize shapes for indexing
-                done_view = done
-                if done_view.ndim > 1 and done_view.shape[-1] == 1:
-                    done_view = done_view.squeeze(-1)
-
-                # --- Append this step to each env's buffer ---
-                for i in range(N):
-                    per_env_buffers[i]["state"].append(state[i])
-                    per_env_buffers[i]["action"].append(action[i])
-                    per_env_buffers[i]["next_state"].append(next_state[i])
-                    per_env_buffers[i]["reward"].append(reward[i])
-                    per_env_buffers[i]["done"].append(done[i])
-                    if value_estimate is not None:
-                        per_env_buffers[i]["value_est"].append(value_estimate[i])
-                    if log_prob is not None:
-                        per_env_buffers[i]["log_prob"].append(log_prob[i])
-                    total_steps += 1
-
-                # --- Finalize any episodes that ended on this step ---
-                for i in range(N):
-                    if bool(done_view[i].item() if torch.is_tensor(done_view[i]) else done_view[i]):
-                        buf = per_env_buffers[i]
-
-                        # Stack lists into (T_i, ...) tensors
-                        traj_state = torch.stack(buf["state"], dim=0)
-                        traj_action = torch.stack(buf["action"], dim=0)
-                        traj_next_state = torch.stack(buf["next_state"], dim=0)
-                        traj_reward = torch.stack(buf["reward"], dim=0)
-                        traj_done = torch.stack(buf["done"], dim=0)
-                        T_i = traj_reward.shape[0]
-
-                        out["state"].append(traj_state)
-                        out["action"].append(traj_action)
-                        out["next_state"].append(traj_next_state)
-                        out["reward"].append(traj_reward)
-                        out["done"].append(traj_done)
-                        out["length"].append(torch.as_tensor(T_i))
-
-                        if len(buf["value_est"]) > 0:
-                            out["value_est"].append(torch.stack(buf["value_est"], dim=0))
-                        if len(buf["log_prob"]) > 0:
-                            out["log_prob"].append(torch.stack(buf["log_prob"], dim=0))
-
-                        episodes_collected += 1
-
-                        # Clear buffer for this env (it may start a new episode immediately)
-                        per_env_buffers[i] = {
-                            "state": [],
-                            "action": [],
-                            "next_state": [],
-                            "reward": [],
-                            "done": [],
-                            "value_est": [],
-                            "log_prob": [],
-                        }
-
-                        # If we still need more episodes, reset this env so it can keep collecting
-                        if episodes_collected < num_trajectories:
-                            reset_state, _ = self.env.reset_index(i)
-                            next_state[i] = reset_state  # ensure we start next ep from reset state
-
-                # Prepare for next loop and update previous_experience
-                self.previous_experience = {
-                    "state": state,
-                    "action": action,
-                    "next_state": next_state,
-                    "reward": reward,
-                    "done": done,
-                }
-                state = next_state
-
-        # Remove optional keys if none were collected (cleaner downstream)
-        if len(out["value_est"]) == 0:
-            out.pop("value_est")
-        if len(out["log_prob"]) == 0:
-            out.pop("log_prob")
-
-        return out, total_steps
+        return state, action, next_state, reward, done, value_est, log_prob                
+    

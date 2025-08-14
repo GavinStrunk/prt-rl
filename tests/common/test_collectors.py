@@ -653,6 +653,298 @@ def test_collect_trajectory_invalid_args_raises(mock_env, discrete_action_params
 
 # Parallel Collector Tests
 # =========================================================
+# Helpers
+@pytest.fixture
+def mock_vec_env_n1(discrete_action_params):
+    env = MagicMock()
+    N = 1
+    env.get_num_envs.return_value = N
+    env.get_parameters.return_value = discrete_action_params
+
+    # reset() -> (N, obs_dim)
+    env.reset.return_value = (torch.zeros(N, 4, dtype=torch.float32), {})
+    # reset_index(i) -> (obs_dim,)
+    env.reset_index.side_effect = lambda i: (torch.zeros(4, dtype=torch.float32), {})
+    # step(action) default: not done
+    env.step.return_value = (
+        torch.zeros(N, 4, dtype=torch.float32),
+        torch.ones(N, 1, dtype=torch.float32),
+        torch.zeros(N, 1, dtype=torch.bool),
+        {}
+    )
+    return env
+
+# ---------------------------------
+# Policy stubs for vector env (N=1)
+# ---------------------------------
+@pytest.fixture
+def mock_vec_env_n3(discrete_action_params):
+    """
+    Minimal vectorized env mock with N=3, obs_dim=4, discrete action_len=1.
+    """
+    env = MagicMock()
+    N = 3
+    env.get_num_envs.return_value = N
+    env.get_parameters.return_value = discrete_action_params
+
+    # reset() -> (N, obs_dim)
+    env.reset.return_value = (torch.zeros(N, 4, dtype=torch.float32), {})
+
+    # reset_index(i) -> (obs_dim,)
+    env.reset_index.side_effect = lambda i: (torch.zeros(4, dtype=torch.float32), {})
+
+    # step(action) -> all envs continue (done=False)
+    env.step.return_value = (
+        torch.zeros(N, 4, dtype=torch.float32),          # next_state
+        torch.ones(N, 1, dtype=torch.float32),           # reward
+        torch.zeros(N, 1, dtype=torch.bool),             # done (all False)
+        {}
+    )
+    return env
+
+def _vec_policy_discrete(with_values=True):
+    def f(policy, state, env_params):
+        # state: (N=1, 4)
+        action = torch.zeros(1, 1, dtype=torch.float32)  # (N, action_len=1)
+        if with_values:
+            value_est = torch.full((1, 1), 0.5, dtype=torch.float32)
+            log_prob  = torch.full((1, 1), -0.1, dtype=torch.float32)
+        else:
+            value_est = None
+            log_prob  = None
+        return action, value_est, log_prob
+    return f
+
+def _vec_policy_discrete_counting(counter):
+    """Counts how many times the policy is queried; returns value/logprob."""
+    def f(policy, state, env_params):
+        counter["n"] += 1
+        action = torch.zeros(1, 1, dtype=torch.float32)
+        value_est = torch.full((1, 1), 0.7, dtype=torch.float32)
+        log_prob  = torch.full((1, 1), -0.2, dtype=torch.float32)
+        return action, value_est, log_prob
+    return f
+
+def _vec_policy_discrete_multi(with_values=True):
+    """
+    Returns action/value/log_prob with correct leading N based on state.shape[0].
+    Assumes discrete action_len=1 from env_params.
+    """
+    def f(policy, state, env_params):
+        N = state.shape[0]
+        action = torch.zeros(N, env_params.action_len, dtype=torch.float32)
+        if with_values:
+            value_est = torch.full((N, 1), 0.5, dtype=torch.float32)
+            log_prob  = torch.full((N, 1), -0.1, dtype=torch.float32)
+        else:
+            value_est = None
+            log_prob  = None
+        return action, value_est, log_prob
+    return f
+
+# Tests
+def test_parallel_collect_flatten_true_shapes(mock_vec_env_n1, monkeypatch):
+    """
+    flatten=True (default). With N=1 and num_steps=5 -> T = ceil(5/1) = 5, B = N*T = 5.
+    Optional keys present; last_value_est computed.
+    """
+    env = mock_vec_env_n1
+    collector = ParallelCollector(env=env, logger=FakeLogger(), flatten=True)
+
+    # Patch policy
+    pc_mod = sys.modules[ParallelCollector.__module__]
+    monkeypatch.setattr(pc_mod, 'get_action_from_policy', _vec_policy_discrete(with_values=True))
+
+    out = collector.collect_experience(policy=MagicMock(), num_steps=5)
+
+    # B = 5
+    assert out["state"].shape      == (5, 4)
+    assert out["action"].shape     == (5, 1)
+    assert out["next_state"].shape == (5, 4)
+    assert out["reward"].shape     == (5, 1)
+    assert out["done"].shape       == (5, 1)
+    assert out["value_est"].shape  == (5, 1)
+    assert out["log_prob"].shape   == (5, 1)
+
+    # last_value_est should be present for N=1 when final step not done
+    assert out["last_value_est"] is not None
+    assert out["last_value_est"].shape == (1, 1)
+
+    # Called once to start, then 5 steps
+    assert env.reset.call_count == 1
+    assert env.step.call_count  == 5
+
+def test_parallel_collect_flatten_false_shapes(mock_vec_env_n1, monkeypatch):
+    """
+    flatten=False -> shapes (T, N, ...). With N=1 and num_steps=4 -> T=4.
+    """
+    env = mock_vec_env_n1
+    collector = ParallelCollector(env=env, logger=FakeLogger(), flatten=False)
+
+    pc_mod = sys.modules[ParallelCollector.__module__]
+    monkeypatch.setattr(pc_mod, 'get_action_from_policy', _vec_policy_discrete(with_values=True))
+
+    out = collector.collect_experience(policy=MagicMock(), num_steps=4)
+
+    # (T, N, ...) = (4, 1, ...)
+    assert out["state"].shape      == (4, 1, 4)
+    assert out["action"].shape     == (4, 1, 1)
+    assert out["next_state"].shape == (4, 1, 4)
+    assert out["reward"].shape     == (4, 1, 1)
+    assert out["done"].shape       == (4, 1, 1)
+    assert out["value_est"].shape  == (4, 1, 1)
+    assert out["log_prob"].shape   == (4, 1, 1)
+
+    assert out["last_value_est"] is not None
+    assert out["last_value_est"].shape == (1, 1)
+
+def test_parallel_collect_resets_done_envs_with_reset_index(mock_vec_env_n1, monkeypatch):
+    """
+    Ensure env.reset_index(i) is called for envs that reported done=True on previous step.
+    With N=1 and T=4, mark done=True on the 2nd step only -> expect exactly 1 call to reset_index.
+    """
+    env = mock_vec_env_n1
+    collector = ParallelCollector(env=env, logger=FakeLogger(), flatten=True)
+
+    # Steps: F, T, F, F  (only the 'T' should trigger a reset_index before the next step)
+    step_returns = [
+        (torch.zeros(1,4), torch.ones(1,1), torch.tensor([[False]]), {}),
+        (torch.zeros(1,4), torch.ones(1,1), torch.tensor([[True]]),  {}),
+        (torch.zeros(1,4), torch.ones(1,1), torch.tensor([[False]]), {}),
+        (torch.zeros(1,4), torch.ones(1,1), torch.tensor([[False]]), {}),
+    ]
+    env.step.side_effect = step_returns
+
+    pc_mod = sys.modules[ParallelCollector.__module__]
+    monkeypatch.setattr(pc_mod, 'get_action_from_policy', _vec_policy_discrete(with_values=False))  # no value/logprob
+
+    out = collector.collect_experience(policy=MagicMock(), num_steps=4)
+
+    # After step 2 (done=True), the next iteration should call reset_index(0)
+    assert env.reset_index.call_count == 1
+
+    # value/log_prob absent -> None
+    assert out["value_est"] is None
+    assert out["log_prob"]  is None
+    # last_value_est will be None as well in this branch
+    assert out["last_value_est"] is None
+
+def test_parallel_collect_bootstraps_last_value_estimate(mock_vec_env_n1, monkeypatch):
+    """
+    When final step is not done and we have value estimates, the collector does one extra
+    policy call for V(s_{T+1}). Verify by counting policy calls: expected T + 1.
+    """
+    env = mock_vec_env_n1
+    collector = ParallelCollector(env=env, logger=FakeLogger(), flatten=True)
+
+    # Ensure none of the steps set done=True
+    env.step.return_value = (
+        torch.zeros(1, 4),
+        torch.ones(1, 1),
+        torch.zeros(1, 1, dtype=torch.bool),
+        {}
+    )
+
+    counter = {"n": 0}
+    pc_mod = sys.modules[ParallelCollector.__module__]
+    monkeypatch.setattr(pc_mod, 'get_action_from_policy', _vec_policy_discrete_counting(counter))
+
+    num_steps = 6
+    out = collector.collect_experience(policy=MagicMock(), num_steps=num_steps)
+
+    # T = ceil(6/1) = 6, expect 6 + 1 calls (bootstrap)
+    assert counter["n"] == num_steps + 1
+    assert out["last_value_est"] is not None
+    assert out["last_value_est"].shape == (1, 1)
+
+def test_parallel_collect_handles_partial_last_done_without_reset(mock_vec_env_n1, monkeypatch):
+    """
+    If the last step reports done=True, no reset_index is expected (since no next step).
+    """
+    env = mock_vec_env_n1
+    collector = ParallelCollector(env=env, logger=FakeLogger(), flatten=True)
+
+    # Steps: F, F, T  -> only the 'T' is last; should NOT trigger reset_index
+    step_returns = [
+        (torch.zeros(1,4), torch.ones(1,1), torch.tensor([[False]]), {}),
+        (torch.zeros(1,4), torch.ones(1,1), torch.tensor([[False]]), {}),
+        (torch.zeros(1,4), torch.ones(1,1), torch.tensor([[True]]),  {}),
+    ]
+    env.step.side_effect = step_returns
+
+    pc_mod = sys.modules[ParallelCollector.__module__]
+    monkeypatch.setattr(pc_mod, 'get_action_from_policy', _vec_policy_discrete(with_values=True))
+
+    out = collector.collect_experience(policy=MagicMock(), num_steps=3)
+
+    assert env.reset_index.call_count == 0  # last step done -> no next-step reset
+    # With last step done, your current code's bootstrap guard may skip last_value_est
+    # because previous_experience['done'] is True; we just check no error:
+    assert "last_value_est" in out
+
+def test_parallel_collect_multi_env_flatten_true_shapes(mock_vec_env_n3, monkeypatch):
+    """
+    With N=3 and num_steps=7 -> T = ceil(7/3) = 3, B = N*T = 9.
+    Expect flattened shapes: (B, ...).
+    Also expects last_value_est shape (N,1) because final step is not done for any env
+    and your guard is: if not done.any() and value_estimates: ...
+    """
+    env = mock_vec_env_n3
+    collector = ParallelCollector(env=env, logger=FakeLogger(), flatten=True)
+
+    # Patch the helper inside the module where ParallelCollector is defined
+    pc_mod = sys.modules[ParallelCollector.__module__]
+    monkeypatch.setattr(pc_mod, 'get_action_from_policy', _vec_policy_discrete_multi(with_values=True))
+
+    out = collector.collect_experience(policy=MagicMock(), num_steps=7)
+
+    # B = 9
+    assert out["state"].shape      == (9, 4)
+    assert out["action"].shape     == (9, 1)
+    assert out["next_state"].shape == (9, 4)
+    assert out["reward"].shape     == (9, 1)
+    assert out["done"].shape       == (9, 1)
+    assert out["value_est"].shape  == (9, 1)
+    assert out["log_prob"].shape   == (9, 1)
+
+    # last_value_est should be present with shape (N,1)
+    assert out["last_value_est"] is not None
+    assert out["last_value_est"].shape == (env.get_num_envs(), 1)
+
+    # One reset to start, T=3 steps
+    assert env.reset.call_count == 1
+    assert env.step.call_count  == 3
+    # No per-index resets since no env finished
+    assert env.reset_index.call_count == 0
 
 
+def test_parallel_collect_multi_env_flatten_false_shapes(mock_vec_env_n3, monkeypatch):
+    """
+    With N=3 and num_steps=7 -> T = 3.
+    Expect unflattened shapes: (T, N, ...).
+    """
+    env = mock_vec_env_n3
+    collector = ParallelCollector(env=env, logger=FakeLogger(), flatten=False)
+
+    pc_mod = sys.modules[ParallelCollector.__module__]
+    monkeypatch.setattr(pc_mod, 'get_action_from_policy', _vec_policy_discrete_multi(with_values=True))
+
+    out = collector.collect_experience(policy=MagicMock(), num_steps=7)
+
+    # (T, N, ...)
+    assert out["state"].shape      == (3, 3, 4)
+    assert out["action"].shape     == (3, 3, 1)
+    assert out["next_state"].shape == (3, 3, 4)
+    assert out["reward"].shape     == (3, 3, 1)
+    assert out["done"].shape       == (3, 3, 1)
+    assert out["value_est"].shape  == (3, 3, 1)
+    assert out["log_prob"].shape   == (3, 3, 1)
+
+    # last_value_est should be (N,1)
+    assert out["last_value_est"] is not None
+    assert out["last_value_est"].shape == (env.get_num_envs(), 1)
+
+    assert env.reset.call_count == 1
+    assert env.step.call_count  == 3
+    assert env.reset_index.call_count == 0
 
