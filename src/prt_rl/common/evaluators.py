@@ -124,10 +124,25 @@ class RewardEvaluator(Evaluator):
         if not is_last and not self._should_evaluate(iteration):
             return
         
+        # Collect desired number of trajectories
         trajectories = self.collector.collect_trajectory(agent, num_trajectories=self.num_episodes)
-        rewards = [t['reward'] for t in trajectories]
 
-        avg_reward = np.mean(rewards)
+        rewards = trajectories['reward'].detach().cpu().numpy().reshape(-1)
+        dones = trajectories['done'].detach().cpu().numpy().reshape(-1)
+
+        # Sum rewards for each episode
+        episode_rewards = []
+        running_reward = 0.0
+        for reward, done in zip(rewards, dones):
+            running_reward += reward
+            if done:
+                episode_rewards.append(running_reward)
+                running_reward = 0.0
+
+        # Calculate average reward across episodes
+        avg_reward = np.mean(episode_rewards)
+
+        # Update the best reward and agent if the current average reward is better
         if avg_reward >= self.best_reward:
             self.best_reward = avg_reward
 
@@ -136,9 +151,9 @@ class RewardEvaluator(Evaluator):
 
         if self.logger is not None:
             self.logger.log_scalar("evaluation_reward", avg_reward, iteration=iteration)
-            self.logger.log_scalar("evaluation_reward_std", np.std(rewards), iteration=iteration)
-            self.logger.log_scalar("evaluation_reward_max", np.max(rewards), iteration=iteration)
-            self.logger.log_scalar("evaluation_reward_min", np.min(rewards), iteration=iteration)
+            self.logger.log_scalar("evaluation_reward_std", np.std(episode_rewards), iteration=iteration)
+            self.logger.log_scalar("evaluation_reward_max", np.max(episode_rewards), iteration=iteration)
+            self.logger.log_scalar("evaluation_reward_min", np.min(episode_rewards), iteration=iteration)
 
 
     def close(self) -> None:
@@ -204,10 +219,22 @@ class NumberOfStepsEvaluator(Evaluator):
         
         trajectories = self.collector.collect_trajectory(agent, num_trajectories=self.num_episodes)
 
-        # @todo sum the rewards properly for each trajectory
-        rewards = [t['reward'] for t in trajectories]
+        rewards = trajectories['reward'].detach().cpu().numpy().reshape(-1)
+        dones = trajectories['done'].detach().cpu().numpy().reshape(-1)
 
-        avg_reward = np.mean(rewards)
+        # Sum rewards for each episode
+        episode_rewards = []
+        running_reward = 0.0
+        for reward, done in zip(rewards, dones):
+            running_reward += reward
+            if done:
+                episode_rewards.append(running_reward)
+                running_reward = 0.0
+
+        # Calculate average reward across episodes
+        avg_reward = np.mean(episode_rewards)
+
+        # Check if the average reward meets the threshold and update best timestep
         if avg_reward >= self.reward_threshold and iteration < self.best_timestep:
             self.best_timestep = iteration
 

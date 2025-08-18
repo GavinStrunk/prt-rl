@@ -2,6 +2,7 @@ import copy
 import math
 import numpy as np
 import pytest
+import torch
 import prt_rl.common.evaluators as MODULE
 from prt_rl.env.wrappers import GymnasiumWrapper
 
@@ -26,8 +27,10 @@ class FakeLogger:
 
 class FakeCollector:
     """
-    Returns a fixed set of trajectories where each trajectory is a dict
-    with a single 'reward' key. Records the last call kwargs.
+    Mimics ParallelCollector.collect_trajectory by returning a batched dict:
+      - 'reward': (B, 1)
+      - 'done'  : (B, 1) with all True (one step per episode)
+    Records last call kwargs and call count.
     """
     def __init__(self, env, rewards=None):
         self.env = env
@@ -35,11 +38,20 @@ class FakeCollector:
         self.last_kwargs = None
         self.calls = 0
 
-    def collect_trajectory(self, agent, num_trajectories=1):
+    def collect_trajectory(self, agent, num_trajectories=1, min_num_steps=None):
         self.calls += 1
-        self.last_kwargs = {"agent": agent, "num_trajectories": num_trajectories}
-        return [{"reward": r} for r in self.rewards[:num_trajectories]]
+        self.last_kwargs = {
+            "agent": agent,
+            "num_trajectories": num_trajectories,
+            "min_num_steps": min_num_steps,
+        }
 
+        # Treat each "trajectory" as a single step that ends immediately.
+        k = min(num_trajectories, len(self.rewards))
+        rew = torch.tensor(self.rewards[:k], dtype=torch.float32).view(-1, 1)  # (B,1)
+        done = torch.ones(k, 1, dtype=torch.bool)                              # (B,1)
+
+        return {"reward": rew, "done": done}
 
 @pytest.fixture
 def env():
@@ -209,10 +221,10 @@ def test_logging_values_are_correct(env, logger, agent, make_collector):
     exp_max = float(np.max(rewards))
     exp_min = float(np.min(rewards))
 
-    assert math.isclose(vals["evaluation_reward"], exp_avg, rel_tol=1e-9)
-    assert math.isclose(vals["evaluation_reward_std"], exp_std, rel_tol=1e-9)
-    assert math.isclose(vals["evaluation_reward_max"], exp_max, rel_tol=1e-9)
-    assert math.isclose(vals["evaluation_reward_min"], exp_min, rel_tol=1e-9)
+    assert math.isclose(vals["evaluation_reward"], exp_avg, rel_tol=1e-6)
+    assert math.isclose(vals["evaluation_reward_std"], exp_std, rel_tol=1e-6)
+    assert math.isclose(vals["evaluation_reward_max"], exp_max, rel_tol=1e-6)
+    assert math.isclose(vals["evaluation_reward_min"], exp_min, rel_tol=1e-6)
 
     # Iteration forwarded
     iters = {it for (_, _, it) in logger.scalars}
