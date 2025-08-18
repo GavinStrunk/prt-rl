@@ -627,40 +627,38 @@ class ParallelCollector:
                 - value_estimate: The value estimate from the policy, if applicable. Shape (B, 1) or None.
                 - log_prob: The log probability of the action, if applicable. Shape (B, 1) or None.
         """
+        # Helper to check if we have enough trajectories collected
+
+                
         if num_trajectories is None and min_num_steps is None:
             num_trajectories = 1
         if num_trajectories is not None and min_num_steps is not None:
             raise ValueError("Only one of num_trajectories or min_num_steps should be provided, not both.")
 
-
+        # Get the number of environments
         N = int(self.env.get_num_envs())
-        state_dim = tuple(self.env_params.observation_shape)
-        action_len = int(self.env_params.action_len)
 
         # Force fresh full episodes
         self.previous_experience = None
 
-        # Step-wise accumulators (N-first); we'll stack to (T, N, ...) once.
+        # Per-step accumulators (N-first); we'll stack to (T, N, ...) once.
         states_steps, actions_steps, next_states_steps = [], [], []
         rewards_steps, dones_steps = [], []
         value_steps, logp_steps = [], []
 
-        # Incremental stopping bookkeeping (so we don't over-collect too far)
-        completed_traj = 0
-
-        # For min_num_steps: track per-env current episode length, and add to the
-        # completed-steps sum when that env finishes.
+        # Bookkeeping for stopping criteria while stepping
+        per_env_counts = [0] * N                # #completed episodes per env
         cur_ep_len = torch.zeros(N, dtype=torch.long)
-        completed_steps_sum = 0
+        completed_steps_sum = 0                 # only counts lengths of completed episodes
+        completed_total = 0
 
         with torch.inference_mode():
             while True:
                 state, action, next_state, reward, done, value_est, log_prob = self._collect_step(policy)
 
-                # Append step
-                states_steps.append(state)           # (N, *state_dim)
+                states_steps.append(state)           # (N, *state_shape)
                 actions_steps.append(action)         # (N, action_len)
-                next_states_steps.append(next_state) # (N, *state_dim)
+                next_states_steps.append(next_state) # (N, *state_shape)
                 rewards_steps.append(reward)         # (N, 1)
                 dones_steps.append(done)             # (N, 1) bool
                 if value_est is not None:
@@ -668,115 +666,134 @@ class ParallelCollector:
                 if log_prob is not None:
                     logp_steps.append(log_prob)      # (N, 1)
 
-                # Update stopping criteria
-                done_bool = done.view(N) if done.ndim == 2 else done
-                done_count = int(done_bool.sum().item())
-                completed_traj += done_count
+                # Update episode counters
+                done_bool = done.view(-1).to(torch.bool)  # (N,)
+                finished_idx = done_bool.nonzero(as_tuple=False).view(-1)
+                n_finished = int(finished_idx.numel())
+                completed_total += n_finished
 
-                # Update completed-steps sum for min_num_steps
+                # update per-env counts and completed_steps_sum (for min_num_steps)
                 cur_ep_len += 1
-                if done_count > 0:
-                    finished_idx = (done_bool.nonzero(as_tuple=False).view(-1))
-                    completed_steps_sum += int(cur_ep_len[finished_idx].sum().item())
-                    cur_ep_len[finished_idx] = 0
+                if n_finished > 0:
+                    for i in finished_idx.tolist():
+                        per_env_counts[i] += 1
+                        completed_steps_sum += int(cur_ep_len[i].item())
+                        cur_ep_len[i] = 0
 
-                # Check stop
+                # Stop conditions
                 if num_trajectories is not None:
-                    if completed_traj >= int(num_trajectories):
+                    if self._have_enough_trajectories(int(num_trajectories), N, per_env_counts):
                         break
                 else:
                     if completed_steps_sum >= int(min_num_steps):
                         break
 
-        # If nothing recorded (edge case), return empty dict
+        # Nothing recorded (edge case)
         if len(states_steps) == 0:
-            return {
-                "state":      torch.empty((0, *state_dim), dtype=torch.float32),
-                "action":     torch.empty((0, action_len),   dtype=torch.float32),
-                "next_state": torch.empty((0, *state_dim),   dtype=torch.float32),
-                "reward":     torch.empty((0, 1),            dtype=torch.float32),
-                "done":       torch.empty((0, 1),            dtype=torch.bool),
-                "value_est":  None,
-                "log_prob":   None,
-            }
+            raise ValueError("No steps were collected. Ensure the environment is properly configured and the policy is valid.")
 
         # Stack to (T, N, ...)
-        states_TN      = torch.stack(states_steps,      dim=0)  # (T,N,*state_dim)
+        states_TN      = torch.stack(states_steps,      dim=0)  # (T,N,*state_shape)
         actions_TN     = torch.stack(actions_steps,     dim=0)  # (T,N,action_len)
-        next_states_TN = torch.stack(next_states_steps, dim=0)  # (T,N,*state_dim)
+        next_states_TN = torch.stack(next_states_steps, dim=0)  # (T,N,*state_shape)
         rewards_TN     = torch.stack(rewards_steps,     dim=0)  # (T,N,1)
         dones_TN       = torch.stack(dones_steps,       dim=0)  # (T,N,1) bool
-
         values_TN = torch.stack(value_steps, dim=0) if value_steps else None
-        logp_TN   = torch.stack(logp_steps,  dim=0) if logp_steps else None
+        logp_TN = torch.stack(logp_steps,  dim=0) if logp_steps else None
 
-        # ---- Vector "cut": produce episode segments per env, ordered by completion time ----
-        T = states_TN.shape[0]
+        # ---- Build per-env episode segments with completion times ----
         done_mask = dones_TN.squeeze(-1)  # (T,N) bool
 
-        segments = []  # list of tuples: (end_t, env_idx, start_t, end_t_incl, length)
-        for env_i in range(N):
-            # Get the time indices where this env is done
-            done_idx = torch.nonzero(done_mask[:, env_i], as_tuple=False).flatten()
+        # Per-env ordered lists of segments (by completion time within the env)
+        per_env_segments = [[] for _ in range(N)]
+        # Also a global list for min_num_steps path
+        global_segments = []
 
-            # If no done indices, skip this env
+        # Loop through the environments in done mask to find episode segments
+        for env_i in range(N):
+            # Check if this env finished any episodes and get the timestep indexes if so
+            done_idx = torch.nonzero(done_mask[:, env_i], as_tuple=False).flatten()
             if done_idx.numel() == 0:
                 continue
 
+            # Build segments: (env_i, t_start, t_end)
             prev_end = -1
-            # Convert the done indices to trajectory segments
             for t_end in done_idx.tolist():
                 start = prev_end + 1
-                length = t_end - start + 1
-                segments.append((t_end, env_i, start, t_end, length))
+                # length = t_end - start + 1
+                seg = (env_i, start, t_end)  # include ordinal within-env
+                per_env_segments[env_i].append(seg)
+                global_segments.append(seg)
                 prev_end = t_end
 
-        # Order segments by completion time to respect "earliest episodes" semantics
-        segments.sort(key=lambda x: x[0])  # sort by end_t
+        # Nothing finished -> return empty
+        if not global_segments:
+            raise ValueError("No complete episodes were recorded. Ensure the environment is properly configured and the policy is valid.")
 
-        # Select which segments to keep (either by count or min steps)
         selected = []
         if num_trajectories is not None:
             K = int(num_trajectories)
-            selected = segments[:K]
+            base = K // N
+            rem  = K % N
+
+            # (1) Take earliest `base` episodes per env (by within-env order)
+            for env_i in range(N):
+                segs = per_env_segments[env_i]
+                if base > 0 and len(segs) >= base:
+                    selected.extend(segs[:base])
+                elif base > 0:
+                    # Shouldn't happen due to stopping rule, but guard anyway
+                    selected.extend(segs)
+
+            # (2) Candidates for remainder: the (base)-th episode (0-based) of each env,
+            #     i.e., the first "extra" beyond the base. Sort by global finish time;
+            #     pick earliest `rem` from DISTINCT envs (by construction they are distinct).
+            if rem > 0:
+                candidates = []
+                for env_i in range(N):
+                    segs = per_env_segments[env_i]
+                    if len(segs) >= base + 1:
+                        # This env's extra episode candidate
+                        candidates.append(segs[base])  # (env_i, start, end)
+                
+                # Sort candidates by end time and take earliest `rem`
+                candidates.sort(key=lambda s: s[-1])
+                selected.extend(candidates[:rem])
+
+            # Order selected by global finish time to preserve temporal ordering
+            selected.sort(key=lambda s: s[-1])
+
         else:
+            # min_num_steps: just take earliest episodes by global completion time until sum lengths >= target
             need = int(min_num_steps)
             acc = 0
-            for seg in segments:
+            global_segments.sort(key=lambda s: s[-1])
+            for seg in global_segments:
                 selected.append(seg)
-                acc += seg[4]
+
+                # Add the length of this segment to the accumulator
+                acc += seg[-1] - seg[-2]
                 if acc >= need:
                     break
 
-        # Concatenate selected segments into (B, ...) batch
+        # ---- Slice and concatenate selected segments into (B, ...) ----
         cat_states, cat_actions, cat_next_states = [], [], []
         cat_rewards, cat_dones = [], []
         cat_values, cat_logp = [], []
 
-        for (_, env_i, t0, t1, _len) in selected:
-            # Slice [t0:t1+1, env_i]
-            cat_states.append(states_TN[t0:t1+1, env_i, ...])
-            cat_actions.append(actions_TN[t0:t1+1, env_i, ...])
+        for (env_i, t0, t1) in selected:
+            cat_states.append(     states_TN[t0:t1+1, env_i, ...])
+            cat_actions.append(    actions_TN[t0:t1+1, env_i, ...])
             cat_next_states.append(next_states_TN[t0:t1+1, env_i, ...])
-            cat_rewards.append(rewards_TN[t0:t1+1, env_i, ...])
-            cat_dones.append(dones_TN[t0:t1+1, env_i, ...])
-
+            cat_rewards.append(    rewards_TN[t0:t1+1, env_i, ...])
+            cat_dones.append(      dones_TN[t0:t1+1, env_i, ...])
             if values_TN is not None:
                 cat_values.append(values_TN[t0:t1+1, env_i, ...])
             if logp_TN is not None:
                 cat_logp.append(logp_TN[t0:t1+1, env_i, ...])
 
         if len(cat_states) == 0:
-            # No completed episodes made it into 'selected'
-            return {
-                "state":      torch.empty((0, *state_dim), dtype=states_TN.dtype, device=states_TN.device),
-                "action":     torch.empty((0, action_len),  dtype=actions_TN.dtype, device=actions_TN.device),
-                "next_state": torch.empty((0, *state_dim),  dtype=next_states_TN.dtype, device=next_states_TN.device),
-                "reward":     torch.empty((0, 1),           dtype=rewards_TN.dtype, device=rewards_TN.device),
-                "done":       torch.empty((0, 1),           dtype=dones_TN.dtype,   device=dones_TN.device),
-                "value_est":  None,
-                "log_prob":   None,
-            }
+            raise ValueError("No complete episodes were recorded. Ensure the environment is properly configured and the policy is valid.")
 
         out = {
             "state":      torch.cat(cat_states,      dim=0),
@@ -788,7 +805,32 @@ class ParallelCollector:
         out["value_est"] = torch.cat(cat_values, dim=0) if len(cat_values) > 0 else None
         out["log_prob"]  = torch.cat(cat_logp,   dim=0) if len(cat_logp)   > 0 else None
 
-        return out     
+        return out   
+    
+    @staticmethod
+    def _have_enough_trajectories(K: int, N: int, per_env_counts: list) -> bool:
+        """
+        Check if we have collected at least K full trajectories across all environments.
+        
+        Args:
+            K (int): The target number of trajectories to collect.
+        Returns:
+            bool: True if we have collected at least K trajectories, False otherwise.
+        """
+        divisible_episodes = K // N
+        remainder_episodes  = K % N
+
+        # Continue collecting until there are a divisible number of episodes per env
+        if any(c < divisible_episodes for c in per_env_counts):
+            return False
+        
+        # If the number of desired episodes is a multiple of N, there are not remainder episodes
+        if remainder_episodes == 0:
+            return True
+        
+        # Need at least `rem` envs with one extra (>= base+1)
+        extras = sum(1 for c in per_env_counts if c >= divisible_episodes + 1)
+        return extras >= remainder_episodes    
 
     
     def _collect_step(self,

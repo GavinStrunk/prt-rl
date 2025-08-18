@@ -742,6 +742,66 @@ def _vec_policy_discrete_multi(with_values=True):
         return action, value_est, log_prob
     return f
 
+class _ScriptedVecEnv:
+    """
+    Minimal vectorized env with deterministic 'done' schedule.
+    - N: number of envs
+    - ends_per_env: list of lists; ends_per_env[i] contains the global step indices t where env i ends.
+    next_state encodes env id in feature 0 so we can recover which env a step came from.
+    """
+    def __init__(self, N, ends_per_env, obs_dim=4):
+        self._N = N
+        self._t = 0
+        self._ends = [list(lst) for lst in ends_per_env]  # copy
+        self._obs_dim = obs_dim
+        self.reset_index_calls = []
+
+    def get_num_envs(self):
+        return self._N
+
+    def get_parameters(self):
+        # Use the discrete_action_params injected by outer fixtures/tests:
+        # We'll monkeypatch the collector to use this env; the test sets env.get_parameters
+        # via a fixture typically. But to be safe, return a simple object with needed fields.
+        class P:
+            action_len = 1
+            action_continuous = False
+            observation_shape = (self._obs_dim,)
+        return P()
+
+    def reset(self):
+        self._t = 0
+        # State shape: (N, obs_dim), encode env_id at feature 0
+        state = torch.zeros(self._N, self._obs_dim, dtype=torch.float32)
+        for i in range(self._N):
+            state[i, 0] = float(i)
+        return state, {}
+
+    def reset_index(self, i):
+        self.reset_index_calls.append(i)
+        s = torch.zeros(self._obs_dim, dtype=torch.float32)
+        s[0] = float(i)
+        return s, {}
+
+    def step(self, action):
+        # Build next_state with env id encoded in feature 0
+        next_state = torch.zeros(self._N, self._obs_dim, dtype=torch.float32)
+        for i in range(self._N):
+            next_state[i, 0] = float(i)
+
+        reward = torch.ones(self._N, 1, dtype=torch.float32)
+
+        # done: True if current t is a scheduled end for env i
+        done = torch.zeros(self._N, 1, dtype=torch.bool)
+        for i in range(self._N):
+            if self._ends[i] and self._t == self._ends[i][0]:
+                done[i, 0] = True
+                # pop this end time; next episode for env i will be driven by later times
+                self._ends[i].pop(0)
+
+        self._t += 1
+        return next_state, reward, done, {}
+
 # Tests
 def test_parallel_collect_flatten_true_shapes(mock_vec_env_n1, monkeypatch):
     """
@@ -948,3 +1008,110 @@ def test_parallel_collect_multi_env_flatten_false_shapes(mock_vec_env_n3, monkey
     assert env.step.call_count  == 3
     assert env.reset_index.call_count == 0
 
+def test_collect_trajectory_fair_distribution_k5_n3(monkeypatch):
+    """
+    K=5, N=3
+    - base = 1 per env (first episode from each env)
+    - remainder = 2 earliest extra, from DISTINCT envs
+    Episode finish times:
+      env0: t_end at 1, 5           (lens: 2, 4)
+      env1: t_end at 2, 4           (lens: 3, 2)
+      env2: t_end at 3, 6           (lens: 4, 3)
+    Expected selected order by finish time: [e0@1, e1@2, e2@3] + [e1@4, e0@5]
+    => episode env sequence at 'done' rows: [0, 1, 2, 1, 0]
+    Total B = 2 + 3 + 4 + 2 + 4 = 15
+    """
+    N = 3
+    ends = [
+        [1, 5],  # env 0
+        [2, 4],  # env 1
+        [3, 6],  # env 2
+    ]
+    env = _ScriptedVecEnv(N, ends)
+    collector = ParallelCollector(env=env, logger=FakeLogger())
+
+    # Patch policy helper in the SAME module where ParallelCollector is defined
+    pc_mod = sys.modules[ParallelCollector.__module__]
+    monkeypatch.setattr(pc_mod, 'get_action_from_policy', _vec_policy_discrete_multi(with_values=True))
+
+    out = collector.collect_trajectory(policy=MagicMock(), num_trajectories=5)
+
+    # Shapes
+    assert out["state"].shape      == (15, 4)
+    assert out["action"].shape     == (15, 1)
+    assert out["next_state"].shape == (15, 4)
+    assert out["reward"].shape     == (15, 1)
+    assert out["done"].shape       == (15, 1)
+    assert out["value_est"].shape  == (15, 1)
+    assert out["log_prob"].shape   == (15, 1)
+
+    # Which env ended at each episode boundary? (env id is encoded at state[..., 0])
+    done_idx = torch.nonzero(out["done"].squeeze(-1), as_tuple=False).flatten().tolist()
+    end_envs = [int(out["state"][i, 0].item()) for i in done_idx]
+
+    # Expected: [0, 1, 2, 1, 0] (see docstring)
+    assert end_envs == [0, 1, 2, 1, 0]
+
+    # Counts per env: base 1 each + remainder spread across distinct envs
+    assert end_envs.count(0) == 2
+    assert end_envs.count(1) == 2
+    assert end_envs.count(2) == 1
+
+
+def test_collect_trajectory_min_num_steps_earliest_episodes(monkeypatch):
+    """
+    min_num_steps = 8 with the same schedule:
+      earliest finishes: e0@1 (len2) -> sum 2
+                         e1@2 (len3) -> sum 5
+                         e2@3 (len4) -> sum 9 >= 8 stop
+    Selected env sequence at 'done': [0, 1, 2]
+    Total B = 2 + 3 + 4 = 9
+    """
+    N = 3
+    ends = [
+        [1, 5],
+        [2, 4],
+        [3, 6],
+    ]
+    env = _ScriptedVecEnv(N, ends)
+    collector = ParallelCollector(env=env, logger=FakeLogger(), flatten=True)
+
+    pc_mod = sys.modules[ParallelCollector.__module__]
+    monkeypatch.setattr(pc_mod, 'get_action_from_policy', _vec_policy_discrete_multi(with_values=True))
+
+    out = collector.collect_trajectory(policy=MagicMock(), min_num_steps=8)
+
+    assert out["state"].shape == (9, 4)
+    assert out["done"].shape  == (9, 1)
+
+    done_idx = torch.nonzero(out["done"].squeeze(-1), as_tuple=False).flatten().tolist()
+    end_envs = [int(out["state"][i, 0].item()) for i in done_idx]
+
+    assert end_envs == [0, 1, 2]  # earliest by finish time
+    assert len(done_idx) == 3     # three episodes
+    assert out["value_est"].shape == (9, 1)
+    assert out["log_prob"].shape  == (9, 1)
+
+
+def test_collect_trajectory_optional_keys_absent(monkeypatch):
+    """
+    If the policy provides no value/log_prob, collector should return None for these keys.
+    """
+    N = 3
+    ends = [
+        [1, 5],
+        [2, 4],
+        [3, 6],
+    ]
+    env = _ScriptedVecEnv(N, ends)
+    collector = ParallelCollector(env=env, logger=FakeLogger(), flatten=True)
+
+    pc_mod = sys.modules[ParallelCollector.__module__]
+    monkeypatch.setattr(pc_mod, 'get_action_from_policy', _vec_policy_discrete_multi(with_values=False))
+
+    out = collector.collect_trajectory(policy=MagicMock(), num_trajectories=3)
+
+    # 1 episode per env -> lens 2 + 3 + 4 = 9
+    assert out["state"].shape == (9, 4)
+    assert out["value_est"] is None
+    assert out["log_prob"] is None
