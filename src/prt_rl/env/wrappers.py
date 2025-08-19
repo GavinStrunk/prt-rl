@@ -227,12 +227,16 @@ class GymnasiumWrapper(EnvironmentInterface):
         if index > self.num_envs:
             raise ValueError(f"Index {index} is out of bounds for {self.num_envs} environments.")
         
-        state, info = self.env.envs[index].reset(seed=seed)
-        state = self._process_observation(state)
+        # If there is only one environment, reset it directly
+        if self.num_envs == 1:
+            state, info = self.env.reset(seed=seed)
+        else:
+            state, info = self.env.envs[index].reset(seed=seed)
+            state = self._process_observation(state)
 
-        if self.render_mode == 'rgb_array':
-            rgb = self.env.render()
-            info['rgb_array'] = rgb[np.newaxis, ...]
+            if self.render_mode == 'rgb_array':
+                rgb = self.env.render()
+                info['rgb_array'] = rgb[np.newaxis, ...]
 
         return state, info
 

@@ -127,6 +127,10 @@ class MetricsTracker:
             reward: Tensor shaped (N, 1) or (…,) whose trailing dims will be summed per env.
             done:   Tensor shaped (N, 1) or scalar/bool-like per env; True indicates episode end.
         """
+        # Move reward and done to CPU if they are not already there
+        reward = reward.cpu()
+        done = done.cpu()
+        
         # Ensure reward and done are tensors with shape (N,)
         r_env = self._sum_rewards_per_env(reward) 
         d_env = self._to_done_mask(done)
@@ -328,39 +332,40 @@ class SequentialCollector:
         value_ests, log_probs = [], []
         total_steps = 0
 
-        with torch.inference_mode():
-            if num_trajectories is not None:
-                for _ in range(num_trajectories):
-                    traj = self._collect_single_trajectory(policy)
-                    states.append(traj['state'])
-                    actions.append(traj['action'])
-                    next_states.append(traj['next_state'])
-                    rewards.append(traj['reward'])
-                    dones.append(traj['done'])
+        if num_trajectories is not None:
+            for _ in range(num_trajectories):
+                traj = self._collect_single_trajectory(policy)
 
-                    ve = traj.get('value_est', None)
-                    lp = traj.get('log_prob', None)
-                    if ve is not None: value_ests.append(ve)
-                    if lp is not None: log_probs.append(lp)
+                states.append(traj['state'])
+                actions.append(traj['action'])
+                next_states.append(traj['next_state'])
+                rewards.append(traj['reward'])
+                dones.append(traj['done'])
+                ve = traj.get('value_est', None)
+                lp = traj.get('log_prob', None)
 
-                    total_steps += traj['state'].shape[0]
-            else:
-                # min_num_steps mode: keep collecting full trajectories until threshold reached
-                target = int(min_num_steps)
-                while total_steps < target:
-                    traj = self._collect_single_trajectory(policy)
-                    states.append(traj['state'])
-                    actions.append(traj['action'])
-                    next_states.append(traj['next_state'])
-                    rewards.append(traj['reward'])
-                    dones.append(traj['done'])
+                if ve is not None: value_ests.append(ve)
+                if lp is not None: log_probs.append(lp)
 
-                    ve = traj.get('value_est', None)
-                    lp = traj.get('log_prob', None)
-                    if ve is not None: value_ests.append(ve)
-                    if lp is not None: log_probs.append(lp)
+                total_steps += traj['state'].shape[0]
+        else:
+            # min_num_steps mode: keep collecting full trajectories until threshold reached
+            target = int(min_num_steps)
+            while total_steps < target:
+                traj = self._collect_single_trajectory(policy)
 
-                    total_steps += traj['state'].shape[0]
+                states.append(traj['state'])
+                actions.append(traj['action'])
+                next_states.append(traj['next_state'])
+                rewards.append(traj['reward'])
+                dones.append(traj['done'])
+                ve = traj.get('value_est', None)
+                lp = traj.get('log_prob', None)
+
+                if ve is not None: value_ests.append(ve)
+                if lp is not None: log_probs.append(lp)
+
+                total_steps += traj['state'].shape[0]
 
         # Concatenate once per key -> (B, ...)
         out = {
@@ -374,6 +379,15 @@ class SequentialCollector:
         out["log_prob"]  = torch.cat(log_probs,  dim=0) if log_probs  else None
 
         return out
+    
+    def get_metric_tracker(self) -> MetricsTracker:
+        """
+        Returns the internal MetricsTracker instance for accessing collection metrics.
+
+        Returns:
+            MetricsTracker: The internal MetricsTracker instance.
+        """
+        return self.metric_tracker
 
     def _collect_single_trajectory(self, 
                                    policy: 'BaseAgent | BasePolicy | None' = None
@@ -652,41 +666,40 @@ class ParallelCollector:
         completed_steps_sum = 0                 # only counts lengths of completed episodes
         completed_total = 0
 
-        with torch.inference_mode():
-            while True:
-                state, action, next_state, reward, done, value_est, log_prob = self._collect_step(policy)
+        while True:
+            state, action, next_state, reward, done, value_est, log_prob = self._collect_step(policy)
 
-                states_steps.append(state)           # (N, *state_shape)
-                actions_steps.append(action)         # (N, action_len)
-                next_states_steps.append(next_state) # (N, *state_shape)
-                rewards_steps.append(reward)         # (N, 1)
-                dones_steps.append(done)             # (N, 1) bool
-                if value_est is not None:
-                    value_steps.append(value_est)    # (N, 1)
-                if log_prob is not None:
-                    logp_steps.append(log_prob)      # (N, 1)
+            states_steps.append(state)           # (N, *state_shape)
+            actions_steps.append(action)         # (N, action_len)
+            next_states_steps.append(next_state) # (N, *state_shape)
+            rewards_steps.append(reward)         # (N, 1)
+            dones_steps.append(done)             # (N, 1) bool
+            if value_est is not None:
+                value_steps.append(value_est)    # (N, 1)
+            if log_prob is not None:
+                logp_steps.append(log_prob)      # (N, 1)
 
-                # Update episode counters
-                done_bool = done.view(-1).to(torch.bool)  # (N,)
-                finished_idx = done_bool.nonzero(as_tuple=False).view(-1)
-                n_finished = int(finished_idx.numel())
-                completed_total += n_finished
+            # Update episode counters
+            done_bool = done.view(-1).to(torch.bool)  # (N,)
+            finished_idx = done_bool.nonzero(as_tuple=False).view(-1)
+            n_finished = int(finished_idx.numel())
+            completed_total += n_finished
 
-                # update per-env counts and completed_steps_sum (for min_num_steps)
-                cur_ep_len += 1
-                if n_finished > 0:
-                    for i in finished_idx.tolist():
-                        per_env_counts[i] += 1
-                        completed_steps_sum += int(cur_ep_len[i].item())
-                        cur_ep_len[i] = 0
+            # update per-env counts and completed_steps_sum (for min_num_steps)
+            cur_ep_len += 1
+            if n_finished > 0:
+                for i in finished_idx.tolist():
+                    per_env_counts[i] += 1
+                    completed_steps_sum += int(cur_ep_len[i].item())
+                    cur_ep_len[i] = 0
 
-                # Stop conditions
-                if num_trajectories is not None:
-                    if self._have_enough_trajectories(int(num_trajectories), N, per_env_counts):
-                        break
-                else:
-                    if completed_steps_sum >= int(min_num_steps):
-                        break
+            # Stop conditions
+            if num_trajectories is not None:
+                if self._have_enough_trajectories(int(num_trajectories), N, per_env_counts):
+                    break
+            else:
+                if completed_steps_sum >= int(min_num_steps):
+                    break
 
         # Nothing recorded (edge case)
         if len(states_steps) == 0:
@@ -805,7 +818,16 @@ class ParallelCollector:
         out["value_est"] = torch.cat(cat_values, dim=0) if len(cat_values) > 0 else None
         out["log_prob"]  = torch.cat(cat_logp,   dim=0) if len(cat_logp)   > 0 else None
 
-        return out   
+        return out 
+
+    def get_metric_tracker(self) -> MetricsTracker:
+        """
+        Returns the internal MetricsTracker instance for accessing collection metrics.
+
+        Returns:
+            MetricsTracker: The internal MetricsTracker instance.
+        """
+        return self.metric  
     
     @staticmethod
     def _have_enough_trajectories(K: int, N: int, per_env_counts: list) -> bool:

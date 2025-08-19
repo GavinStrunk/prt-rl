@@ -104,6 +104,46 @@ def test_hard_update_raises_on_mismatched_shapes():
     with pytest.raises(RuntimeError):  # torch will raise if shape mismatch during copy_
         utils.hard_update(target, net)
 
+# Normalized advantages tests
+# ==================================================
+def test_normalize_advantages_zero_mean_unit_std():
+    advantages = torch.tensor([[1.0], [2.0], [3.0]])
+    normalized = utils.normalize_advantages(advantages)
+    
+    # Check shape
+    assert advantages.shape == (3, 1)
+    assert normalized.shape == advantages.shape
+
+    # Check mean ~ 0 and std ~ 1
+    assert torch.isclose(normalized.mean(), torch.tensor(0.0), atol=1e-6)
+    assert torch.isclose(normalized.std(), torch.tensor(1.0), atol=1e-6)
+
+def test_normalize_advantages_identical_values():
+    advantages = torch.tensor([[5.0], [5.0], [5.0]])
+    normalized = utils.normalize_advantages(advantages)
+
+    # All outputs should be 0 when all inputs are the same (std is zero)
+    expected = torch.zeros_like(advantages)
+    torch.testing.assert_close(normalized, expected)
+
+def test_normalize_advantages_single_element():
+    advantages = torch.tensor([[10.0]])
+    normalized = utils.normalize_advantages(advantages)
+
+    # Single value minus mean (same value) divided by std (zero) + epsilon => 0
+    print(normalized)
+    expected = torch.tensor([[0.0]])
+    torch.testing.assert_close(normalized, expected)
+
+def test_normalize_advantages_batch_shape():
+    # Shape (B, 1) with B > 3
+    advantages = torch.randn(100, 1)
+    normalized = utils.normalize_advantages(advantages)
+
+    assert normalized.shape == (100, 1)
+    assert torch.isclose(normalized.mean(), torch.tensor(0.0), atol=1e-6)
+    assert torch.isclose(normalized.std(), torch.tensor(1.0), atol=1e-6)
+
 # GAE tests
 # ==================================================
 def test_gae_time_major():

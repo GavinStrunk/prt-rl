@@ -39,7 +39,7 @@ from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.loggers import Logger
 from prt_rl.common.progress_bar import ProgressBar
 from prt_rl.common.evaluators import Evaluator
-from prt_rl.common.collectors import SequentialCollector
+from prt_rl.common.collectors import SequentialCollector, ParallelCollector
 from prt_rl.common.policies import DistributionPolicy
 from prt_rl.common.networks import MLP
 import prt_rl.common.utils as utils
@@ -75,7 +75,7 @@ class PolicyGradient(BaseAgent):
                  gamma: float = 0.99,
                  gae_lambda: float = 0.95,
                  optim_steps: int = 1,
-                 reward_to_go: bool = False, 
+                 use_reward_to_go: bool = False, 
                  use_baseline: bool = False,
                  use_gae: bool = False,
                  baseline_learning_rate: float = 5e-3,
@@ -90,7 +90,7 @@ class PolicyGradient(BaseAgent):
         self.learning_rate = learning_rate
         self.gamma = gamma
         self.gae_lambda = gae_lambda
-        self.reward_to_go = reward_to_go
+        self.use_reward_to_go = use_reward_to_go
         self.use_baseline = use_baseline
         self.use_gae = use_gae
         self.baseline_learning_rate = baseline_learning_rate
@@ -104,7 +104,7 @@ class PolicyGradient(BaseAgent):
         self.policy.to(self.device)
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.learning_rate)
 
-        if use_baseline:
+        if use_baseline or use_gae:
             self.critic = MLP(
                 input_dim=env_params.observation_shape[0],
                 output_dim=1,
@@ -154,8 +154,11 @@ class PolicyGradient(BaseAgent):
         if show_progress:
             progress_bar = ProgressBar(total_steps=total_steps)
 
-        # Initialize collector without flattening so the experience shape is (N, T, ...)
-        collector = SequentialCollector(env=env, logger=logger)
+        # Initialize collector without flattening so the experience shape is (B, ...)
+        if env.get_num_envs() == 1:
+            collector = SequentialCollector(env=env, logger=logger)
+        else:
+            collector = ParallelCollector(env=env, logger=logger, flatten=True)
 
         num_steps = 0
         while num_steps < total_steps:
@@ -164,44 +167,43 @@ class PolicyGradient(BaseAgent):
                 scheduler.update(current_step=num_steps)
 
             # Collect experience using the current policy
-            # trajectories is a list of tensors, each tensor is a trajectory of shape (T_i, ...)
-            trajectories, batch_steps = collector.collect_trajectory(policy=self.policy, min_num_steps=self.batch_size)
-            num_steps += batch_steps
-
-            batch_states = torch.cat([t['state'] for t in trajectories], dim=0)  # Shape (N*T, D)
-            batch_rewards = torch.cat([t['reward'] for t in trajectories], dim=0).squeeze(1)  # Shape (N*T, 1)
-            batch_dones = torch.cat([t['done'] for t in trajectories], dim=0).squeeze(1)  # Shape (N*T, 1)
-            batch_log_probs = torch.cat([t['log_prob'] for t in trajectories], dim=0).squeeze(1)  # Shape (N*T,)
+            trajectories = collector.collect_trajectory(policy=self.policy, min_num_steps=self.batch_size)
+            num_steps += trajectories['state'].shape[0]  
 
             # Compute Monte Carlo estimate of the Q function
             if self.use_gae:
-                values = self.critic(batch_states).detach().squeeze(1)
-                advantages = self._compute_generalized_advantage_estimate(
-                    rewards=batch_rewards,
-                    dones=batch_dones,
+                values = self.critic(trajectories['state']).detach()
+                advantages, Q_hat = utils.generalized_advantage_estimates(
+                    rewards=trajectories['reward'],
                     values=values,
+                    dones=trajectories['done'],
+                    last_values=trajectories['last_value'] if 'last_value' in trajectories else torch.zeros_like(values[-1]),
                     gamma=self.gamma,
                     gae_lambda=self.gae_lambda
                 )
-                Q_hat = advantages + values
-            elif not self.reward_to_go:
-                # \sum_{t'=0}^{T-1} \gamma^t r_t'
-                Q_hat = self._compute_trajectory_rewards(
-                    rewards=batch_rewards,
-                    dones=batch_dones,
-                    gamma=self.gamma
-                )
-                advantages = Q_hat - self.critic(batch_states).squeeze(1) if self.critic is not None else Q_hat
             else:
-                # \sum_{t'=t}^{T-1} \gamma^{t'-t} r_{t'}
-                Q_hat = self._compute_rewards_to_go(
-                    rewards=batch_rewards,
-                    dones=batch_dones,
-                    gamma=self.gamma
-                )
-                advantages = Q_hat - self.critic(batch_states).squeeze(1) if self.critic is not None else Q_hat
+                if self.use_reward_to_go:
+                    # \sum_{t'=t}^{T-1} \gamma^{t'-t} r_{t'}
+                    Q_hat = utils.rewards_to_go(
+                        rewards=trajectories['reward'],
+                        dones=trajectories['done'],
+                        gamma=self.gamma
+                    )
+                else:
+                    # Total discounted return               
+                    # \sum_{t'=0}^{T-1} \gamma^t r_t'
+                    Q_hat = utils.trajectory_returns(
+                        rewards=trajectories['reward'],
+                        dones=trajectories['done'],
+                        gamma=self.gamma
+                    )
 
-            loss = self._compute_loss(advantages, batch_log_probs, self.normalize_advantages)
+                if self.use_baseline:
+                    advantages = Q_hat - self.critic(trajectories['state']).squeeze(1)
+                else:
+                    advantages = Q_hat
+            
+            loss = self._compute_loss(advantages, trajectories['log_prob'], self.normalize_advantages)
             save_loss = loss.item()
 
             self.optimizer.zero_grad()
@@ -213,7 +215,7 @@ class PolicyGradient(BaseAgent):
                 critic_losses = []
                 for _ in range(self.baseline_optim_steps):
                     # Compute the Q function predictions
-                    q_value_pred = self.critic(batch_states).squeeze(1)
+                    q_value_pred = self.critic(trajectories['state']).squeeze(1)
 
                     critic_loss = torch.nn.functional.mse_loss(q_value_pred, Q_hat)
                     critic_losses.append(critic_loss.item())
@@ -223,8 +225,9 @@ class PolicyGradient(BaseAgent):
                     self.critic_optimizer.step()  # Update the critic parameters
                     
             if show_progress:
-                progress_bar.update(num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}, "
-                                                                   f"Episode Length: {collector.previous_episode_length}, "
+                tracker = collector.get_metric_tracker()
+                progress_bar.update(num_steps, desc=f"Episode Reward: {tracker.last_episode_reward:.2f}, "
+                                                                   f"Episode Length: {tracker.last_episode_length}, "
                                                                    f"Loss: {save_loss:.4f},")
 
             # Log the training progress
@@ -240,7 +243,8 @@ class PolicyGradient(BaseAgent):
         if evaluator is not None:
             evaluator.close()
 
-    def _compute_loss(self, 
+    @classmethod
+    def _compute_loss(cls, 
                       advantages, 
                       log_probs, 
                       normalize
@@ -250,7 +254,7 @@ class PolicyGradient(BaseAgent):
 
         Args:
             advantages (List[torch.Tensor]): List of advantages for each trajectory with shape (B, 1)
-            log_probs (List[torch.Tensor]): List of log probabilities for each trajectory with shape (B, ...)
+            log_probs (List[torch.Tensor]): List of log probabilities for each trajectory with shape (B, 1)
             normalize (bool): Whether to normalize the advantages.
 
         Returns:
@@ -262,99 +266,99 @@ class PolicyGradient(BaseAgent):
         loss = -(log_probs * advantages).mean()
         return loss
 
-    @staticmethod        
-    def _compute_trajectory_rewards(rewards: torch.Tensor, dones: torch.Tensor, gamma: float) -> torch.Tensor:
-        """
-        Compute the total discounted return G from a full trajectory.
+    # @staticmethod        
+    # def _compute_trajectory_rewards(rewards: torch.Tensor, dones: torch.Tensor, gamma: float) -> torch.Tensor:
+    #     """
+    #     Compute the total discounted return G from a full trajectory.
 
-        ..math::
-            \hat{Q}(s_{i,t},a_{i,t}) = \sum_{t'=1}^{T} \gamma^t r(s_{i,t}, a_{i,t})
+    #     ..math::
+    #         \hat{Q}(s_{i,t},a_{i,t}) = \sum_{t'=1}^{T} \gamma^t r(s_{i,t}, a_{i,t})
         
-        Args:
-            rewards: Tensor of shape (B,) with rewards for each timestep.
-            dones: Tensor of shape (B,) with done flags indicating if the episode has ended.
-            gamma: Discount factor
+    #     Args:
+    #         rewards: Tensor of shape (B,) with rewards for each timestep.
+    #         dones: Tensor of shape (B,) with done flags indicating if the episode has ended.
+    #         gamma: Discount factor
 
-        Returns:
-            Scalar float representing total discounted return with shape (B, )
-        """
-        returns = []
-        start = 0
+    #     Returns:
+    #         Scalar float representing total discounted return with shape (B, )
+    #     """
+    #     returns = []
+    #     start = 0
 
-        for t in range(len(rewards)):
-            if dones[t]:
-                # Slice out the trajectory
-                trajectory = rewards[start:t+1]
-                T = trajectory.shape[0]
-                total_return = trajectory.sum() * (gamma ** T)
-                # Fill trajectory with the same return value
-                filled = torch.full((T,), total_return.item(), dtype=torch.float32, device=rewards.device)
-                returns.append(filled)
-                start = t + 1
+    #     for t in range(len(rewards)):
+    #         if dones[t]:
+    #             # Slice out the trajectory
+    #             trajectory = rewards[start:t+1]
+    #             T = trajectory.shape[0]
+    #             total_return = trajectory.sum() * (gamma ** T)
+    #             # Fill trajectory with the same return value
+    #             filled = torch.full((T,), total_return.item(), dtype=torch.float32, device=rewards.device)
+    #             returns.append(filled)
+    #             start = t + 1
 
-        return torch.cat(returns, dim=0)
+    #     return torch.cat(returns, dim=0)
     
-    @staticmethod
-    def _compute_rewards_to_go(rewards: torch.Tensor, dones: torch.Tensor, gamma: float) -> torch.Tensor:
-        """
-        Compute rewards-to-go from rewards and done flags.
+    # @staticmethod
+    # def _compute_rewards_to_go(rewards: torch.Tensor, dones: torch.Tensor, gamma: float) -> torch.Tensor:
+    #     """
+    #     Compute rewards-to-go from rewards and done flags.
 
-        Args:
-            rewards (torch.Tensor): Rewards from the environment with shape (B, 1).
-            dones (torch.Tensor): Done flags indicating if the episode has ended with shape (N, T, 1).
-            gamma (float): Discount factor.
+    #     Args:
+    #         rewards (torch.Tensor): Rewards from the environment with shape (B, 1).
+    #         dones (torch.Tensor): Done flags indicating if the episode has ended with shape (N, T, 1).
+    #         gamma (float): Discount factor.
 
-        Returns:
-            torch.Tensor: Computed rewards-to-go with shape (B, )
-        """
-        rewards_to_go = []
-        R = 0
-        for reward, done in zip(reversed(rewards), reversed(dones)):
-            if done:
-                R = 0.0
-            R = reward + gamma * R
-            rewards_to_go.insert(0, R)
+    #     Returns:
+    #         torch.Tensor: Computed rewards-to-go with shape (B, )
+    #     """
+    #     rewards_to_go = []
+    #     R = 0
+    #     for reward, done in zip(reversed(rewards), reversed(dones)):
+    #         if done:
+    #             R = 0.0
+    #         R = reward + gamma * R
+    #         rewards_to_go.insert(0, R)
 
-        return torch.stack(rewards_to_go)  # Shape (B, )
+    #     return torch.stack(rewards_to_go)  # Shape (B, )
     
-    @staticmethod
-    def _compute_generalized_advantage_estimate(
-        rewards: torch.Tensor,  
-        values: torch.Tensor,            
-        dones: torch.Tensor,             
-        gamma: float = 0.99,
-        gae_lambda: float = 0.95,
-    ):
-        """
-        Compute GAE and TD(lambda) returns for a batched rollout.
+    # @staticmethod
+    # def _compute_generalized_advantage_estimate(
+    #     rewards: torch.Tensor,  
+    #     values: torch.Tensor,            
+    #     dones: torch.Tensor,             
+    #     gamma: float = 0.99,
+    #     gae_lambda: float = 0.95,
+    # ):
+    #     """
+    #     Compute GAE and TD(lambda) returns for a batched rollout.
 
-        Args:
-            rewards (B,): Rewards from rollout
-            values (B,): Estimated state values
-            dones (B,): Done flags (1 if episode ended at step t, else 0)
-            gamma (float): Discount factor
-            gae_lambda (float): GAE lambda
+    #     Args:
+    #         rewards (B,): Rewards from rollout
+    #         values (B,): Estimated state values
+    #         dones (B,): Done flags (1 if episode ended at step t, else 0)
+    #         gamma (float): Discount factor
+    #         gae_lambda (float): GAE lambda
 
-        Returns:
-            advantages (T, N): Estimated advantage values
-            returns (T, N): TD(lambda) returns
-        """
-        B = rewards.shape[0]
+    #     Returns:
+    #         advantages (T, N): Estimated advantage values
+    #         returns (T, N): TD(lambda) returns
+    #     """
+    #     B = rewards.shape[0]
 
-        advantages = torch.zeros((B), dtype=values.dtype, device=values.device)
+    #     advantages = torch.zeros((B), dtype=values.dtype, device=values.device)
 
-        for t in reversed(range(B)):
-            if dones[t]:
-                next_value = 0.0
-                next_advantage = 0.0
-            else:
-                next_value = values[t + 1]
-                next_advantage = advantages[t+1]
+    #     for t in reversed(range(B)):
+    #         if dones[t]:
+    #             next_value = 0.0
+    #             next_advantage = 0.0
+    #         else:
+    #             next_value = values[t + 1]
+    #             next_advantage = advantages[t+1]
             
-            delta = rewards[t] + gamma * next_value - values[t]
-            advantages[t] = delta + gamma * gae_lambda * next_advantage
+    #         delta = rewards[t] + gamma * next_value - values[t]
+    #         advantages[t] = delta + gamma * gae_lambda * next_advantage
 
-        return advantages
+    #     return advantages
     
     
 class PolicyGradientTrajectory(PolicyGradient):
@@ -425,7 +429,7 @@ class PolicyGradientTrajectory(PolicyGradient):
             batch_states = torch.cat([t['state'] for t in trajectories], dim=0)  # Shape (N*T, D)
 
             # Compute Monte Carlo estimate of the Q function
-            if not self.reward_to_go:
+            if not self.use_reward_to_go:
                 # \sum_{t'=0}^{T-1} \gamma^t r_t'
                 Q_hat = self._compute_trajectory_rewards(
                     rewards=[t['reward'] for t in trajectories],

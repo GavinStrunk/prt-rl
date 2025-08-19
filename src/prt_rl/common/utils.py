@@ -33,17 +33,12 @@ def polyak_update(target: torch.nn.Module, network: torch.nn.Module, tau: float)
 
     Args:
         target (torch.nn.Module): The target network to be updated.
-        network (torch.nn.Module): The policy network from which parameters are taken.
+        network (torch.nn.Module): The policy, pi, network from which parameters are taken.
         tau (float): The interpolation factor, typically in the range [0, 1].
 
     References:
     [1] https://github.com/DLR-RM/stable-baselines3/issues/93
     """
-    # Perform Polyak update on parameters
-    # for target_params, policy_params in zip(target.parameters(), network.parameters()):
-    #     target_params.data.copy_(tau * policy_params.data + (1 - tau) * target_params.data)
-
-    # Perform polyak update on state_dict which support parameters and buffers, but is slower than the above method
     target_sd = target.state_dict()
     source_sd = network.state_dict()
 
@@ -69,12 +64,19 @@ def normalize_advantages(advantages: torch.Tensor) -> torch.Tensor:
     """
     Normalizes advantages to have zero mean and unit variance.
 
+    .. math::
+        A_{norm} = \frac{A - \mu}{\sigma + \epsilon}
+
     Args:
-        advantages (torch.Tensor): The advantages to normalize.
+        advantages (torch.Tensor): The advantages to normalize. Shape (B, 1)
 
     Returns:
-        torch.Tensor: The normalized advantages.
+        torch.Tensor: The normalized advantages. Shape (B, 1)
     """
+    # Handle the case where advantages is a single value. Mean is 0
+    if advantages.numel() == 1:
+        return torch.zeros_like(advantages)
+    
     mean = advantages.mean()
     std = advantages.std()
     normalized_advantages = (advantages - mean) / (std + 1e-8)
@@ -140,7 +142,7 @@ def generalized_advantage_estimates(
     last_gae_lam = torch.zeros((N, 1), dtype=values.dtype, device=values.device)
 
     for t in reversed(range(T)):
-        not_done = 1.0 - dones[t]
+        not_done = 1.0 - dones[t].float()
         delta = rewards[t] + gamma * values[t + 1] * not_done - values[t]
         last_gae_lam = delta + gamma * gae_lambda * not_done * last_gae_lam
         advantages[t] = last_gae_lam
@@ -212,7 +214,7 @@ def rewards_to_go(
     rtg = torch.zeros_like(rewards)
 
     for t in reversed(range(T)):
-        running_return = rewards[t] + gamma * running_return * (1.0 - dones[t])
+        running_return = rewards[t] + gamma * running_return * (1.0 - dones[t].float())
         rtg[t] = running_return
 
     return rtg.view(original_shape)
