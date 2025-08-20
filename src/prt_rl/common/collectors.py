@@ -597,7 +597,7 @@ class ParallelCollector:
             log_probs = torch.stack(log_probs, dim=0) if log_probs else None
 
         # If the last step was not done in any environment and value estimates are available, then compute the last value estimate for bootstrapping
-        if not self.previous_experience['done'].any() and value_estimates is not None:
+        if value_estimates is not None:
             _, last_value_estimate, _ = get_action_from_policy(policy, self.previous_experience['next_state'], self.env_params)
         
         return {

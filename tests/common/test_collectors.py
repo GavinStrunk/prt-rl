@@ -1115,3 +1115,19 @@ def test_collect_trajectory_optional_keys_absent(monkeypatch):
     assert out["state"].shape == (9, 4)
     assert out["value_est"] is None
     assert out["log_prob"] is None
+
+def test_collect_step_from_single_env_with_reset():
+    env = GymnasiumWrapper("CartPole-v1")
+
+    collector = ParallelCollector(env=env, flatten=False)
+    state, action, next_state, reward, done, value_est, log_prob = collector._collect_step()
+    collector.previous_experience['done'] = torch.tensor([[True]])
+
+    state, action, next_state, reward, done, value_est, log_prob = collector._collect_step()
+    assert state.shape == (1, 4)
+    assert action.shape == (1, 1)
+    assert next_state.shape == (1, 4)
+    assert reward.shape == (1, 1)
+    assert done.shape == (1, 1)
+    assert value_est is None
+    assert log_prob is None

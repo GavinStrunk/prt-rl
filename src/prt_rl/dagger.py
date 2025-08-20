@@ -32,9 +32,9 @@ class DAgger(BaseAgent):
     """
     def __init__(self,
                  env_params: EnvParams, 
-                 policy: DistributionPolicy | None,
                  expert_policy: BaseAgent,
                  experience_buffer: ReplayBuffer,                 
+                 policy: DistributionPolicy | None = None,
                  buffer_size: int = 10000,
                  learning_rate: float = 1e-3,
                  optim_steps: int = 1,

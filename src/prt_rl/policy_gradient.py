@@ -155,10 +155,7 @@ class PolicyGradient(BaseAgent):
             progress_bar = ProgressBar(total_steps=total_steps)
 
         # Initialize collector without flattening so the experience shape is (B, ...)
-        if env.get_num_envs() == 1:
-            collector = SequentialCollector(env=env, logger=logger)
-        else:
-            collector = ParallelCollector(env=env, logger=logger, flatten=True)
+        collector = ParallelCollector(env=env, logger=logger, flatten=True)
 
         num_steps = 0
         while num_steps < total_steps:

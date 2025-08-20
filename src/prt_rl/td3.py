@@ -3,7 +3,7 @@ Twin Delayed Deep Deterministic Policy Gradient (TD3)
 """
 import torch
 import torch.nn.functional as F
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from prt_rl.agent import BaseAgent
 from prt_rl.env.interface import EnvParams, EnvironmentInterface
 from prt_rl.common.loggers import Logger
@@ -75,6 +75,26 @@ class TD3Policy(BasePolicy):
             The action to be taken.
         """
         return self.actor(state, deterministic=deterministic)
+    
+    def predict(self, 
+                state: torch.Tensor, 
+                deterministic: bool = False
+                ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Predict the action based on the current state.
+
+        Args:
+            state (torch.Tensor): Current state tensor.
+            deterministic (bool): If True, choose the action deterministically. Default is False.
+            
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the chosen action, value estimate, and action log probability.
+                - action (torch.Tensor): Tensor with the chosen action. Shape (B, action_dim)
+                - value_estimate (torch.Tensor): Tensor with the estimated value of the state. Shape (B, 1)
+                - log_prob (torch.Tensor): Tensor with the log probability of the chosen action. Shape (B, 1)
+        """
+        action, _, _ = self.actor(state, deterministic=deterministic)
+        
 
 class TD3(BaseAgent):
     """
@@ -266,7 +286,8 @@ class TD3(BaseAgent):
                         utils.polyak_update(self.policy.critic_target.critics[i], self.policy.critic.critics[i], tau=self.tau)
 
             if show_progress:
-                progress_bar.update(current_step=num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}")
+                tracker = collector.get_metric_tracker()
+                progress_bar.update(current_step=num_steps, desc=f"Episode Reward: {tracker.last_episode_reward:.2f}")
 
             if logger.should_log(num_steps):
                 logger.log_scalar('actor_loss', np.mean(actor_losses), num_steps)

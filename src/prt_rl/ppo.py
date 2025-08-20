@@ -27,30 +27,30 @@ class PPO(BaseAgent):
     Args:
         env_params (EnvParams): Environment parameters.
         policy (ActorCriticPolicy | None): Policy to use. If None, a default ActorCriticPolicy will be created.
+        steps_per_batch (int): Number of steps to collect per batch.
+        mini_batch_size (int): Size of mini-batches for optimization.
+        learning_rate (float): Learning rate for the optimizer.
         gamma (float): Discount factor for future rewards.
         epsilon (float): Clipping parameter for PPO.
-        learning_rate (float): Learning rate for the optimizer.
         gae_lambda (float): Lambda parameter for Generalized Advantage Estimation.
         entropy_coef (float): Coefficient for the entropy term in the loss function.
         value_coef (float): Coefficient for the value loss term in the loss function.
         num_optim_steps (int): Number of optimization steps per batch.
-        mini_batch_size (int): Size of mini-batches for optimization.
-        steps_per_batch (int): Number of steps to collect per batch.
         normalize_advantages (bool): Whether to normalize advantages.
         device (str): Device to run the computations on ('cpu' or 'cuda').
     """
     def __init__(self,
                  env_params: EnvParams,
-                 policy: ActorCriticPolicy | None,
+                 policy: ActorCriticPolicy | None = None,
+                 steps_per_batch: int = 2048,
+                 mini_batch_size: int = 32,
+                 learning_rate: float = 3e-4,
                  gamma: float = 0.99,
                  epsilon: float = 0.1,
-                 learning_rate: float = 3e-4,
                  gae_lambda: float = 0.95,
                  entropy_coef: float = 0.01,
                  value_coef: float = 0.5,
                  num_optim_steps: int = 10,
-                 mini_batch_size: int = 32,
-                 steps_per_batch: int = 2048,
                  normalize_advantages: bool = False,
                  device: str = 'cpu',
                  ) -> None:
@@ -68,7 +68,7 @@ class PPO(BaseAgent):
         self.normalize_advantages = normalize_advantages
         self.device = torch.device(device)
 
-        self.policy = policy if policy is not None else ActorCriticPolicy(env_params, device=device)
+        self.policy = policy if policy is not None else ActorCriticPolicy(env_params=env_params)
         self.policy.to(self.device)
 
         # Configure optimizers
@@ -131,7 +131,7 @@ class PPO(BaseAgent):
             experience = collector.collect_experience(policy=self.policy, num_steps=self.steps_per_batch)
 
             # Compute Advantages and Returns under the current policy
-            advantages, returns = utils.compute_gae_and_returns(
+            advantages, returns = utils.generalized_advantage_estimates(
                 rewards=experience['reward'],
                 values=experience['value_est'],
                 dones=experience['done'],
@@ -141,7 +141,7 @@ class PPO(BaseAgent):
             )
             
             if self.normalize_advantages:
-                advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+                advantages = utils.normalize_advantages(advantages)
 
             experience['advantages'] = advantages.detach()
             experience['returns'] = returns.detach()
@@ -194,8 +194,9 @@ class PPO(BaseAgent):
 
             # Update progress bar
             if show_progress:
-                progress_bar.update(current_step=num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}, "
-                                                                   f"Episode Length: {collector.previous_episode_length}, "
+                tracker = collector.get_metric_tracker()
+                progress_bar.update(current_step=num_steps, desc=f"Episode Reward: {tracker.last_episode_reward:.2f}, "
+                                                                   f"Episode Length: {tracker.last_episode_length}, "
                                                                    f"Loss: {np.mean(losses):.4f},")
             # Log metrics
             if logger.should_log(num_steps):
@@ -203,8 +204,8 @@ class PPO(BaseAgent):
                 logger.log_scalar('entropy_loss', np.mean(entropy_losses), num_steps)
                 logger.log_scalar('value_loss', np.mean(value_losses), num_steps)
                 logger.log_scalar('loss', np.mean(losses), num_steps)
-                logger.log_scalar('episode_reward', collector.previous_episode_reward, num_steps)
-                logger.log_scalar('episode_length', collector.previous_episode_length, num_steps)
+                # logger.log_scalar('episode_reward', collector.previous_episode_reward, num_steps)
+                # logger.log_scalar('episode_length', collector.previous_episode_length, num_steps)
 
             if evaluator is not None:
                 # Evaluate the agent periodically

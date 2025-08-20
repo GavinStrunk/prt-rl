@@ -229,7 +229,7 @@ class GymnasiumWrapper(EnvironmentInterface):
         
         # If there is only one environment, reset it directly
         if self.num_envs == 1:
-            state, info = self.env.reset(seed=seed)
+            state, info = self.reset(seed=seed)
         else:
             state, info = self.env.envs[index].reset(seed=seed)
             state = self._process_observation(state)
