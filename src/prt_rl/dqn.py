@@ -5,7 +5,7 @@ from typing import Optional, List, Tuple
 from prt_rl.env.interface import EnvParams, EnvironmentInterface
 from prt_rl.common.buffers import ReplayBuffer, BaseBuffer, PrioritizedReplayBuffer
 from prt_rl.common.schedulers import ParameterScheduler
-from prt_rl.common.collectors import SequentialCollector
+from prt_rl.common.collectors import ParallelCollector
 from prt_rl.common.loggers import Logger
 from prt_rl.agent import BaseAgent
 from prt_rl.common.policies import QValuePolicy
@@ -38,24 +38,26 @@ class DQN(BaseAgent):
     """
     def __init__(self,
                  env_params: EnvParams,
-                 policy: QValuePolicy,
-                 alpha: float = 0.1,
-                 gamma: float = 0.99,
+                 policy: QValuePolicy | None = None,
+                 replay_buffer: Optional[BaseBuffer] = None,
                  buffer_size: int = 1_000_000,
                  min_buffer_size: int = 10_000,
-                 mini_batch_size: int = 32,
+                 mini_batch_size: int = 32,                 
+                 learning_rate: float = 0.1,
+                 gamma: float = 0.99,
                  max_grad_norm: Optional[float] = 10.0,
                  target_update_freq: int = 1,
                  polyak_tau: Optional[float] = None,
                  train_freq: int = 1,
                  gradient_steps: int = 1,
-                 replay_buffer: Optional[BaseBuffer] = None,
                  device: str = "cuda",
                  ) -> None:
         super().__init__()
+        if env_params.action_continuous:
+            raise ValueError("DQN only supports discrete action spaces")
+        
         self.env_params = env_params
-        self.policy = policy
-        self.alpha = alpha
+        self.learning_rate = learning_rate
         self.gamma = gamma
         self.buffer_size = buffer_size
         self.min_buffer_size = min_buffer_size
@@ -68,6 +70,9 @@ class DQN(BaseAgent):
         self.device = torch.device(device)
         self._reset_env = True
 
+        self.policy = policy if policy is not None else QValuePolicy(env_params=env_params)
+        self.policy.to(self.device)
+
         # Initialize replay buffer
         self.replay_buffer = replay_buffer or ReplayBuffer(capacity=self.buffer_size, device=torch.device(device))
 
@@ -77,7 +82,7 @@ class DQN(BaseAgent):
         # Initialize optimizer
         self.optimizer = torch.optim.Adam(
             params=self.policy.parameters(),
-            lr=self.alpha
+            lr=self.learning_rate
         )
 
     def _compute_td_targets(self, 
@@ -145,7 +150,9 @@ class DQN(BaseAgent):
         if show_progress:
             progress_bar = ProgressBar(total_steps=total_steps)
 
-        collector = SequentialCollector(env, logger=logger)
+        # Setup up collector to return experience with shape (B, ...)
+        collector = ParallelCollector(env, logger=logger, flatten=True)
+        
         experience = {}
         num_steps = 0
         training_steps = 0
@@ -169,15 +176,15 @@ class DQN(BaseAgent):
             
             # Collect experience and add to replay buffer
             self.policy.eval()
-            experience = collector.collect_experience(policy=self.predict, num_steps=1)
+            experience = collector.collect_experience(policy=self.policy, num_steps=1)
             num_steps += experience["state"].shape[0]
             self.replay_buffer.add(experience)
 
             # Only train at a rate of the training frequency
+            td_errors = []
+            losses = []
             if num_steps % self.train_freq == 0:
                 self.policy.train()
-                td_errors = []
-                losses = []
 
                 for _ in range(self.gradient_steps):
                     # If minimum number of samples in replay buffer, sample a batch
@@ -216,8 +223,9 @@ class DQN(BaseAgent):
                 training_steps += 1
 
                 if show_progress:
-                    progress_bar.update(current_step=num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}, "
-                                                                   f"Episode Length: {collector.previous_episode_length}, "
+                    tracker = collector.get_metric_tracker()
+                    progress_bar.update(current_step=num_steps, desc=f"Episode Reward: {tracker.last_episode_reward:.2f}, "
+                                                                   f"Episode Length: {tracker.last_episode_length}, "
                                                                    f"Loss: {np.mean(losses):.4f},")
 
             # Update target network with either hard or soft update
@@ -285,7 +293,7 @@ class DoubleDQN(DQN):
         super().__init__(
             env_params=env_params,
             policy=policy,
-            alpha=alpha,
+            learning_rate=alpha,
             gamma=gamma,
             buffer_size=buffer_size,
             min_buffer_size=min_buffer_size,

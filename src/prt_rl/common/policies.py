@@ -298,10 +298,7 @@ class QValuePolicy(BasePolicy):
             latent_dim = self.encoder_network.features_dim
 
         # Get action dimension
-        if env_params.action_continuous:
-            action_dim = env_params.action_len
-        else:
-            action_dim = env_params.action_max - env_params.action_min + 1
+        action_dim = env_params.action_max - env_params.action_min + 1
 
         self.policy_head = policy_head(
             input_dim=latent_dim,
@@ -328,17 +325,17 @@ class QValuePolicy(BasePolicy):
         Returns:
             Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the chosen action, value estimate, and action log probability.
                 - action (torch.Tensor): Tensor with the chosen action. Shape (B, action_dim)
-                - value_estimate (torch.Tensor): Tensor with the estimated value of the state. Shape (B, 1)
+                - value_estimate (torch.Tensor): None
                 - log_prob (torch.Tensor): None
         """
         value_est = self.get_q_values(state)
 
-        with torch.no_grad():
-            if not deterministic:
-                action = self.decision_function.select_action(value_est)
-            else:
-                action = torch.argmax(value_est, dim=-1, keepdim=True)
-        return action, value_est, None
+        if not deterministic:
+            action = self.decision_function.select_action(value_est)
+        else:
+            action = torch.argmax(value_est, dim=-1, keepdim=True)
+
+        return action, None, None
     
     def get_q_values(self,
                         state: torch.Tensor

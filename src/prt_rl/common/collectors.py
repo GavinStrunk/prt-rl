@@ -282,16 +282,23 @@ class SequentialCollector:
         if not self.previous_experience['done'] and value_estimates:
             _, last_value_estimate, _ = get_action_from_policy(policy, self.previous_experience['next_state'], self.env_params)
 
-        return {
+        exp = {
             "state": torch.stack(states, dim=0),
             "action": torch.stack(actions, dim=0),
             "next_state": torch.stack(next_states, dim=0),
             "reward": torch.stack(rewards, dim=0),
             "done": torch.stack(dones, dim=0),
-            "value_est": torch.stack(value_estimates, dim=0) if value_estimates else None,
-            "log_prob": torch.stack(log_probs, dim=0) if log_probs else None,
-            "last_value_est": last_value_estimate if last_value_estimate is not None else None
         }
+
+        # Add the optional keys only if they were collected
+        if value_estimates:
+            exp['value_est'] = torch.stack(value_estimates, dim=0)
+        if log_probs:
+            exp['log_prob'] = torch.stack(log_probs, dim=0)
+        if last_value_estimate is not None:
+            exp['last_value_est'] = last_value_estimate
+
+        return exp
     
     def collect_trajectory(self, 
                         policy: 'BaseAgent | BasePolicy | None' = None,
@@ -375,8 +382,12 @@ class SequentialCollector:
             "reward":     torch.cat(rewards, dim=0) if len(rewards) else torch.empty(0),
             "done":       torch.cat(dones, dim=0) if len(dones) else torch.empty(0),
         }
-        out["value_est"] = torch.cat(value_ests, dim=0) if value_ests else None
-        out["log_prob"]  = torch.cat(log_probs,  dim=0) if log_probs  else None
+
+        # Add the optional keys only if they were collected
+        if value_ests:
+            out["value_est"] = torch.cat(value_ests, dim=0)
+        if log_probs:
+            out["log_prob"]  = torch.cat(log_probs,  dim=0)
 
         return out
     
@@ -435,15 +446,21 @@ class SequentialCollector:
             if done:
                 break
 
-        return {
+        traj = {
             "state": torch.stack(states, dim=0),
             "action": torch.stack(actions, dim=0),
             "next_state": torch.stack(next_states, dim=0),
             "reward": torch.stack(rewards, dim=0),
             "done": torch.stack(dones, dim=0),
-            "value_est": torch.stack(value_estimates, dim=0) if value_estimates else None,
-            "log_prob": torch.stack(log_probs, dim=0) if log_probs else None,
         }
+
+        # Add the optional keys only if they were collected
+        if value_estimates:
+            traj['value_est'] = torch.stack(value_estimates, dim=0)
+        if log_probs:
+            traj['log_prob'] = torch.stack(log_probs, dim=0)
+
+        return traj
     
     def _collect_step(self,
                       policy: 'BaseAgent | BasePolicy | None' = None
@@ -600,16 +617,23 @@ class ParallelCollector:
         if value_estimates is not None:
             _, last_value_estimate, _ = get_action_from_policy(policy, self.previous_experience['next_state'], self.env_params)
         
-        return {
+        exp = {
             "state": states,
             "action": actions,
             "next_state": next_states,
             "reward": rewards,
             "done": dones,
-            "value_est": value_estimates if value_estimates is not None else None,
-            "log_prob": log_probs if log_probs is not None else None,
-            "last_value_est": last_value_estimate if value_estimates is not None else None
         }
+
+        # Add the optional keys only if they were collected
+        if value_estimates is not None:
+            exp['value_est'] = value_estimates
+        if log_probs is not None:
+            exp['log_prob'] = log_probs
+        if last_value_estimate is not None:
+            exp['last_value_est'] = last_value_estimate
+
+        return exp
     
     def collect_trajectory(self, 
                         policy: 'BaseAgent | BasePolicy | None' = None,
@@ -815,8 +839,11 @@ class ParallelCollector:
             "reward":     torch.cat(cat_rewards,     dim=0),
             "done":       torch.cat(cat_dones,       dim=0),
         }
-        out["value_est"] = torch.cat(cat_values, dim=0) if len(cat_values) > 0 else None
-        out["log_prob"]  = torch.cat(cat_logp,   dim=0) if len(cat_logp)   > 0 else None
+
+        if len(cat_values) > 0:
+            out["value_est"] = torch.cat(cat_values, dim=0) 
+        if len(cat_logp) > 0:
+            out["log_prob"]  = torch.cat(cat_logp,   dim=0)
 
         return out 
 

@@ -329,9 +329,9 @@ def test_collect_no_values_or_logprobs_returns_none(mock_env, discrete_action_pa
 
     assert out["state"].shape == (3, 4)
     assert out["action"].shape == (3, 1)
-    assert out["value_est"] is None
-    assert out["log_prob"] is None
-    assert out["last_value_est"] is None
+    assert not hasattr(out, 'value_est')
+    assert not hasattr(out, 'log_prob')
+    assert not hasattr(out, 'last_value_est')
 
 def test_collect_continuous_action_shapes(mock_env, cont_action_params, monkeypatch):
     mock_env.get_parameters.return_value = cont_action_params
@@ -474,8 +474,8 @@ def test_collect_single_trajectory_no_values_or_logprobs(mock_env, discrete_acti
     assert traj["reward"].shape     == (2, 1)
     assert traj["done"].shape       == (2, 1)
 
-    assert traj["value_est"] is None
-    assert traj["log_prob"] is None
+    assert not hasattr(traj, 'value_est')
+    assert not hasattr(traj, 'log_prob')
 
     assert mock_env.reset.call_count == 1
     assert mock_env.step.call_count  == 2
@@ -607,8 +607,8 @@ def test_collect_trajectory_optional_keys_all_missing(mock_env, discrete_action_
     out = collector.collect_trajectory(policy=MagicMock(), num_trajectories=2)
 
     assert out["state"].shape == (4, 4)
-    assert out["value_est"] is None
-    assert out["log_prob"] is None
+    assert not hasattr(out, 'value_est')
+    assert not hasattr(out, 'log_prob')
 
 def test_collect_trajectory_continuous_action_shapes(mock_env, cont_action_params, monkeypatch):
     """
@@ -884,10 +884,9 @@ def test_parallel_collect_resets_done_envs_with_reset_index(mock_vec_env_n1, mon
     assert env.reset_index.call_count == 1
 
     # value/log_prob absent -> None
-    assert out["value_est"] is None
-    assert out["log_prob"]  is None
-    # last_value_est will be None as well in this branch
-    assert out["last_value_est"] is None
+    assert not hasattr(out, 'value_est')
+    assert not hasattr(out, 'log_prob')
+    assert not hasattr(out, 'last_value_est')
 
 def test_parallel_collect_bootstraps_last_value_estimate(mock_vec_env_n1, monkeypatch):
     """
@@ -1113,8 +1112,8 @@ def test_collect_trajectory_optional_keys_absent(monkeypatch):
 
     # 1 episode per env -> lens 2 + 3 + 4 = 9
     assert out["state"].shape == (9, 4)
-    assert out["value_est"] is None
-    assert out["log_prob"] is None
+    assert not hasattr(out, 'value_est')
+    assert not hasattr(out, 'log_prob')
 
 def test_collect_step_from_single_env_with_reset():
     env = GymnasiumWrapper("CartPole-v1")
