@@ -36,6 +36,7 @@ from prt_rl.env.interface import EnvParams
 from prt_rl.common.decision_functions import DecisionFunction, EpsilonGreedy
 from prt_rl.common.networks import MLP, BaseEncoder
 import prt_rl.common.distributions as dist
+from prt_rl.common.utils import clamp_actions
 
 
 class ValueCritic(torch.nn.Module):
@@ -642,7 +643,8 @@ class ContinuousPolicy(BasePolicy):
             state = self.encoder(state)
 
         action = self.policy_head(state)
-        action = action.clamp(self.env_params.action_min, self.env_params.action_max)
+
+        action = clamp_actions(action, self.env_params.action_min, self.env_params.action_max)
         return action, None, None
 
     

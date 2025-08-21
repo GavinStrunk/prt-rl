@@ -4,6 +4,63 @@ import pytest
 from copy import deepcopy
 import prt_rl.common.utils as utils
 
+# Clamp Actions tests
+# ==================================================
+def test_clamp_scalar_bounds():
+    actions = torch.tensor([[2.0, -3.0], [0.5, 1.5]])
+    clamped = utils.clamp_actions(actions, -1.0, 1.0)
+    expected = torch.tensor([[1.0, -1.0], [0.5, 1.0]])
+    assert torch.allclose(clamped, expected)
+
+
+def test_clamp_list_bounds():
+    actions = torch.tensor([[2.0, -3.0], [0.5, 1.5]])
+    clamped = utils.clamp_actions(actions, [-1.0, -2.0], [1.0, 2.0])
+    expected = torch.tensor([[1.0, -2.0], [0.5, 1.5]])
+    assert torch.allclose(clamped, expected)
+
+
+def test_clamp_tensor_bounds():
+    actions = torch.tensor([[2.0, -3.0], [0.5, 1.5]])
+    action_min = torch.tensor([-1.0, -2.0])
+    action_max = torch.tensor([1.0, 2.0])
+    clamped = utils.clamp_actions(actions, action_min, action_max)
+    expected = torch.tensor([[1.0, -2.0], [0.5, 1.5]])
+    assert torch.allclose(clamped, expected)
+
+
+def test_clamp_no_clipping():
+    actions = torch.tensor([[0.0, 0.5], [0.2, -0.5]])
+    clamped = utils.clamp_actions(actions, -1.0, 1.0)
+    assert torch.allclose(clamped, actions)
+
+
+def test_clamp_on_cuda_if_available():
+    if torch.cuda.is_available():
+        actions = torch.tensor([[2.0, -3.0]], device='cuda')
+        clamped = utils.clamp_actions(actions, -1.0, 1.0)
+        expected = torch.tensor([[1.0, -1.0]], device='cuda')
+        assert torch.allclose(clamped, expected)
+
+
+def test_clamp_invalid_length_list():
+    actions = torch.randn(2, 3)
+    with pytest.raises(RuntimeError):
+        utils.clamp_actions(actions, [-1.0, 0.0], [1.0, 1.0])  # Wrong length
+
+
+def test_clamp_invalid_length_tensor():
+    actions = torch.randn(2, 3)
+    min_tensor = torch.tensor([-1.0, 0.0])  # Invalid
+    max_tensor = torch.tensor([1.0, 1.0])   # Invalid
+    with pytest.raises(RuntimeError):
+        utils.clamp_actions(actions, min_tensor, max_tensor)
+
+def test_clamp_discrete_actions_fails():
+    actions = torch.tensor([[2], [1]], dtype=torch.int32)
+    with pytest.raises(ValueError):
+        utils.clamp_actions(actions, -1, 1)
+
 # Polyak update tests
 # ==================================================
 class DummyNet(nn.Module):

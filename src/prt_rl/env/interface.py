@@ -13,12 +13,12 @@ class EnvParams:
     Parameters:
         action_len (int): Number of actions in action space
         action_continuous (bool): True if the actions are continuous or False if they are discrete
-        action_min: Minimum action value. If this is a scalar it is applied to all actions otherwise it must match the action shape
-        action_max: Maximum action values. If this is a scalar it is applied to all actions otherwise it must match the action shape
+        action_min: Minimum action value. If the actions are discrete this is the minimum integer value, if the actions are continuous it matches the action shape with the minimum value for each action
+        action_max: Maximum action values. If the actions are discrete this is the maximum integer value, if the actions are continuous it matches the action shape with the maximum value for each action
         observation_shape (tuple): shape of the observation space
         observation_continuous (bool): True if the observations are continuous or False if they are discrete
-        observation_min: Minimum observation value. If this is a scalar it is applied to all observations otherwise it must match the observation shape
-        observation_max: Maximum observation value. If this is a scalar it is applied to all observations otherwise it must match the observation shape
+        observation_min: Minimum observation value. If the observations are discrete this is the minimum integer value, if the observations are continuous it matches the observation shape with the minimum value for each observation
+        observation_max: Maximum observation value. If the observations are discrete this is the maximum integer value, if the observations are continuous it matches the observation shape with the maximum value for each observation
     """
     action_len: int
     action_continuous: bool

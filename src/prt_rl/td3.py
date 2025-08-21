@@ -14,7 +14,7 @@ import prt_rl.common.utils as utils
 
 import copy
 import numpy as np
-from prt_rl.common.collectors import SequentialCollector
+from prt_rl.common.collectors import ParallelCollector
 from prt_rl.common.buffers import ReplayBuffer
 from prt_rl.common.policies import BasePolicy, ContinuousPolicy, StateActionCritic
 
@@ -55,15 +55,18 @@ class TD3Policy(BasePolicy):
         if not self.share_encoder and actor_encoder is not None:
             actor_encoder = copy.deepcopy(actor_encoder)
 
-        self.target_actor = copy.deepcopy(self.actor)
-        self.target_actor.to(self.device)
+        self.actor_target = copy.deepcopy(self.actor)
+        self.actor_target.to(self.device)
 
         self.critic = critic if critic is not None else StateActionCritic(env_params=env_params, num_critics=num_critics, encoder=actor_encoder)
         self.critic.to(self.device)
         self.critic_target = copy.deepcopy(self.critic)
         self.critic_target.to(self.device)
 
-    def forward(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
+    def forward(self, 
+                state: torch.Tensor, 
+                deterministic: bool = False
+                ) -> torch.Tensor:
         """
         Forward pass through the policy network.
 
@@ -90,11 +93,55 @@ class TD3Policy(BasePolicy):
         Returns:
             Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the chosen action, value estimate, and action log probability.
                 - action (torch.Tensor): Tensor with the chosen action. Shape (B, action_dim)
-                - value_estimate (torch.Tensor): Tensor with the estimated value of the state. Shape (B, 1)
-                - log_prob (torch.Tensor): Tensor with the log probability of the chosen action. Shape (B, 1)
+                - value_estimate (torch.Tensor): Tensor with the estimated value of the state. Shape (B, C, 1) where C is the number of critics
+                - log_prob (torch.Tensor): None
         """
-        action, _, _ = self.actor(state, deterministic=deterministic)
-        
+        action = self.actor(state, deterministic=deterministic)
+
+        value_estimates = self.critic(state, action)
+        value_estimates = torch.stack(value_estimates, dim=1)  # Shape (B, C, 1) where C is the number of critics
+        return action, value_estimates, None
+    
+    def get_q_values(self,
+                     state: torch.Tensor,
+                     action: torch.Tensor,
+                     index: Optional[int] = None
+                     ) -> torch.Tensor:
+        """
+        Get Q-values from all critics for the given state-action pairs.
+
+        Args:
+            state (torch.Tensor): Current state tensor.
+            action (torch.Tensor): Action tensor.
+
+        Returns:
+            torch.Tensor: Tensor containing Q-values from all critics. Shape (B, C, 1) where C is the number of critics.
+        """
+        if index is None:
+            q_values = self.critic(state, action)
+            q_values = torch.stack(q_values, dim=1)  # Shape (B, C, 1) where C is the number of critics
+        else:
+            q_values = self.critic.forward_indexed(index, state, action)
+        return q_values
+    
+    def get_target_q_values(self,
+                            state: torch.Tensor,
+                            action: torch.Tensor,
+                            ) -> torch.Tensor:
+        """
+        Get target Q-values from all target critics for the given state-action pairs.
+
+        Args:
+            state (torch.Tensor): Current state tensor.
+            action (torch.Tensor): Action tensor.
+
+        Returns:
+            torch.Tensor: Tensor containing target Q-values from all critics. Shape (B, C, 1) where C is the number of critics.
+        """
+        q_values = self.critic_target(state, action)
+        q_values = torch.stack(q_values, dim=1)  # Shape (B, C, 1) where C is the number of critics
+        return q_values
+    
 
 class TD3(BaseAgent):
     """
@@ -151,6 +198,7 @@ class TD3(BaseAgent):
         self.delay_freq = delay_freq
         self.tau = tau
         self.device = torch.device(device)
+
         self.policy = policy if policy is not None else TD3Policy(env_params=env_params, num_critics=2, device=device)
         self.policy.to(self.device)
 
@@ -158,6 +206,9 @@ class TD3(BaseAgent):
         self.critic_optimizers = [
             torch.optim.Adam(critic.parameters(), lr=self.learning_rate) for critic in self.policy.critic.critics
         ]
+
+        self.action_min = torch.tensor(env_params.action_min, device=self.device, dtype=torch.float32)
+        self.action_max = torch.tensor(env_params.action_max, device=self.device, dtype=torch.float32)
 
     def predict(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
         """
@@ -176,7 +227,7 @@ class TD3(BaseAgent):
                 # Add noise to the action for exploration
                 noise = utils.gaussian_noise(mean=0, std=self.exploration_noise, shape=action.shape, device=self.device)
                 action = action + noise
-                # action = action.clamp(self.env_params.action_min, self.env_params.action_max)
+                action = action.clamp(self.action_min, self.action_max)
         return action
         
     def train(self,
@@ -207,8 +258,8 @@ class TD3(BaseAgent):
         num_steps = 0
         num_gradient_steps = 0
 
-        # Make collector and flatten the experience so the shape is (N*T, ...)
-        collector = SequentialCollector(env=env, logger=logger)
+        # Make collector and flatten the experience so the shape is (B, ...)
+        collector = ParallelCollector(env=env, logger=logger, flatten=True)
         replay_buffer = ReplayBuffer(capacity=self.buffer_size, device=self.device)
 
         while num_steps < total_steps:
@@ -239,15 +290,16 @@ class TD3(BaseAgent):
                 batch = replay_buffer.sample(batch_size=self.mini_batch_size)
 
                 # Compute current policy's action and target
+                # We compute the target y values without gradients because they will be used to compute the loss for each critic
+                # so an error will be raised for trying to backpropagate through y more than once.
                 with torch.no_grad():
                     # Compute the policies next action with noise and clip to ensure it does not exceed action bounds
                     noise = utils.gaussian_noise(mean=0, std=self.policy_noise, shape=batch['action'].shape, device=self.device)
                     noise_clipped = noise.clamp(-self.noise_clip, self.noise_clip)
-                    next_action = (self.policy.target_actor(batch['next_state'].float()) + noise_clipped) #.clamp(self.env_params.action_min, self.env_params.action_max)
+                    next_action = (self.policy.actor_target(batch['next_state'].float()) + noise_clipped) #.clamp(self.env_params.action_min, self.env_params.action_max)
 
-                    # Compute the Q-Values for all the critics
-                    next_q_values = self.policy.critic_target(batch['next_state'].float(), next_action)
-                    next_q_values = torch.cat(next_q_values, dim=1)
+                    # Compute the Q-Values for all the critics - shape (B, C, 1) -> (B, C)
+                    next_q_values = self.policy.get_target_q_values(batch['next_state'], next_action).squeeze(-1) 
 
                     # Use the minimum Q-Value across critics for the target
                     next_q_values = torch.min(next_q_values, dim=1, keepdim=True)[0] 
@@ -255,15 +307,12 @@ class TD3(BaseAgent):
                     # Compute the target Q-Value
                     y = batch['reward'] + self.gamma * (1 - batch['done'].float()) * next_q_values
 
-                # Perform gradient step on critics
-                q_input = torch.cat([batch['state'].float(), batch['action']], dim=1)
-                
-                c_losses = []
+                # Update critics
                 for i in range(self.policy.num_critics):
                     # Compute critics loss
-                    q_i = self.policy.critic.critics[i](q_input.detach())
+                    q_i = self.policy.get_q_values(batch['state'].detach(), batch['action'].detach(), index=i)
                     critic_loss = F.mse_loss(y, q_i)
-                    c_losses.append(critic_loss.item())
+                    critics_losses.append(critic_loss.item())
 
                     self.critic_optimizers[i].zero_grad()
                     critic_loss.backward()
@@ -272,7 +321,7 @@ class TD3(BaseAgent):
                 # Delayed policy update 
                 if num_gradient_steps % self.delay_freq == 0:
                     # Compute actor loss
-                    actor_loss = -self.policy.critic.forward_indexed(index=0, state=batch['state'], action=self.policy.actor(batch['state'])).mean()
+                    actor_loss = -self.policy.get_q_values(state=batch['state'], action=self.policy.actor(batch['state']), index=0).mean()
                     actor_losses.append(actor_loss.item())
 
                     # Take a gradient step on the actor
@@ -281,13 +330,17 @@ class TD3(BaseAgent):
                     self.actor_optimizer.step()
 
                     # Update target networks
-                    utils.polyak_update(self.policy.target_actor, self.policy.actor, tau=self.tau)
+                    utils.polyak_update(self.policy.actor_target, self.policy.actor, tau=self.tau)
                     for i in range(self.policy.num_critics):
                         utils.polyak_update(self.policy.critic_target.critics[i], self.policy.critic.critics[i], tau=self.tau)
 
             if show_progress:
                 tracker = collector.get_metric_tracker()
-                progress_bar.update(current_step=num_steps, desc=f"Episode Reward: {tracker.last_episode_reward:.2f}")
+                progress_bar.update(current_step=num_steps, desc=f"Episode Reward: {tracker.last_episode_reward:.2f}"
+                                                                f" Episode Length: {tracker.last_episode_length}"
+                                                                f" Episode number: {tracker.episode_count}"
+                                                                f" Actor Loss: {np.mean(actor_losses):.4f}"
+                                                                )
 
             if logger.should_log(num_steps):
                 logger.log_scalar('actor_loss', np.mean(actor_losses), num_steps)

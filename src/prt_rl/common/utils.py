@@ -4,7 +4,7 @@ Utility functions for reinforcement learning agents that are used across differe
 import random
 import numpy as np
 import torch
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Union, List
 
 def set_seed(seed: int):
     # Python
@@ -21,6 +21,47 @@ def set_seed(seed: int):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     # torch.use_deterministic_algorithms(True)  # Uncomment for stricter control (may raise errors)
+
+
+def clamp_actions(actions: torch.Tensor,
+                  action_min: Union[float, List[float], torch.Tensor],
+                  action_max: Union[float, List[float], torch.Tensor]) -> torch.Tensor:
+    """
+    Clamps actions to be within min and max bounds, handling scalar, list, or tensor bounds.
+
+    Args:
+        actions (torch.Tensor): Action tensor of shape (B, A)
+        action_min (float | List[float] | torch.Tensor): Minimum bounds for actions.
+        action_max (float | List[float] | torch.Tensor): Maximum bounds for actions.
+
+    Returns:
+        torch.Tensor: Clamped actions of shape (B, A)
+    """
+    if actions.dtype is not torch.float32:
+        raise ValueError(f"Expected actions to be of type torch.float32, got {actions.dtype}")
+    
+    device = actions.device
+
+    # Convert to tensors if needed
+    if isinstance(action_min, (float, int)):
+        action_min = torch.full((actions.shape[1],), float(action_min), device=device)
+    elif isinstance(action_min, list):
+        action_min = torch.tensor(action_min, device=device, dtype=actions.dtype)
+    else:
+        action_min = action_min.to(device).view(-1)
+
+    if isinstance(action_max, (float, int)):
+        action_max = torch.full((actions.shape[1],), float(action_max), device=device)
+    elif isinstance(action_max, list):
+        action_max = torch.tensor(action_max, device=device, dtype=actions.dtype)
+    else:
+        action_max = action_max.to(device).view(-1)
+
+    # Reshape to (1, A) for broadcasting over batch
+    action_min = action_min.view(1, -1)
+    action_max = action_max.view(1, -1)
+
+    return torch.clamp(actions, min=action_min, max=action_max)
 
 def polyak_update(target: torch.nn.Module, network: torch.nn.Module, tau: float) -> None:
     """
