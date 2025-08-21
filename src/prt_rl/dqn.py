@@ -50,7 +50,7 @@ class DQN(BaseAgent):
                  polyak_tau: Optional[float] = None,
                  train_freq: int = 1,
                  gradient_steps: int = 1,
-                 device: str = "cuda",
+                 device: str = "cpu",
                  ) -> None:
         super().__init__()
         if env_params.action_continuous:
