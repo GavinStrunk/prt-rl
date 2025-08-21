@@ -3,7 +3,6 @@ import torch
 from typing import Optional, List, Union
 from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.loggers import Logger
-from prt_rl.common.policies import BasePolicy
 from prt_rl.env.interface import EnvironmentInterface, EnvParams, MultiAgentEnvParams
 from prt_rl.common.evaluators import Evaluator
 
@@ -11,33 +10,30 @@ class BaseAgent(ABC):
     """
     Base class for all agents in the PRT-RL framework.
     """
-    def __init__(self,
-                 policy: BasePolicy
-                 ) -> None:
-        self.policy = policy
-
-    def __call__(self, state: torch.Tensor) -> torch.Tensor:
+    def __call__(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
         """
         Call the agent to perform an action based on the current state.
 
         Args:
-            state: The current state of the environment.
+            state (torch.Tensor): The current state of the environment.
+            deterministic (bool): If True, the agent will select actions deterministically.
 
         Returns:
-            The action to be taken.
+            torch.Tensor: The action to be taken.
         """
-        return self.predict(state)
+        return self.predict(state, deterministic)
 
     @abstractmethod
-    def predict(self, state: torch.Tensor) -> torch.Tensor:
+    def predict(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
         """
         Perform an action based on the current state.
 
         Args:
-            state: The current state of the environment.
+            state (torch.Tensor): The current state of the environment.
+            deterministic (bool): If True, the agent will select actions deterministically.
 
         Returns:
-            The action to be taken.
+            torch.Tensor: The action to be taken.
         """
         raise NotImplementedError("The predict method must be implemented by subclasses.")
 
@@ -47,18 +43,19 @@ class BaseAgent(ABC):
               total_steps: int,
               schedulers: Optional[List[ParameterScheduler]] = None,
               logger: Optional[Logger] = None,
-              logging_freq: int = 1000,
-              evaluator: Evaluator = Evaluator(),
-              eval_freq: int = 1000,
+              evaluator: Optional[Evaluator] = None,
+              show_progress: bool = True
               ) -> None:
         """
         Update the agent's knowledge based on the action taken and the received reward.
 
         Args:
-            state: The current state of the environment.
-            action: The action taken.
-            reward: The reward received after taking the action.
-            next_state: The next state of the environment after taking the action.
+            env (EnvironmentInterface): The environment in which the agent will operate.
+            total_steps (int): Total number of training steps to perform.
+            schedulers (List[ParameterScheduler]): List of parameter schedulers to update during training.
+            logger (Optional[Logger]): Logger for logging training progress. If None, a default logger will be created.
+            evaluator (Evaluator): Evaluator to evaluate the agent periodically.
+            show_progress (bool): If True, show a progress bar during training.
         """
         raise NotImplementedError("The train method must be implemented by subclasses.")
     
@@ -73,11 +70,12 @@ class RandomAgent(BaseAgent):
     def __init__(self,
                  env_params: Union[EnvParams | MultiAgentEnvParams],
                  ) -> None:
-        super(RandomAgent, self).__init__(policy=None)
+        super(RandomAgent, self).__init__()
         self.env_params = env_params
 
     def predict(self,
-                   state: torch.Tensor
+                   state: torch.Tensor,
+                   deterministic: bool = False
                    ) -> torch.Tensor:
         """
         Randomly samples an action from action space.
@@ -85,6 +83,9 @@ class RandomAgent(BaseAgent):
         Returns:
             TensorDict: Tensordict with the "action" key added
         """
+        if deterministic:
+            raise ValueError("RandomAgent does not support deterministic actions. Set deterministic=False to sample random actions.")
+        
         if isinstance(self.env_params, EnvParams):
             ashape = (state.shape[0], self.env_params.action_len)
             params = self.env_params
@@ -108,5 +109,12 @@ class RandomAgent(BaseAgent):
 
         return action
     
-    def train(self, env, total_steps, schedulers = None, logger = None, logging_freq = 1000):
+    def train(self,
+              env: EnvironmentInterface,
+              total_steps: int,
+              schedulers: Optional[List[ParameterScheduler]] = None,
+              logger: Optional[Logger] = None,
+              evaluator: Optional[Evaluator] = None,
+              show_progress: bool = True
+              ) -> None:
         raise NotImplementedError("RandomAgent does not support training. It is designed for interactive control only.")

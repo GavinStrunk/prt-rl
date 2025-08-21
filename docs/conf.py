@@ -8,6 +8,8 @@
 
 import os
 import sys
+import inspect
+import torch  # Or other base classes you want to hide
 
 sys.path.insert(0, os.path.abspath('.'))
 sys.path.insert(0, os.path.abspath('..'))
@@ -95,3 +97,17 @@ html_favicon = "_static/prt-rl-logo.jpg"
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
 
+# Hide inherited members from external libraries like torch.nn
+def skip_external_inherited_members(app, what, name, obj, skip, options):
+    # Always include your own members
+    if inspect.isfunction(obj) or inspect.ismethod(obj):
+        # Only skip if the object is defined outside your own codebase
+        mod = inspect.getmodule(obj)
+        if mod:
+            # You can adjust this to allow members from your own library
+            if mod.__name__.split('.')[0] in {"torch"}:
+                return True
+    return skip  # Otherwise, keep default behavior
+
+def setup(app):
+    app.connect("autodoc-skip-member", skip_external_inherited_members)

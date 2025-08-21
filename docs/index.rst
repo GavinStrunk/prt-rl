@@ -14,14 +14,6 @@
     Demo Gallery <gallery>
 
 .. toctree::
-    :maxdepth: 1
-    :hidden:
-    :caption: Algorithm Notes
-
-    source/dqn.md
-    source/ppo.md
-
-.. toctree::
    :hidden:
    :caption: API Reference
 

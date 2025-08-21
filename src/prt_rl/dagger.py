@@ -20,7 +20,9 @@ class DAgger(BaseAgent):
 
     Args:
         env_params (EnvParams): Environment parameters.
-        policy (Optional[DistributionPolicy]): The policy to be used by the agent. If None, a default policy will be created based on the environment parameters.
+        policy (DistributionPolicy | None): The policy to be used by the agent. If None, a default policy will be created based on the environment parameters.
+        expert_policy (BaseAgent): The expert agent to provide actions for the states.
+        experience_buffer (ReplayBuffer): The replay buffer to store experiences.        
         buffer_size (int): Size of the replay buffer. Default is 10000.
         learning_rate (float): Learning rate for the optimizer. Default is 1e-3.
         optim_steps (int): Number of optimization steps per training iteration. Default is 1.
@@ -30,7 +32,9 @@ class DAgger(BaseAgent):
     """
     def __init__(self,
                  env_params: EnvParams, 
-                 policy: Optional[DistributionPolicy] = None,
+                 expert_policy: BaseAgent,
+                 experience_buffer: ReplayBuffer,                 
+                 policy: DistributionPolicy | None = None,
                  buffer_size: int = 10000,
                  learning_rate: float = 1e-3,
                  optim_steps: int = 1,
@@ -38,14 +42,18 @@ class DAgger(BaseAgent):
                  max_grad_norm: float = 10.0,
                  device: str = 'cpu',
                  ) -> None:
+        super(DAgger, self).__init__()
         self.env_params = env_params
-        self.policy = policy if policy is not None else DistributionPolicy(env_params=env_params)
+        self.expert_policy = expert_policy
+        self.experience_buffer = experience_buffer
         self.buffer_size = buffer_size
         self.learning_rate = learning_rate
         self.optim_steps = optim_steps
         self.mini_batch_size = mini_batch_size
         self.max_grad_norm = max_grad_norm
         self.device = torch.device(device)
+
+        self.policy = policy if policy is not None else DistributionPolicy(env_params=env_params)
         self.policy.to(self.device)
 
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.learning_rate)
@@ -72,7 +80,7 @@ class DAgger(BaseAgent):
         else:
             raise ValueError(f"Unsupported distribution type {policy.distribution.__class__} loss function.")
     
-    def predict(self, state: torch.Tensor) -> torch.Tensor:
+    def predict(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
         """
         Perform an action based on the current state using the policy.
         
@@ -83,41 +91,37 @@ class DAgger(BaseAgent):
             The action to be taken by the policy.
         """
         with torch.no_grad():
-            return self.policy(state)
+            return self.policy(state, deterministic=deterministic)
     
     def train(self,
               env: EnvironmentInterface,
-              expert_policy: BaseAgent,
-              experience_buffer: ReplayBuffer,
               total_steps: int,
               schedulers: List[ParameterScheduler] = [],              
               logger: Optional[Logger] = None,
-              logging_freq: int = 1,              
               evaluator: Evaluator = Evaluator(),
-              eval_freq: int = 1000,
+              show_progress: bool = True
               ) -> None:
         """
         Train the DAgger agent using the provided environment and expert policy.
 
         Args:
             env (EnvironmentInterface): The environment in which the agent will operate.
-            expert_policy (BaseAgent): The expert agent to provide actions for the states.
-            experience_buffer (ReplayBuffer): The replay buffer to store experiences.
             total_steps (int): Total number of training steps to perform.
             schedulers (List[ParameterScheduler]): List of parameter schedulers to update during training.
             logger (Optional[Logger]): Logger for logging training progress. If None, a default logger will be created.
-            logging_freq (int): Frequency of logging training progress.
             evaluator (Evaluator): Evaluator to evaluate the agent periodically.
-            eval_freq (int): Frequency of evaluation during training.
+            show_progress (bool): If True, show a progress bar during training.
         """
         logger = logger or Logger.create('blank')
-        progress_bar = ProgressBar(total_steps=total_steps)
+
+        if show_progress:
+            progress_bar = ProgressBar(total_steps=total_steps)
 
         # Resize the replay buffer with size: initial experience + total_steps
-        experience_buffer.resize(new_capacity=experience_buffer.size + self.buffer_size)
+        self.experience_buffer.resize(new_capacity=self.experience_buffer.size + self.buffer_size)
 
         # Add initial experience to the replay buffer
-        collector = SequentialCollector(env=env, logger=logger, logging_freq=logging_freq)
+        collector = SequentialCollector(env=env, logger=logger)
 
         num_steps = 0
 
@@ -131,18 +135,18 @@ class DAgger(BaseAgent):
             num_steps += policy_experience['state'].shape[0]
 
             # Get expert action for each state in the collected experience
-            expert_actions = expert_policy(policy_experience['state'])
+            expert_actions = self.expert_policy(policy_experience['state'])
 
             # Update the policy experience with expert actions
             policy_experience['action'] = expert_actions
 
             # Add the policy experience to the replay buffer
-            experience_buffer.add(policy_experience)
+            self.experience_buffer.add(policy_experience)
 
             # Optimize the policy
             losses = []
             for _ in range(self.optim_steps):
-                for batch in experience_buffer.get_batches(batch_size=self.mini_batch_size):
+                for batch in self.experience_buffer.get_batches(batch_size=self.mini_batch_size):
                     # Compute the loss between the policy's actions and the expert's actions
                     if not self.env_params.action_continuous:
                         policy_logits = self.policy.get_logits(batch['state'])
@@ -158,18 +162,20 @@ class DAgger(BaseAgent):
                     torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=self.max_grad_norm)
                     self.optimizer.step()
             
-            progress_bar.update(num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}, "
+            if show_progress:
+                progress_bar.update(num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}, "
                                                                    f"Episode Length: {collector.previous_episode_length}, "
                                                                    f"Loss: {np.mean(losses):.4f},")
 
             # Log the training progress
-            if num_steps % logging_freq == 0:
+            if logger.should_log(num_steps):
                 for scheduler in schedulers:
                     logger.log_scalar(name=scheduler.parameter_name, value=getattr(scheduler.obj, scheduler.parameter_name), iteration=num_steps)
                 logger.log_scalar(name='loss', value=np.mean(losses), iteration=num_steps)
 
             # Evaluate the agent periodically
-            if num_steps % eval_freq == 0:
+            if evaluator is not None:
                 evaluator.evaluate(agent=self.policy, iteration=num_steps)
 
-        evaluator.close()
+        if evaluator is not None:
+            evaluator.close()

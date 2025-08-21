@@ -83,7 +83,7 @@ class SB3Agent(BaseAgent):
         # Load the model
         self.model = self.model_class.load(self.model_path, device=self.device, **kwargs)
 
-    def predict(self, state: torch.Tensor) -> torch.Tensor:
+    def predict(self, state: torch.Tensor, deterministic: bool = True) -> torch.Tensor:
         """
         Perform an action based on the current state.
 
@@ -100,7 +100,7 @@ class SB3Agent(BaseAgent):
         if isinstance(state, torch.Tensor):
             state = state.cpu().numpy()
 
-        action, _ = self.model.predict(state, deterministic=True)
+        action, _ = self.model.predict(state, deterministic=deterministic)
 
         if len(action.shape) == 1:
             # Discrete actions are returned with shape (batch_size,)
@@ -117,6 +117,7 @@ class SB3Agent(BaseAgent):
               logging_freq: int = 1000,
               evaluator: Evaluator = Evaluator(),
               eval_freq: int = 1000,
+              show_progress: bool = True
               ) -> None:
         raise NotImplementedError("The train method must be implemented by subclasses.")
       

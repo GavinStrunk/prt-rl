@@ -227,12 +227,16 @@ class GymnasiumWrapper(EnvironmentInterface):
         if index > self.num_envs:
             raise ValueError(f"Index {index} is out of bounds for {self.num_envs} environments.")
         
-        state, info = self.env.envs[index].reset(seed=seed)
-        state = self._process_observation(state)
+        # If there is only one environment, reset it directly
+        if self.num_envs == 1:
+            state, info = self.reset(seed=seed)
+        else:
+            state, info = self.env.envs[index].reset(seed=seed)
+            state = self._process_observation(state)
 
-        if self.render_mode == 'rgb_array':
-            rgb = self.env.render()
-            info['rgb_array'] = rgb[np.newaxis, ...]
+            if self.render_mode == 'rgb_array':
+                rgb = self.env.render()
+                info['rgb_array'] = rgb[np.newaxis, ...]
 
         return state, info
 
@@ -253,7 +257,7 @@ class GymnasiumWrapper(EnvironmentInterface):
                 # If there are multiple environments and 1 action, the step function expects an action with shape (# envs,)
                 action = action.cpu().numpy().squeeze(-1)
         else:
-            action = action.cpu().numpy()
+            action = action.detach().cpu().numpy()
 
             # If there is only one environment remove the first dimension
             if action.shape[0] == 1:
@@ -265,7 +269,7 @@ class GymnasiumWrapper(EnvironmentInterface):
         # Reshape the reward and done to be (# envs, 1)
         if self.num_envs == 1:
             reward = torch.tensor([[reward]], dtype=torch.float, device=self.device)
-            done = torch.tensor([[done]], dtype=torch.bool, device=self.device)
+            done = torch.tensor([[bool(done)]], dtype=torch.bool, device=self.device)
         else:
             reward = torch.tensor(reward, dtype=torch.float, device=self.device).unsqueeze(-1)
             done = torch.tensor(done, dtype=torch.bool, device=self.device).unsqueeze(-1)
@@ -298,6 +302,10 @@ class GymnasiumWrapper(EnvironmentInterface):
         else:
             observation = torch.tensor(observation, device=self.device)
 
+        # If observation is float64 convert it to float32
+        if observation.dtype == torch.float64:
+            observation = observation.float()
+            
         return observation
 
     def _make_env_params(self,
