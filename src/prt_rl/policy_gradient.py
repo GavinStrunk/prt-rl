@@ -30,9 +30,10 @@ This example demonstrates how to initialize a Policy Gradient agent with a custo
 
     agent.train(env, total_steps=10000)
 """
+from dataclasses import dataclass
 import numpy as np
 import torch
-from typing import Optional, List
+from typing import List
 from prt_rl.agent import BaseAgent
 from prt_rl.env.interface import EnvironmentInterface, EnvParams
 from prt_rl.common.schedulers import ParameterScheduler
@@ -44,14 +45,12 @@ from prt_rl.common.policies import DistributionPolicy
 from prt_rl.common.networks import MLP
 import prt_rl.common.utils as utils
 
-
-class PolicyGradient(BaseAgent):
+@dataclass
+class PolicyGradientConfig:
     """
-    Policy Gradient agent with step-wise optimization.
-
+    Hyperparameters for the Policy Gradient agent.
+    
     Args:
-        env_params (EnvParams): Environment parameters.
-        policy (Optional[DistributionPolicy]): The policy to be used by the agent. If None, a default policy will be created based on the environment parameters.
         batch_size (int): Size of the batch for training. Default is 100.
         learning_rate (float): Learning rate for the optimizer. Default is 1e-3.
         gamma (float): Discount factor for future rewards. Default is 0.99.
@@ -63,55 +62,52 @@ class PolicyGradient(BaseAgent):
         baseline_learning_rate (float): Learning rate for the baseline network if used. Default is 5e-3.
         baseline_optim_steps (int): Number of optimization steps for the baseline network. Default is 5.
         normalize_advantages (bool): Whether to normalize advantages before training. Default is True.
-        network_arch (List[int]): Architecture of the neural network for the policy. Default is [64, 64].
-        device (str): Device to run the agent on (e.g., 'cpu' or 'cuda'). Default is 'cpu'.
+    """
+    batch_size: int = 100
+    learning_rate: float = 1e-3
+    gamma: float = 0.99
+    gae_lambda: float = 0.95
+    optim_steps: int = 1
+    use_reward_to_go: bool = False
+    use_baseline: bool = False
+    use_gae: bool = False
+    baseline_learning_rate: float = 5e-3
+    baseline_optim_steps: int = 5
+    normalize_advantages: bool = True
 
+class PolicyGradient(BaseAgent):
+    """
+    Policy Gradient agent with step-wise optimization.
+
+    Args:
+        env_params (EnvParams): Environment parameters.
+        config (PolicyGradientConfig): Configuration for the Policy Gradient agent.
+        policy (Optional[DistributionPolicy]): The policy to be used by the agent. If None, a default policy will be created based on the environment parameters.
+        device (str): Device to run the agent on (e.g., 'cpu' or 'cuda'). Default is 'cpu'.
     """
     def __init__(self, 
                  env_params: EnvParams,
+                 config: PolicyGradientConfig = PolicyGradientConfig(),
                  policy: DistributionPolicy | None = None,
-                 batch_size: int = 100,
-                 learning_rate: float = 1e-3,
-                 gamma: float = 0.99,
-                 gae_lambda: float = 0.95,
-                 optim_steps: int = 1,
-                 use_reward_to_go: bool = False, 
-                 use_baseline: bool = False,
-                 use_gae: bool = False,
-                 baseline_learning_rate: float = 5e-3,
-                 baseline_optim_steps: int = 5,
-                 normalize_advantages: bool = True,
-                 network_arch: List[int] = [64, 64],
                  device: str = 'cpu',
                  ) -> None:
         super().__init__()
         self.env_params = env_params
-        self.batch_size = batch_size
-        self.learning_rate = learning_rate
-        self.gamma = gamma
-        self.gae_lambda = gae_lambda
-        self.use_reward_to_go = use_reward_to_go
-        self.use_baseline = use_baseline
-        self.use_gae = use_gae
-        self.baseline_learning_rate = baseline_learning_rate
-        self.baseline_optim_steps = baseline_optim_steps
-        self.normalize_advantages = normalize_advantages
-        self.optim_steps = optim_steps
-        self.network_arch = network_arch
+        self.config = config
         self.device = torch.device(device)
 
-        self.policy = policy if policy is not None else DistributionPolicy(env_params=env_params, policy_kwargs={'network_arch': network_arch})
+        self.policy = policy if policy is not None else DistributionPolicy(env_params=env_params)
         self.policy.to(self.device)
-        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.learning_rate)
+        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.config.learning_rate)
 
-        if use_baseline or use_gae:
+        if self.config.use_baseline or self.config.use_gae:
             self.critic = MLP(
                 input_dim=env_params.observation_shape[0],
                 output_dim=1,
-                network_arch=self.network_arch,
+                network_arch=[64,64],
             )
             self.critic.to(self.device)
-            self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=baseline_learning_rate)
+            self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=self.config.baseline_learning_rate)
         else:
             self.critic = None
 
@@ -164,27 +160,27 @@ class PolicyGradient(BaseAgent):
                 scheduler.update(current_step=num_steps)
 
             # Collect experience using the current policy
-            trajectories = collector.collect_trajectory(policy=self.policy, min_num_steps=self.batch_size)
+            trajectories = collector.collect_trajectory(policy=self.policy, min_num_steps=self.config.batch_size)
             num_steps += trajectories['state'].shape[0]  
 
             # Compute Monte Carlo estimate of the Q function
-            if self.use_gae:
+            if self.config.use_gae:
                 values = self.critic(trajectories['state']).detach()
                 advantages, Q_hat = utils.generalized_advantage_estimates(
                     rewards=trajectories['reward'],
                     values=values,
                     dones=trajectories['done'],
                     last_values=trajectories['last_value'] if 'last_value' in trajectories else torch.zeros_like(values[-1]),
-                    gamma=self.gamma,
-                    gae_lambda=self.gae_lambda
+                    gamma=self.config.gamma,
+                    gae_lambda=self.config.gae_lambda
                 )
             else:
-                if self.use_reward_to_go:
+                if self.config.use_reward_to_go:
                     # \sum_{t'=t}^{T-1} \gamma^{t'-t} r_{t'}
                     Q_hat = utils.rewards_to_go(
                         rewards=trajectories['reward'],
                         dones=trajectories['done'],
-                        gamma=self.gamma
+                        gamma=self.config.gamma
                     )
                 else:
                     # Total discounted return               
@@ -192,15 +188,15 @@ class PolicyGradient(BaseAgent):
                     Q_hat = utils.trajectory_returns(
                         rewards=trajectories['reward'],
                         dones=trajectories['done'],
-                        gamma=self.gamma
+                        gamma=self.config.gamma
                     )
 
-                if self.use_baseline:
+                if self.config.use_baseline:
                     advantages = Q_hat - self.critic(trajectories['state']).squeeze(1)
                 else:
                     advantages = Q_hat
             
-            loss = self._compute_loss(advantages, trajectories['log_prob'], self.normalize_advantages)
+            loss = self._compute_loss(advantages, trajectories['log_prob'], self.config.normalize_advantages)
             save_loss = loss.item()
 
             self.optimizer.zero_grad()
@@ -210,7 +206,7 @@ class PolicyGradient(BaseAgent):
             # Update the baseline is applicable
             if self.critic is not None:
                 critic_losses = []
-                for _ in range(self.baseline_optim_steps):
+                for _ in range(self.config.baseline_optim_steps):
                     # Compute the Q function predictions
                     q_value_pred = self.critic(trajectories['state']).squeeze(1)
 

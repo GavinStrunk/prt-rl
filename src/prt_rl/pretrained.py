@@ -32,7 +32,7 @@ class SB3Agent(BaseAgent):
                  device: str = "cpu",
                  **kwargs
                  ) -> None:
-        super().__init__(policy=None)  # SB3Agent does not use a separate policy, it uses the model directly
+        super().__init__()  # SB3Agent does not use a separate policy, it uses the model directly
         self.device = torch.device(device)
 
         try:

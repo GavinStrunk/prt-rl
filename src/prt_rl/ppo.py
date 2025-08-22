@@ -4,6 +4,7 @@ Proximal Policy Optimization (PPO)
 Reference:
 [1] https://arxiv.org/abs/1707.06347
 """
+from dataclasses import dataclass
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -19,6 +20,35 @@ from prt_rl.common.evaluators import Evaluator
 import prt_rl.common.utils as utils
 
 from prt_rl.common.policies import ActorCriticPolicy
+
+@dataclass
+class PPOConfig:
+    """
+    Configuration for the PPO agent.
+
+    Args:
+        steps_per_batch (int): Number of steps to collect per batch.
+        mini_batch_size (int): Size of mini-batches for optimization.
+        learning_rate (float): Learning rate for the optimizer.
+        gamma (float): Discount factor for future rewards.
+        epsilon (float): Clipping parameter for PPO.
+        gae_lambda (float): Lambda parameter for Generalized Advantage Estimation.
+        entropy_coef (float): Coefficient for the entropy term in the loss function.
+        value_coef (float): Coefficient for the value loss term in the loss function.
+        num_optim_steps (int): Number of optimization steps per batch.
+        normalize_advantages (bool): Whether to normalize advantages.
+    """
+    steps_per_batch: int = 2048
+    mini_batch_size: int = 32
+    learning_rate: float = 3e-4
+    gamma: float = 0.99
+    epsilon: float = 0.1
+    gae_lambda: float = 0.95
+    entropy_coef: float = 0.01
+    value_coef: float = 0.5
+    num_optim_steps: int = 10
+    normalize_advantages: bool = False
+
 
 class PPO(BaseAgent):
     """
@@ -42,37 +72,19 @@ class PPO(BaseAgent):
     def __init__(self,
                  env_params: EnvParams,
                  policy: ActorCriticPolicy | None = None,
-                 steps_per_batch: int = 2048,
-                 mini_batch_size: int = 32,
-                 learning_rate: float = 3e-4,
-                 gamma: float = 0.99,
-                 epsilon: float = 0.1,
-                 gae_lambda: float = 0.95,
-                 entropy_coef: float = 0.01,
-                 value_coef: float = 0.5,
-                 num_optim_steps: int = 10,
-                 normalize_advantages: bool = False,
+                 config: PPOConfig = PPOConfig(),
                  device: str = 'cpu',
                  ) -> None:
         super().__init__()
         self.env_params = env_params
-        self.gamma = gamma
-        self.epsilon = epsilon
-        self.learning_rate = learning_rate
-        self.gae_lambda = gae_lambda
-        self.entropy_coef = entropy_coef
-        self.value_coef = value_coef
-        self.num_optim_steps = num_optim_steps
-        self.mini_batch_size = mini_batch_size
-        self.steps_per_batch = steps_per_batch
-        self.normalize_advantages = normalize_advantages
+        self.config = config
         self.device = torch.device(device)
 
         self.policy = policy if policy is not None else ActorCriticPolicy(env_params=env_params)
         self.policy.to(self.device)
 
         # Configure optimizers
-        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.learning_rate)
+        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.config.learning_rate)
 
     def predict(self, 
                 state: torch.Tensor, 
@@ -119,7 +131,7 @@ class PPO(BaseAgent):
 
         # Make collector and do not flatten the experience so the shape is (N, T, ...)
         collector = ParallelCollector(env=env, logger=logger, flatten=False)
-        rollout_buffer = RolloutBuffer(capacity=self.steps_per_batch, device=self.device)
+        rollout_buffer = RolloutBuffer(capacity=self.config.steps_per_batch, device=self.device)
 
         while num_steps < total_steps:
             # Update Schedulers if provided
@@ -128,7 +140,7 @@ class PPO(BaseAgent):
                     scheduler.update(current_step=num_steps)
 
             # Collect experience dictionary with shape (N, T, ...)
-            experience = collector.collect_experience(policy=self.policy, num_steps=self.steps_per_batch)
+            experience = collector.collect_experience(policy=self.policy, num_steps=self.config.steps_per_batch)
 
             # Compute Advantages and Returns under the current policy
             advantages, returns = utils.generalized_advantage_estimates(
@@ -136,11 +148,11 @@ class PPO(BaseAgent):
                 values=experience['value_est'],
                 dones=experience['done'],
                 last_values=experience['last_value_est'],
-                gamma=self.gamma,
-                gae_lambda=self.gae_lambda
+                gamma=self.config.gamma,
+                gae_lambda=self.config.gae_lambda
             )
             
-            if self.normalize_advantages:
+            if self.config.normalize_advantages:
                 advantages = utils.normalize_advantages(advantages)
 
             experience['advantages'] = advantages.detach()
@@ -158,8 +170,8 @@ class PPO(BaseAgent):
             entropy_losses = []
             value_losses = []
             losses = []
-            for _ in range(self.num_optim_steps):
-                for batch in rollout_buffer.get_batches(batch_size=self.mini_batch_size):
+            for _ in range(self.config.num_optim_steps):
+                for batch in rollout_buffer.get_batches(batch_size=self.config.mini_batch_size):
                     new_value_est, new_log_prob, entropy = self.policy.evaluate_actions(batch['state'], batch['action'])
                     old_log_prob = batch['log_prob'].detach()
 
@@ -169,14 +181,14 @@ class PPO(BaseAgent):
                     # Clipped surrogate loss
                     batch_advantages = batch['advantages']
                     clip_loss = batch_advantages * ratio
-                    clip_loss2 = batch_advantages * torch.clamp(ratio, 1 - self.epsilon, 1 + self.epsilon)
+                    clip_loss2 = batch_advantages * torch.clamp(ratio, 1 - self.config.epsilon, 1 + self.config.epsilon)
                     clip_loss = -torch.min(clip_loss, clip_loss2).mean()
 
                     entropy_loss = -entropy.mean()
 
                     value_loss = F.mse_loss(new_value_est, batch['returns'])
 
-                    loss = clip_loss + self.entropy_coef*entropy_loss + self.value_coef * value_loss
+                    loss = clip_loss + self.config.entropy_coef*entropy_loss + self.config.value_coef * value_loss
                     
                     clip_losses.append(clip_loss.item())
                     entropy_losses.append(entropy_loss.item())

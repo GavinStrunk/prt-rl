@@ -1,6 +1,6 @@
 import torch
 import pytest
-from prt_rl.policy_gradient import PolicyGradient
+from prt_rl.policy_gradient import PolicyGradient, PolicyGradientConfig
 from prt_rl.env.wrappers import GymnasiumWrapper
 
 
@@ -40,9 +40,13 @@ def test_policy_gradient_multiple_envs():
 def test_policy_gradient_gae():
     env = GymnasiumWrapper("CartPole-v1")
 
+    config = PolicyGradientConfig(
+        use_gae=True,
+    )
+
     agent = PolicyGradient(
         env_params=env.get_parameters(),
-        use_gae=True,
+        config=config
     )
 
     # Test agent completes a training step without errors
@@ -52,9 +56,13 @@ def test_policy_gradient_gae():
 def test_policy_gradient_reward_to_go():
     env = GymnasiumWrapper("CartPole-v1")
 
+    config = PolicyGradientConfig(
+        use_reward_to_go=True,
+    )
+
     agent = PolicyGradient(
         env_params=env.get_parameters(),
-        use_reward_to_go=True,
+        config=config
     )
 
     # Test agent completes a training step without errors
@@ -64,9 +72,13 @@ def test_policy_gradient_reward_to_go():
 def test_policy_gradient_baseline():
     env = GymnasiumWrapper("CartPole-v1")
 
+    config = PolicyGradientConfig(
+        use_baseline=True,
+    )
+
     agent = PolicyGradient(
         env_params=env.get_parameters(),
-        use_baseline=True,
+        config=config
     )
 
     # Test agent completes a training step without errors
