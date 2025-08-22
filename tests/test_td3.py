@@ -1,6 +1,6 @@
 import torch
 import pytest
-from prt_rl.td3 import TD3Policy, TD3
+from prt_rl.td3 import TD3Policy, TD3, TD3Config
 from prt_rl.env.interface import EnvParams
 from prt_rl.common.policies import ContinuousPolicy, StateActionCritic
 from prt_rl.env.wrappers import GymnasiumWrapper
@@ -75,11 +75,14 @@ def test_td3_fails_on_discrete_actions():
 def test_policy_gradient_continuous_actions():
     env = GymnasiumWrapper("InvertedPendulum-v5")
 
+    config = TD3Config(
+        steps_per_batch=1,
+        min_buffer_size=1,
+        mini_batch_size=1,
+        delay_freq=1,
+    )
     agent = TD3(env_params=env.get_parameters(), 
-                steps_per_batch=1, 
-                min_buffer_size=1, 
-                mini_batch_size=1,
-                delay_freq=1
+                config=config,
                 )
 
     # Test agent completes a training step without errors
