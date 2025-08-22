@@ -1,4 +1,8 @@
+"""
+Deep Q-Network (DQN) Agents
+"""
 import copy
+from dataclasses import dataclass
 import numpy as np
 import torch
 from typing import Optional, List, Tuple
@@ -12,6 +16,35 @@ from prt_rl.common.policies import QValuePolicy
 from prt_rl.common.progress_bar import ProgressBar
 from prt_rl.common.evaluators import Evaluator
 import prt_rl.common.utils as utils
+
+
+@dataclass
+class DQNConfig:
+    """
+    Hyperparameters for the DQN agent.
+
+    Args:
+        buffer_size (int): Size of the replay buffer. Default is 1_000_000.
+        min_buffer_size (int): Minimum size of the replay buffer before training. Default is 10_000.
+        mini_batch_size (int): Size of the mini-batch for training. Default is 32.
+        learning_rate (float): Learning rate for the optimizer. Default is 0.1.
+        gamma (float): Discount factor for future rewards. Default is 0.99.
+        max_grad_norm (float): Maximum gradient norm for gradient clipping. Default is None.
+        target_update_freq (int): Frequency of target network updates. Default is 1.
+        polyak_tau (float): Polyak averaging coefficient for target network updates. Default is None.
+        train_freq (int): Frequency of training steps. Default is 1.
+        gradient_steps (int): Number of gradient steps per training iteration. Default is 1.
+    """
+    buffer_size: int = 1_000_000
+    min_buffer_size: int = 10_000
+    mini_batch_size: int = 32
+    learning_rate: float = 0.1
+    gamma: float = 0.99
+    max_grad_norm: Optional[float] = None
+    target_update_freq: int = 1
+    polyak_tau: Optional[float] = None
+    train_freq: int = 1
+    gradient_steps: int = 1
 
 class DQN(BaseAgent):
     """
@@ -40,16 +73,17 @@ class DQN(BaseAgent):
                  env_params: EnvParams,
                  policy: QValuePolicy | None = None,
                  replay_buffer: Optional[BaseBuffer] = None,
-                 buffer_size: int = 1_000_000,
-                 min_buffer_size: int = 10_000,
-                 mini_batch_size: int = 32,                 
-                 learning_rate: float = 0.1,
-                 gamma: float = 0.99,
-                 max_grad_norm: Optional[float] = 10.0,
-                 target_update_freq: int = 1,
-                 polyak_tau: Optional[float] = None,
-                 train_freq: int = 1,
-                 gradient_steps: int = 1,
+                 config: DQNConfig = DQNConfig(),
+                #  buffer_size: int = 1_000_000,
+                #  min_buffer_size: int = 10_000,
+                #  mini_batch_size: int = 32,                 
+                #  learning_rate: float = 0.1,
+                #  gamma: float = 0.99,
+                #  max_grad_norm: Optional[float] = 10.0,
+                #  target_update_freq: int = 1,
+                #  polyak_tau: Optional[float] = None,
+                #  train_freq: int = 1,
+                #  gradient_steps: int = 1,
                  device: str = "cpu",
                  ) -> None:
         super().__init__()
@@ -57,16 +91,17 @@ class DQN(BaseAgent):
             raise ValueError("DQN only supports discrete action spaces")
         
         self.env_params = env_params
-        self.learning_rate = learning_rate
-        self.gamma = gamma
-        self.buffer_size = buffer_size
-        self.min_buffer_size = min_buffer_size
-        self.mini_batch_size = mini_batch_size
-        self.max_grad_norm = max_grad_norm
-        self.target_update_freq = target_update_freq
-        self.polyak_tau = polyak_tau
-        self.train_freq = train_freq
-        self.gradient_steps = gradient_steps
+        self.config = config
+        # self.learning_rate = learning_rate
+        # self.gamma = gamma
+        # self.buffer_size = buffer_size
+        # self.min_buffer_size = min_buffer_size
+        # self.mini_batch_size = mini_batch_size
+        # self.max_grad_norm = max_grad_norm
+        # self.target_update_freq = target_update_freq
+        # self.polyak_tau = polyak_tau
+        # self.train_freq = train_freq
+        # self.gradient_steps = gradient_steps
         self.device = torch.device(device)
         self._reset_env = True
 
@@ -74,7 +109,7 @@ class DQN(BaseAgent):
         self.policy.to(self.device)
 
         # Initialize replay buffer
-        self.replay_buffer = replay_buffer or ReplayBuffer(capacity=self.buffer_size, device=torch.device(device))
+        self.replay_buffer = replay_buffer or ReplayBuffer(capacity=self.config.buffer_size, device=torch.device(device))
 
         # Initialize target network
         self.target = copy.deepcopy(self.policy).to(self.device)
@@ -82,7 +117,7 @@ class DQN(BaseAgent):
         # Initialize optimizer
         self.optimizer = torch.optim.Adam(
             params=self.policy.parameters(),
-            lr=self.learning_rate
+            lr=self.config.learning_rate
         )
 
     def _compute_td_targets(self, 
@@ -95,7 +130,7 @@ class DQN(BaseAgent):
 
         """
         target_values = self.target.get_q_values(next_state)
-        td_target = reward + (1-done.float()) * self.gamma * torch.max(target_values, dim=1, keepdim=True)[0]
+        td_target = reward + (1-done.float()) * self.config.gamma * torch.max(target_values, dim=1, keepdim=True)[0]
         return td_target
 
     @staticmethod
@@ -125,7 +160,8 @@ class DQN(BaseAgent):
         Returns:
             torch.Tensor: Action to be taken.
         """
-        return self.policy(state, deterministic=deterministic)
+        with torch.no_grad():
+            return self.policy(state, deterministic=deterministic)
 
     def train(self,
               env: EnvironmentInterface,
@@ -165,7 +201,7 @@ class DQN(BaseAgent):
                     scheduler.update(current_step=num_steps)
             
             # Collect initial experience until the replay buffer is filled
-            if self.replay_buffer.get_size() < self.min_buffer_size:
+            if self.replay_buffer.get_size() < self.config.min_buffer_size:
                 experience = collector.collect_experience(num_steps=1)
                 num_steps += experience["state"].shape[0]
                 self.replay_buffer.add(experience)
@@ -183,12 +219,12 @@ class DQN(BaseAgent):
             # Only train at a rate of the training frequency
             td_errors = []
             losses = []
-            if num_steps % self.train_freq == 0:
+            if num_steps % self.config.train_freq == 0:
                 self.policy.train()
 
-                for _ in range(self.gradient_steps):
+                for _ in range(self.config.gradient_steps):
                     # If minimum number of samples in replay buffer, sample a batch
-                    batch_data = self.replay_buffer.sample(batch_size=self.mini_batch_size)
+                    batch_data = self.replay_buffer.sample(batch_size=self.config.mini_batch_size)
 
                     # Compute TD Target Values
                     with torch.no_grad():
@@ -213,7 +249,7 @@ class DQN(BaseAgent):
                     # Optimize policy model parameters
                     self.optimizer.zero_grad()
                     loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=self.max_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=self.config.max_grad_norm)
                     self.optimizer.step()
 
                     # Update sample priorities if this is a prioritized replay buffer
@@ -229,12 +265,12 @@ class DQN(BaseAgent):
                                                                    f"Loss: {np.mean(losses):.4f},")
 
             # Update target network with either hard or soft update
-            if num_steps % self.target_update_freq == 0:
-                if self.polyak_tau is None:
+            if num_steps % self.config.target_update_freq == 0:
+                if self.config.polyak_tau is None:
                     utils.hard_update(target=self.target, network=self.policy)
                 else:
                     # Polyak update
-                    utils.polyak_update(target=self.target, network=self.policy, tau=self.polyak_tau)
+                    utils.polyak_update(target=self.target, network=self.policy, tau=self.config.polyak_tau)
                 
             # Log training metrics
             if logger.should_log(num_steps):
@@ -276,34 +312,16 @@ class DoubleDQN(DQN):
     """
     def __init__(self,
                  env_params: EnvParams,
-                 policy,
-                 alpha: float = 0.1,
-                 gamma: float = 0.99,
-                 buffer_size: int = 1_000_000,
-                 min_buffer_size: int = 10_000,
-                 mini_batch_size: int = 32,
-                 max_grad_norm: Optional[float] = 10.0,
-                 target_update_freq: int = 1,
-                 polyak_tau: Optional[float] = None,
-                 train_freq: int = 1,
-                 gradient_steps: int = 1,
+                 policy: QValuePolicy | None = None,
                  replay_buffer: Optional[BaseBuffer] = None,
-                 device: str = "cuda",
+                 config: DQNConfig = DQNConfig(),
+                 device: str = "cpu",
                  ) -> None:
         super().__init__(
             env_params=env_params,
             policy=policy,
-            learning_rate=alpha,
-            gamma=gamma,
-            buffer_size=buffer_size,
-            min_buffer_size=min_buffer_size,
-            mini_batch_size=mini_batch_size,
-            max_grad_norm=max_grad_norm,
-            target_update_freq=target_update_freq,
-            polyak_tau=polyak_tau,
-            train_freq=train_freq,
-            gradient_steps=gradient_steps,
             replay_buffer=replay_buffer,
+            config=config,
             device=device
         )
     
@@ -330,5 +348,5 @@ class DoubleDQN(DQN):
             torch.Tensor: TD target values.
         """
         action_selections = self.policy.get_q_values(next_state).argmax(dim=1, keepdim=True)
-        td_target = reward + (1-done.float()) * self.gamma * torch.gather(self.target.get_q_values(next_state), dim=1, index=action_selections)
+        td_target = reward + (1-done.float()) * self.config.gamma * torch.gather(self.target.get_q_values(next_state), dim=1, index=action_selections)
         return td_target

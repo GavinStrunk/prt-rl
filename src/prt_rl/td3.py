@@ -14,10 +14,45 @@ import prt_rl.common.utils as utils
 
 import copy
 import numpy as np
+from dataclasses import dataclass
 from prt_rl.common.collectors import ParallelCollector
 from prt_rl.common.buffers import ReplayBuffer
 from prt_rl.common.policies import BasePolicy, ContinuousPolicy, StateActionCritic
 
+
+@dataclass
+class TD3Config:
+    """
+    Configuration for the TD3 agent.
+
+    Args:
+        buffer_size (int): Size of the replay buffer.
+        min_buffer_size (int): Minimum size of the replay buffer before training starts.
+        steps_per_batch (int): Number of steps to collect per batch.
+        mini_batch_size (int): Size of the mini-batch sample for each gradient update.
+        gradient_steps (int): Number of gradient steps to take per training iteration.
+        learning_rate (float): Learning rate for the optimizer.
+        gamma (float): Discount factor for future rewards.
+        exploration_noise (float): Standard deviation of Gaussian noise added to actions for exploration.
+        policy_noise (float): Standard deviation of noise added to the target policy's actions.
+        noise_clip (float): Maximum absolute value of noise added to the target policy's actions.
+        delay_freq (int): Frequency of delayed policy updates.
+        tau (float): Polyak averaging factor for target networks.
+        num_critics (int): Number of critic networks to use.
+    """
+    buffer_size: int = 100000
+    min_buffer_size: int = 1000
+    steps_per_batch: int = 1
+    mini_batch_size: int = 256
+    gradient_steps: int = 1
+    learning_rate: float = 1e-3
+    gamma: float = 0.99
+    exploration_noise: float = 0.1
+    policy_noise: float = 0.2
+    noise_clip: float = 0.5
+    delay_freq: int = 2
+    tau: float = 0.005
+    num_critics: int = 2
 
 class TD3Policy(BasePolicy):
     """
@@ -152,59 +187,26 @@ class TD3(BaseAgent):
     Args:
         env_params (EnvParams): Environment parameters.
         policy (TD3Policy | None): Custom TD3 policy. If None, a default TD3 policy will be created.
-        buffer_size (int): Size of the replay buffer. Default is 100000.
-        min_buffer_size (int): Minimum size of the replay buffer before training starts. Default is 1000.
-        steps_per_batch (int): Number of steps to collect per batch. Default is 1.
-        mini_batch_size (int): Size of the mini-batch sample for each gradient update. Default is 256.
-        gradient_steps (int): Number of gradient steps to take per training iteration. Default is 1.
-        learning_rate (float): Learning rate for the optimizer. Default is 1e-3.
-        gamma (float): Discount factor for future rewards. Default is 0.99.
-        exploration_noise (float): Standard deviation of Gaussian noise added to actions for exploration. Default is 0.1.
-        policy_noise (float): Standard deviation of noise added to the target policy's actions. Default is 0.2.
-        noise_clip (float): Maximum absolute value of noise added to the target policy's actions. Default is 0.5.
-        delay_freq (int): Frequency of delayed policy updates. Default is 2.
-        tau (float): Polyak averaging factor for target networks. Default is 0.005.
+        config (TD3Config): Configuration for the TD3 agent.
         device (str): Device to run the agent on ('cpu' or 'cuda'). Default is 'cpu'.
     """
     def __init__(self,
                  env_params: EnvParams,
                  policy: TD3Policy | None = None,
-                 buffer_size: int = 100000,
-                 min_buffer_size: int = 1000,
-                 steps_per_batch: int = 1,
-                 mini_batch_size: int = 256,
-                 gradient_steps: int = 1,
-                 learning_rate: float = 1e-3,
-                 gamma: float = 0.99,
-                 exploration_noise: float = 0.1,
-                 policy_noise: float = 0.2,
-                 noise_clip: float = 0.5,
-                 delay_freq: int = 2,
-                 tau: float = 0.005,
+                 config: TD3Config = TD3Config(),
                  device: str = 'cpu',
                  ) -> None:
         super().__init__()
         self.env_params = env_params
-        self.buffer_size = buffer_size
-        self.steps_per_batch = steps_per_batch
-        self.min_buffer_size = min_buffer_size
-        self.gradient_steps = gradient_steps
-        self.mini_batch_size = mini_batch_size
-        self.learning_rate = learning_rate
-        self.gamma = gamma
-        self.exploration_noise = exploration_noise
-        self.policy_noise = policy_noise
-        self.noise_clip = noise_clip
-        self.delay_freq = delay_freq
-        self.tau = tau
+        self.config = config
         self.device = torch.device(device)
 
-        self.policy = policy if policy is not None else TD3Policy(env_params=env_params, num_critics=2, device=device)
+        self.policy = policy if policy is not None else TD3Policy(env_params=env_params, num_critics=self.config.num_critics, device=device)
         self.policy.to(self.device)
 
-        self.actor_optimizer = torch.optim.Adam(self.policy.actor.parameters(), lr=self.learning_rate)
+        self.actor_optimizer = torch.optim.Adam(self.policy.actor.parameters(), lr=self.config.learning_rate)
         self.critic_optimizers = [
-            torch.optim.Adam(critic.parameters(), lr=self.learning_rate) for critic in self.policy.critic.critics
+            torch.optim.Adam(critic.parameters(), lr=self.config.learning_rate) for critic in self.policy.critic.critics
         ]
 
         self.action_min = torch.tensor(env_params.action_min, device=self.device, dtype=torch.float32)
@@ -225,7 +227,7 @@ class TD3(BaseAgent):
             action = self.policy(state)
             if not deterministic:
                 # Add noise to the action for exploration
-                noise = utils.gaussian_noise(mean=0, std=self.exploration_noise, shape=action.shape, device=self.device)
+                noise = utils.gaussian_noise(mean=0, std=self.config.exploration_noise, shape=action.shape, device=self.device)
                 action = action + noise
                 action = action.clamp(self.action_min, self.action_max)
         return action
@@ -260,7 +262,7 @@ class TD3(BaseAgent):
 
         # Make collector and flatten the experience so the shape is (B, ...)
         collector = ParallelCollector(env=env, logger=logger, flatten=True)
-        replay_buffer = ReplayBuffer(capacity=self.buffer_size, device=self.device)
+        replay_buffer = ReplayBuffer(capacity=self.config.buffer_size, device=self.device)
 
         while num_steps < total_steps:
             # Update Schedulers if provided
@@ -269,34 +271,34 @@ class TD3(BaseAgent):
                     scheduler.update(current_step=num_steps)
 
             # Collect experience dictionary with shape (B, ...)
-            experience = collector.collect_experience(policy=self.policy, num_steps=self.steps_per_batch)
+            experience = collector.collect_experience(policy=self.policy, num_steps=self.config.steps_per_batch)
             num_steps += experience['state'].shape[0]
 
             # Store experience in replay buffer
             replay_buffer.add(experience)
 
             # Collect a minimum number of steps in the replay buffer before training
-            if replay_buffer.get_size() < self.min_buffer_size:
+            if replay_buffer.get_size() < self.config.min_buffer_size:
                 if show_progress:
                     progress_bar.update(current_step=num_steps, desc="Collecting initial experience...")
                 continue
 
             actor_losses = []
             critics_losses = []
-            for _ in range(self.gradient_steps):
+            for _ in range(self.config.gradient_steps):
                 num_gradient_steps += 1
 
                 # Sample a batch of experiences from the replay buffer
-                batch = replay_buffer.sample(batch_size=self.mini_batch_size)
+                batch = replay_buffer.sample(batch_size=self.config.mini_batch_size)
 
                 # Compute current policy's action and target
                 # We compute the target y values without gradients because they will be used to compute the loss for each critic
                 # so an error will be raised for trying to backpropagate through y more than once.
                 with torch.no_grad():
                     # Compute the policies next action with noise and clip to ensure it does not exceed action bounds
-                    noise = utils.gaussian_noise(mean=0, std=self.policy_noise, shape=batch['action'].shape, device=self.device)
-                    noise_clipped = noise.clamp(-self.noise_clip, self.noise_clip)
-                    next_action = (self.policy.actor_target(batch['next_state'].float()) + noise_clipped) #.clamp(self.env_params.action_min, self.env_params.action_max)
+                    noise = utils.gaussian_noise(mean=0, std=self.config.policy_noise, shape=batch['action'].shape, device=self.device)
+                    noise_clipped = noise.clamp(-self.config.noise_clip, self.config.noise_clip)
+                    next_action = (self.policy.actor_target(batch['next_state']) + noise_clipped) #.clamp(self.env_params.action_min, self.env_params.action_max)
 
                     # Compute the Q-Values for all the critics - shape (B, C, 1) -> (B, C)
                     next_q_values = self.policy.get_target_q_values(batch['next_state'], next_action).squeeze(-1) 
@@ -305,7 +307,7 @@ class TD3(BaseAgent):
                     next_q_values = torch.min(next_q_values, dim=1, keepdim=True)[0] 
 
                     # Compute the target Q-Value
-                    y = batch['reward'] + self.gamma * (1 - batch['done'].float()) * next_q_values
+                    y = batch['reward'] + self.config.gamma * (1 - batch['done'].float()) * next_q_values
 
                 # Update critics
                 for i in range(self.policy.num_critics):
@@ -319,7 +321,7 @@ class TD3(BaseAgent):
                     self.critic_optimizers[i].step()
 
                 # Delayed policy update 
-                if num_gradient_steps % self.delay_freq == 0:
+                if num_gradient_steps % self.config.delay_freq == 0:
                     # Compute actor loss
                     actor_loss = -self.policy.get_q_values(state=batch['state'], action=self.policy.actor(batch['state']), index=0).mean()
                     actor_losses.append(actor_loss.item())
@@ -330,9 +332,9 @@ class TD3(BaseAgent):
                     self.actor_optimizer.step()
 
                     # Update target networks
-                    utils.polyak_update(self.policy.actor_target, self.policy.actor, tau=self.tau)
+                    utils.polyak_update(self.policy.actor_target, self.policy.actor, tau=self.config.tau)
                     for i in range(self.policy.num_critics):
-                        utils.polyak_update(self.policy.critic_target.critics[i], self.policy.critic.critics[i], tau=self.tau)
+                        utils.polyak_update(self.policy.critic_target.critics[i], self.policy.critic.critics[i], tau=self.config.tau)
 
             if show_progress:
                 tracker = collector.get_metric_tracker()
@@ -348,7 +350,7 @@ class TD3(BaseAgent):
                     logger.log_scalar(f'critic{i}_loss', np.mean(critics_losses[i]), num_steps)
 
             if evaluator is not None:
-                evaluator.evaluate(agent=self.policy, num_steps=num_steps)
+                evaluator.evaluate(agent=self.policy, iteration=num_steps)
 
         if evaluator is not None:
             evaluator.close()

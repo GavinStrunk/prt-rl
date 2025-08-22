@@ -396,10 +396,12 @@ class DistributionPolicy(BasePolicy):
                  policy_head: torch.nn.Module = MLP,
                  policy_kwargs: Optional[dict] = {},
                  distribution: dist.Distribution | None = None,
+                 return_log_prob: bool = True
                  ) -> None:
         super().__init__(env_params=env_params)
         self.env_params = env_params
         self.encoder_network = None
+        self.return_log_prob = return_log_prob
 
         # Construct the encoder network if provided
         if encoder_network is not None:
@@ -494,10 +496,13 @@ class DistributionPolicy(BasePolicy):
         else:
             action = distribution.sample()
 
-        log_probs = distribution.log_prob(action)
+        if self.return_log_prob:
+            log_probs = distribution.log_prob(action)
 
-        # Compute the total log probability for the action vector
-        log_probs = log_probs.sum(dim=-1, keepdim=True)
+            # Compute the total log probability for the action vector
+            log_probs = log_probs.sum(dim=-1, keepdim=True)
+        else:
+            log_probs = None
 
         return action, None, log_probs
     

@@ -1,6 +1,7 @@
 import json
 import mlflow
 import mlflow.pyfunc
+import numpy as np
 import os
 import shutil
 import tempfile
@@ -181,13 +182,22 @@ class FileLogger(Logger):
         """
         Writes the saved parameters and scalar metrics to a file.
         """
+        def to_serializable(obj):
+            if isinstance(obj, (np.generic, torch.Tensor)):
+                return obj.item()
+            return obj
+
         param_file_path = os.path.join(self.output_dir, "parameters.json")
         with open(param_file_path, "w") as f:
             json.dump(self.parameters, f, indent=4)
 
         scalar_file_path = os.path.join(self.output_dir, "scalars.json")
         with open(scalar_file_path, "w") as f:
-            json.dump(self.scalars, f, indent=4)
+            serializable_scalars = {
+                k: [(int(step), to_serializable(value)) for step, value in v]
+                for k, v in self.scalars.items()
+            }
+            json.dump(serializable_scalars, f, indent=4)
 
     def log_parameters(self,
                        params: dict,
