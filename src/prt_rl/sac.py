@@ -16,23 +16,31 @@ import numpy as np
 from prt_rl.common.collectors import ParallelCollector
 from prt_rl.common.buffers import ReplayBuffer
 from prt_rl.common.policies import DistributionPolicy, StateActionCritic, BasePolicy
+import prt_rl.common.distributions as dist
 import prt_rl.common.utils as utils
 
 @dataclass
 class SACConfig:
     buffer_size: int = 1000000
     min_buffer_size: int = 100
-    steps_per_batch: int = 256
+    steps_per_batch: int = 1
     mini_batch_size: int = 256
     gradient_steps: int = 1
     learning_rate: float = 3e-4
     tau: float = 0.005
     gamma: float = 0.99
     train_freq: int = 1
+    entropy_coeff: Optional[float] = None
+    target_entropy: Optional[float] = None
+    use_log_entropy: bool = True
+    reward_scale: float = 1.0
     
 class SACPolicy(BasePolicy):
     """
     Soft Actor-Critic (SAC) policy class.
+
+    The default actor is a DistributionPolicy with a TanhGaussian distribution,
+    and the default critic is a StateActionCritic with 2 critics.
     
     Args:
         env_params (EnvParams): Environment parameters.
@@ -52,13 +60,19 @@ class SACPolicy(BasePolicy):
         self.num_critics = num_critics
         self.device = torch.device(device)
 
-        self.actor = actor if actor is not None else DistributionPolicy(env_params=env_params)
+        self.actor = actor if actor is not None else DistributionPolicy(env_params=env_params, policy_kwargs={'network_arch': [256, 256]}, distribution=dist.TanhGaussian)
         self.actor.to(self.device)
 
         self.critic = critic if critic is not None else StateActionCritic(env_params=env_params, num_critics=num_critics)
         self.critic.to(self.device)
         self.critic_target = copy.deepcopy(self.critic)
         self.critic_target.to(self.device)
+
+        # Compute the scaling and bias for rescaling the actions
+        amax = self.env_params.get_action_max_tensor().to(self.device)
+        amin = self.env_params.get_action_min_tensor().to(self.device)
+        self.action_scale = (amax - amin) / 2
+        self.action_bias = (amax + amin) / 2
 
     def forward(self, 
                 state: torch.Tensor, 
@@ -74,7 +88,10 @@ class SACPolicy(BasePolicy):
         Returns:
             The action to be taken.
         """
-        return self.actor(state, deterministic=deterministic)
+        # Get the action from the Squashed Gaussian policy which is in the range [-1, 1]
+        action = self.actor(state, deterministic=deterministic)
+        action = action * self.action_scale + self.action_bias
+        return action
 
     def predict(self, 
                 state: torch.Tensor, 
@@ -93,7 +110,10 @@ class SACPolicy(BasePolicy):
                 - value_estimate (torch.Tensor): Tensor with the estimated value of the state. Shape (B, C, 1) where C is the number of critics
                 - log_prob (torch.Tensor): None
         """
-        action, _, log_probs = self.actor.predict(state, deterministic=deterministic)     
+        action, _, log_probs = self.actor.predict(state, deterministic=deterministic) 
+
+        # Rescale the action to the environment's action space
+        action = action * self.action_scale + self.action_bias  
 
         value_estimates = self.critic(state, action)
         value_estimates = torch.stack(value_estimates, dim=1)  # Shape (B, C, 1) where C is the number of critics
@@ -164,18 +184,32 @@ class SAC(BaseAgent):
         self.config = config
         self.device = torch.device(device)
         
+        # Construct a default policy is one is not provided
         self.policy = policy if policy is not None else SACPolicy(env_params=env_params, device=device) 
         self.policy.to(self.device)
 
+        # Initialize the entropy coefficient and target
+        if self.config.target_entropy is None:
+            self.target_entropy = -float(env_params.action_len)
+        else:
+            self.target_entropy = self.config.target_entropy
+        
+        if self.config.entropy_coeff is None:
+            if self.config.use_log_entropy:
+                self.entropy_coeff = torch.log(torch.ones(1, device=self.device)).requires_grad_(True)
+            else:
+                self.entropy_coeff = torch.tensor(0.0, requires_grad=True, device=self.device)
+
+            self.entropy_optimizer = torch.optim.Adam([self.entropy_coeff], lr=self.config.learning_rate)
+        else:
+            self.entropy_coeff = torch.tensor(self.config.entropy_coeff, device=self.device)
+            self.entropy_optimizer = None
+
+        # Configure the optimizers
         self.actor_optimizer = torch.optim.Adam(self.policy.actor.parameters(), lr=self.config.learning_rate)
         self.critic_optimizers = [
             torch.optim.Adam(critic.parameters(), lr=self.config.learning_rate) for critic in self.policy.critic.critics
         ]
-        # Initialize the entropy coefficient and target
-        self.target_entropy = -float(env_params.action_len)
-        self.entropy_coeff = torch.tensor(0.0, requires_grad=True, device=self.device)
-        self.entropy_optimizer = torch.optim.Adam([self.entropy_coeff], lr=1)
-
 
     def predict(self, 
                 state: torch.Tensor, 
@@ -212,12 +246,22 @@ class SAC(BaseAgent):
             # Collect experience dictionary with shape (B, ...)
             experience = collector.collect_experience(policy=self.policy, num_steps=self.config.steps_per_batch, bootstrap=False)
             num_steps += experience['state'].shape[0]
+
+            # Apply reward scaling
+            experience['reward'] = experience['reward'] * self.config.reward_scale
+
+            # Add experience to the replay buffer
             replay_buffer.add(experience)
+
+            # Collect a minimum number of steps in the replay buffer before training
+            if replay_buffer.get_size() < self.config.min_buffer_size:
+                if show_progress:
+                    progress_bar.update(current_step=num_steps, desc="Collecting initial experience...")
+                continue            
 
             actor_losses = []
             critics_losses = []
             entropy_losses = []
-            entropy_coeffs = []
             for _ in range(self.config.gradient_steps):
                 # Sample a mini-batch from the replay buffer
                 mini_batch = replay_buffer.sample(batch_size=self.config.mini_batch_size)
@@ -226,24 +270,30 @@ class SAC(BaseAgent):
                 current_action, _, current_log_prob = self.policy.predict(mini_batch['state'])
 
                 # Entropy coefficient optimization
-                entropy_loss = -(self.entropy_coeff * (current_log_prob + self.target_entropy).detach()).mean()
-                entropy_losses.append(entropy_loss.item())
-                self.entropy_optimizer.zero_grad()
-                entropy_loss.backward()
-                self.entropy_optimizer.step()
-                entropy_coeffs.append(self.entropy_coeff.item())
+                if self.config.use_log_entropy:
+                    entropy_coeff = torch.exp(self.entropy_coeff.detach())
+                else:
+                    entropy_coeff = self.entropy_coeff
+
+                if self.entropy_optimizer is not None:
+                    entropy_loss = -(self.entropy_coeff * (current_log_prob + self.target_entropy).detach()).mean()
+                    entropy_losses.append(entropy_loss.item())
+
+                    self.entropy_optimizer.zero_grad()
+                    entropy_loss.backward()
+                    self.entropy_optimizer.step()
 
                 # Compute the target values from the current policy
                 with torch.no_grad():
                     # Select next action based on current policy
                     next_action, _, next_log_prob = self.policy.predict(mini_batch['next_state'])
 
-                    # Compute the Q-values for all critics
+                    # Compute the Q-values for all critics using target networks
                     next_q_values = self.policy.get_target_q_values(state=mini_batch['next_state'], action=next_action).squeeze(-1)
                     next_q_values = torch.min(next_q_values, dim=1, keepdim=True)[0]
 
                     # Add the entropy term to the target Q-values
-                    next_q_values += -self.entropy_coeff * next_log_prob.reshape(-1, 1)
+                    next_q_values += -entropy_coeff * next_log_prob
 
                     # Compute the discounted target Q-values
                     y = mini_batch['reward'] + (1 - mini_batch['done'].float()) * self.config.gamma * next_q_values
@@ -261,14 +311,14 @@ class SAC(BaseAgent):
                 # Compute Actor loss
                 q_values_pi = self.policy.get_q_values(state=mini_batch['state'], action=current_action)
                 q_values_pi = torch.min(q_values_pi, dim=1, keepdim=True)[0]
-                actor_loss = (self.entropy_coeff * current_log_prob - q_values_pi).mean()
+                actor_loss = (entropy_coeff * current_log_prob - q_values_pi).mean()
                 actor_losses.append(actor_loss.item())
 
                 self.actor_optimizer.zero_grad()
                 actor_loss.backward()
                 self.actor_optimizer.step()
 
-                # Update target networks
+                # Update target critic networks
                 for i in range(self.policy.num_critics):
                     utils.polyak_update(self.policy.critic_target.critics[i], self.policy.critic.critics[i], tau=self.config.tau)   
 
@@ -278,10 +328,13 @@ class SAC(BaseAgent):
                                                                 f" Episode Length: {tracker.last_episode_length}"
                                                                 f" Episode number: {tracker.episode_count}"
                                                                 f" Actor Loss: {np.mean(actor_losses):.4f}"
+                                                                f" Entropy Coef: {entropy_coeff.item():.2f}"
                                                                 )
 
             if logger.should_log(num_steps):
                 logger.log_scalar('actor_loss', np.mean(actor_losses), num_steps)
+                logger.log_scalar('entropy_loss', np.mean(entropy_losses), num_steps)
+                logger.log_scalar('entropy_coeff', entropy_coeff.item(), num_steps)
                 for i in range(self.policy.num_critics):
                     logger.log_scalar(f'critic{i}_loss', np.mean(critics_losses[i]), num_steps)
 
