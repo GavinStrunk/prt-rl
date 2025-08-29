@@ -76,7 +76,12 @@ def get_action_from_policy(
         if policy is None:
             return random_action(env_params, state), None, None
         else:
-            return policy.predict(state, deterministic=deterministic)
+            prediction = policy.predict(state, deterministic=deterministic)
+
+            # If only the action is returned then set the value estimate and log probs to None
+            if prediction.numel() == 1:
+                prediction = prediction, None, None
+            return prediction
 
 class MetricsTracker:
     """

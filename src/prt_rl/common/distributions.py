@@ -160,6 +160,9 @@ class Normal(Distribution, tdist.Normal):
         """
         return self.mean
     
+    def sample(self):
+        return super().rsample()
+    
 class TanhGaussian(Normal):
     """
     Tanh-transformed Gaussian to constrain the actions to the range [-1, 1]. 
@@ -224,9 +227,5 @@ class TanhGaussian(Normal):
     
     def sample(self) -> torch.Tensor:
         # Non-reparameterized sample and then squash with tanh
-        return torch.tanh(super().sample())
-    
-    def rsample(self, sample_shape: torch.Size = torch.Size()) -> torch.Tensor:
-        # Reparameterized sample and then squash with tanh
-        return torch.tanh(super().rsample(sample_shape))
+        return torch.tanh(super().rsample())
 

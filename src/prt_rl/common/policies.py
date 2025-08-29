@@ -494,7 +494,7 @@ class DistributionPolicy(BasePolicy):
         if deterministic:
             action = distribution.deterministic_action()
         else:
-            action = distribution.rsample()
+            action = distribution.sample()
 
         if self.return_log_prob:
             log_probs = distribution.log_prob(action)
