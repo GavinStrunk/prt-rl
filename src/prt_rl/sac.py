@@ -21,6 +21,23 @@ import prt_rl.common.utils as utils
 
 @dataclass
 class SACConfig:
+    """
+    Hyperparameter configuration for the SAC agent.
+    
+    Args:
+        buffer_size (int): Size of the replay buffer.
+        min_buffer_size (int): Minimum number of transitions in the replay buffer before training starts.
+        steps_per_batch (int): Number of steps to collect per training batch.
+        mini_batch_size (int): Size of the mini-batch sampled from the replay buffer for training.
+        gradient_steps (int): Number of gradient update steps to perform after each batch of experience is collected.
+        learning_rate (float): Learning rate for the optimizers.
+        tau (float): Soft update coefficient for the target networks.
+        gamma (float): Discount factor for future rewards.
+        entropy_coeff (float | None): Initial value for the entropy coefficient, alpha. If None, it will be learned.
+        target_entropy (float | None): Target entropy for the policy. If None, it will be set to -action_dim.
+        use_log_entropy (bool): If True, optimize the log of the entropy coefficient, else optimize the coefficient directly.
+        reward_scale (float): Scaling factor for rewards.
+    """
     buffer_size: int = 1000000
     min_buffer_size: int = 100
     steps_per_batch: int = 1
@@ -29,7 +46,6 @@ class SACConfig:
     learning_rate: float = 3e-4
     tau: float = 0.005
     gamma: float = 0.99
-    train_freq: int = 1
     entropy_coeff: Optional[float] = None
     target_entropy: Optional[float] = None
     use_log_entropy: bool = True
@@ -215,7 +231,16 @@ class SAC(BaseAgent):
                 state: torch.Tensor, 
                 deterministic: bool = False
                 ) -> torch.Tensor:
+        """
+        Predict the action based on the current state.
         
+        Args:
+            state (torch.Tensor): Current state tensor.
+            deterministic (bool): If True, choose the action deterministically. Default is False.
+        
+        Returns:
+            torch.Tensor: Tensor with the chosen action. Shape (B, action_dim)
+        """
         with torch.no_grad():
             return self.policy(state, deterministic=deterministic)
 
@@ -227,6 +252,17 @@ class SAC(BaseAgent):
               evaluator: Optional[Evaluator] = None,
               show_progress: bool = True
               ) -> None:
+        """
+        Train the SAC agent.
+        
+        Args:
+            env (EnvironmentInterface): The environment to train on.
+            total_steps (int): Total number of environment steps to train for.
+            schedulers (List[ParameterScheduler] | None): List of parameter schedulers to update during training.
+            logger (Logger | None): Logger for logging training metrics. If None, a default logger will be created.
+            evaluator (Evaluator | None): Evaluator for periodic evaluation during training.
+            show_progress (bool): If True, display a progress bar during training.
+        """
         logger = logger or Logger.create('blank')
 
         if show_progress:

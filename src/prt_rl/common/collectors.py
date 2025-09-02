@@ -79,7 +79,7 @@ def get_action_from_policy(
             prediction = policy.predict(state, deterministic=deterministic)
 
             # If only the action is returned then set the value estimate and log probs to None
-            if prediction.numel() == 1:
+            if len(prediction) == 1:
                 prediction = prediction, None, None
             return prediction
 

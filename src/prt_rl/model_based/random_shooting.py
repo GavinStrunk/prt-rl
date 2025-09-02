@@ -20,8 +20,8 @@ class RandomShootingConfig:
         num_action_sequences (int): Number of random action sequences to sample.
         num_elites (int): Number of top action sequences to consider for selecting the best action.
     """
-    planning_horizon: int = 10  # Number of steps to plan ahead
-    num_action_sequences: int = 100  #
+    planning_horizon: int = 10
+    num_action_sequences: int = 100 
 
 class RandomShooting(BaseAgent):
     """
@@ -67,8 +67,6 @@ class RandomShooting(BaseAgent):
 
         # Sort by reward value
         max_index = torch.argmax(rewards)
-
-        # @todo add logging
 
         # Return the first action from the best action sequence
         return action_sequences[max_index.item(), 0, :].unsqueeze(0)
