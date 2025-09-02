@@ -22,12 +22,42 @@ class EnvParams:
     """
     action_len: int
     action_continuous: bool
-    action_min: Union[int, List[float]]
-    action_max: Union[int, List[float]]
+    action_min: Union[int, float, List[float]]
+    action_max: Union[int, float, List[float]]
     observation_shape: tuple
     observation_continuous: bool
-    observation_min: Union[int, List[float]]
-    observation_max: Union[int, List[float]]
+    observation_min: Union[int, float, List[float]]
+    observation_max: Union[int, float, List[float]]
+
+    def get_action_min_tensor(self) -> torch.Tensor:
+        """
+        Converts `action_min` to a tensor of shape (action_len, 1).
+        - If `action_min` is a float, it is broadcast across all actions.
+        - If it is a list, its length must match `action_len`.
+        """
+        if isinstance(self.action_min, float):
+            return torch.full((self.action_len, 1), self.action_min)
+        elif isinstance(self.action_min, list):
+            if len(self.action_min) != self.action_len:
+                raise ValueError(f"Expected action_min list to have length {self.action_len}, got {len(self.action_min)}")
+            return torch.tensor(self.action_min, dtype=torch.float32).view(self.action_len, 1)
+        else:
+            raise TypeError("action_min must be a float or a list of floats.") 
+
+    def get_action_max_tensor(self) -> torch.Tensor:
+        """
+        Converts `action_max` to a tensor of shape (action_len, 1).
+        - If `action_max` is a float, it is broadcast across all actions.
+        - If it is a list, its length must match `action_len`.
+        """
+        if isinstance(self.action_max, float):
+            return torch.full((self.action_len, 1), self.action_max)
+        elif isinstance(self.action_max, list):
+            if len(self.action_max) != self.action_len:
+                raise ValueError(f"Expected action_max list to have length {self.action_len}, got {len(self.action_max)}")
+            return torch.tensor(self.action_max, dtype=torch.float32).view(self.action_len, 1)
+        else:
+            raise TypeError("action_max must be a float or a list of floats.")   
 
 @dataclass
 class MultiAgentEnvParams:

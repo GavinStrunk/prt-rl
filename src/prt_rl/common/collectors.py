@@ -76,7 +76,12 @@ def get_action_from_policy(
         if policy is None:
             return random_action(env_params, state), None, None
         else:
-            return policy.predict(state, deterministic=deterministic)
+            prediction = policy.predict(state, deterministic=deterministic)
+
+            # If only the action is returned then set the value estimate and log probs to None
+            if len(prediction) == 1:
+                prediction = prediction, None, None
+            return prediction
 
 class MetricsTracker:
     """
@@ -233,7 +238,8 @@ class SequentialCollector:
 
     def collect_experience(self,
                            policy: 'BaseAgent | BasePolicy | None' = None,
-                           num_steps: int = 1
+                           num_steps: int = 1,
+                           bootstrap: bool = True
                            ) -> Dict[str, torch.Tensor]:
         """
         Collects the given number of environment steps using the provided policy. 
@@ -243,6 +249,7 @@ class SequentialCollector:
         Args:
             policy (BaseAgent | BasePolicy | None): An agent or policy that takes a state and returns an action.
             num_steps (int): The number of steps to collect experience for. Defaults to 1.
+            bootstrap (bool): Whether to compute the last value estimate V(s_{T+1}) for bootstrapping if the last step is not done and the policy provides value estimates. Defaults to True.
 
         Returns:
             Dict[str, torch.Tensor]: A dictionary containing the collected experience with keys (B=T):
@@ -279,7 +286,7 @@ class SequentialCollector:
                 log_probs.append(log_prob)
 
         # If the last step was not done and value estimates are available, then compute the last value estimate for bootstrapping
-        if not self.previous_experience['done'] and value_estimates:
+        if not self.previous_experience['done'] and value_estimates and bootstrap:
             _, last_value_estimate, _ = get_action_from_policy(policy, self.previous_experience['next_state'], self.env_params)
 
         exp = {
@@ -351,8 +358,10 @@ class SequentialCollector:
                 ve = traj.get('value_est', None)
                 lp = traj.get('log_prob', None)
 
-                if ve is not None: value_ests.append(ve)
-                if lp is not None: log_probs.append(lp)
+                if ve is not None: 
+                    value_ests.append(ve)
+                if lp is not None: 
+                    log_probs.append(lp)
 
                 total_steps += traj['state'].shape[0]
         else:
@@ -369,8 +378,10 @@ class SequentialCollector:
                 ve = traj.get('value_est', None)
                 lp = traj.get('log_prob', None)
 
-                if ve is not None: value_ests.append(ve)
-                if lp is not None: log_probs.append(lp)
+                if ve is not None: 
+                    value_ests.append(ve)
+                if lp is not None: 
+                    log_probs.append(lp)
 
                 total_steps += traj['state'].shape[0]
 
@@ -543,7 +554,8 @@ class ParallelCollector:
 
     def collect_experience(self,
                            policy: 'BaseAgent | BasePolicy | None' = None,
-                           num_steps: int = 1
+                           num_steps: int = 1,
+                           bootstrap: bool = True
                            ) -> Dict[str, torch.Tensor]:
         """
         Collects the given number of experiences from the environment using the provided policy.
@@ -553,6 +565,7 @@ class ParallelCollector:
         Args:
             policy (BaseAgent | BasePolicy | None): An agent or policy that takes a state and returns an action.
             num_steps (int): The number of steps to collect experience for. Defaults to 1.
+            bootstrap (bool): Whether to compute the last value estimate V(s_{T+1}) for bootstrapping if the last step is not done and the policy provides value estimates. Defaults to True.
 
         Returns:
             Dict[str, torch.Tensor]: A dictionary containing the collected experience with keys:
@@ -614,7 +627,7 @@ class ParallelCollector:
             log_probs = torch.stack(log_probs, dim=0) if log_probs else None
 
         # If the last step was not done in any environment and value estimates are available, then compute the last value estimate for bootstrapping
-        if value_estimates is not None:
+        if value_estimates is not None and bootstrap:
             _, last_value_estimate, _ = get_action_from_policy(policy, self.previous_experience['next_state'], self.env_params)
         
         exp = {
