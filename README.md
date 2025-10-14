@@ -6,7 +6,7 @@
 
 My code related to learning and using RL outside of a specific project
 
-The documentation website is at [https://reinforcement-learning.readthedocs.io/](https://reinforcement-learning.readthedocs.io/)
+The documentation website is at [https://prt-rl.readthedocs.io](https://prt-rl.readthedocs.io/en/latest/)
 
 # Installation
 Installing prt-rl from pypi as:
