@@ -181,7 +181,6 @@ class SAC(BaseAgent):
     Soft Actor-Critic (SAC) agent.
 
     Args:
-        env_params (EnvParams): Environment parameters.
         policy (SACPolicy | None): Policy to use. If None, a default SACPolicy will be created.
         config (SACConfig): Configuration for the SAC agent.
         device (str): Device to run the model on (e.g., 'cpu' or 'cuda').
@@ -190,23 +189,21 @@ class SAC(BaseAgent):
         [1] https://arxiv.org/pdf/1812.05905    
     """
     def __init__(self, 
-                 env_params: EnvParams, 
-                 policy: SACPolicy | None = None,
+                 policy: SACPolicy,
                  config: SACConfig = SACConfig(), 
                  device: str = 'cpu'
                  ) -> None:
         super().__init__()
-        self.env_params = env_params
         self.config = config
         self.device = torch.device(device)
         
         # Construct a default policy is one is not provided
-        self.policy = policy if policy is not None else SACPolicy(env_params=env_params, device=device) 
+        self.policy = policy 
         self.policy.to(self.device)
 
         # Initialize the entropy coefficient and target
         if self.config.target_entropy is None:
-            self.target_entropy = -float(env_params.action_len)
+            self.target_entropy = -float(self.policy.env_params.action_len)
         else:
             self.target_entropy = self.config.target_entropy
         

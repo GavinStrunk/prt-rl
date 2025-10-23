@@ -6,36 +6,13 @@ Example Usage:
 --------------
 This example demonstrates how to initialize a Policy Gradient agent with a custom policy.
 
-.. code-block:: python
-
-    from prt_rl import PolicyGradient
-    from prt_rl.common.policies import DistributionPolicy
-    from prt_rl.common.networks import MLP
-    from prt_rl.common.distributions import Normal
-
-    env = ...  # Initialize your environment here
-    agent = PolicyGradient(
-        env_params=env.get_env_params(),
-        policy=DistributionPolicy(
-            env_params=env.get_env_params(),
-            encoder_network=None,
-            encoder_kwargs={},
-            policy_head=MLP,
-            policy_kwargs={'network_arch': [64, 64]},
-            distribution=Normal
-            ),
-        learning_rate=1e-3,
-        ...
-        )
-
-    agent.train(env, total_steps=10000)
 """
 from dataclasses import dataclass
 import numpy as np
 import torch
 from typing import List
 from prt_rl.agent import BaseAgent
-from prt_rl.env.interface import EnvironmentInterface, EnvParams
+from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.loggers import Logger
 from prt_rl.common.progress_bar import ProgressBar
@@ -48,7 +25,7 @@ import prt_rl.common.utils as utils
 @dataclass
 class PolicyGradientConfig:
     """
-    Hyperparameters for the Policy Gradient agent.
+    Hyperparameter Configuration for the Policy Gradient agent.
     
     Args:
         batch_size (int): Size of the batch for training. Default is 100.
@@ -79,30 +56,54 @@ class PolicyGradient(BaseAgent):
     """
     Policy Gradient agent with step-wise optimization.
 
+    Example:
+        .. code-block:: python
+
+            from prt_rl import PolicyGradient
+            from prt_rl.common.policies import DistributionPolicy
+
+            # Setup the environment
+            # env = ...
+
+            # Configure the Algorithm Hyperparameters
+            config = PolicyGradientConfig(
+                batch_size=1000,
+                learning_rate=5e-3,
+                gamma=1.0,
+                use_reward_to_go=True,
+                normalize_advantages=True,
+            )
+
+            # Configure Policy Gradient Policy
+            policy = DistributionPolicy(env_params=env.get_parameters())
+
+            # Create Agent
+            agent = PolicyGradient(policy=policy, config=config)
+
+            # Train the agent
+            agent.train(env=env, total_steps=num_iterations * config.batch_size)    
+
     Args:
-        env_params (EnvParams): Environment parameters.
         config (PolicyGradientConfig): Configuration for the Policy Gradient agent.
         policy (Optional[DistributionPolicy]): The policy to be used by the agent. If None, a default policy will be created based on the environment parameters.
         device (str): Device to run the agent on (e.g., 'cpu' or 'cuda'). Default is 'cpu'.
     """
     def __init__(self, 
-                 env_params: EnvParams,
                  config: PolicyGradientConfig = PolicyGradientConfig(),
                  policy: DistributionPolicy | None = None,
                  device: str = 'cpu',
                  ) -> None:
         super().__init__()
-        self.env_params = env_params
         self.config = config
         self.device = torch.device(device)
 
-        self.policy = policy if policy is not None else DistributionPolicy(env_params=env_params)
+        self.policy = policy 
         self.policy.to(self.device)
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.config.learning_rate)
 
         if self.config.use_baseline or self.config.use_gae:
             self.critic = MLP(
-                input_dim=env_params.observation_shape[0],
+                input_dim=self.policy.env_params.observation_shape[0],
                 output_dim=1,
                 network_arch=[64,64],
             )
@@ -258,100 +259,6 @@ class PolicyGradient(BaseAgent):
         
         loss = -(log_probs * advantages).mean()
         return loss
-
-    # @staticmethod        
-    # def _compute_trajectory_rewards(rewards: torch.Tensor, dones: torch.Tensor, gamma: float) -> torch.Tensor:
-    #     """
-    #     Compute the total discounted return G from a full trajectory.
-
-    #     ..math::
-    #         \hat{Q}(s_{i,t},a_{i,t}) = \sum_{t'=1}^{T} \gamma^t r(s_{i,t}, a_{i,t})
-        
-    #     Args:
-    #         rewards: Tensor of shape (B,) with rewards for each timestep.
-    #         dones: Tensor of shape (B,) with done flags indicating if the episode has ended.
-    #         gamma: Discount factor
-
-    #     Returns:
-    #         Scalar float representing total discounted return with shape (B, )
-    #     """
-    #     returns = []
-    #     start = 0
-
-    #     for t in range(len(rewards)):
-    #         if dones[t]:
-    #             # Slice out the trajectory
-    #             trajectory = rewards[start:t+1]
-    #             T = trajectory.shape[0]
-    #             total_return = trajectory.sum() * (gamma ** T)
-    #             # Fill trajectory with the same return value
-    #             filled = torch.full((T,), total_return.item(), dtype=torch.float32, device=rewards.device)
-    #             returns.append(filled)
-    #             start = t + 1
-
-    #     return torch.cat(returns, dim=0)
-    
-    # @staticmethod
-    # def _compute_rewards_to_go(rewards: torch.Tensor, dones: torch.Tensor, gamma: float) -> torch.Tensor:
-    #     """
-    #     Compute rewards-to-go from rewards and done flags.
-
-    #     Args:
-    #         rewards (torch.Tensor): Rewards from the environment with shape (B, 1).
-    #         dones (torch.Tensor): Done flags indicating if the episode has ended with shape (N, T, 1).
-    #         gamma (float): Discount factor.
-
-    #     Returns:
-    #         torch.Tensor: Computed rewards-to-go with shape (B, )
-    #     """
-    #     rewards_to_go = []
-    #     R = 0
-    #     for reward, done in zip(reversed(rewards), reversed(dones)):
-    #         if done:
-    #             R = 0.0
-    #         R = reward + gamma * R
-    #         rewards_to_go.insert(0, R)
-
-    #     return torch.stack(rewards_to_go)  # Shape (B, )
-    
-    # @staticmethod
-    # def _compute_generalized_advantage_estimate(
-    #     rewards: torch.Tensor,  
-    #     values: torch.Tensor,            
-    #     dones: torch.Tensor,             
-    #     gamma: float = 0.99,
-    #     gae_lambda: float = 0.95,
-    # ):
-    #     """
-    #     Compute GAE and TD(lambda) returns for a batched rollout.
-
-    #     Args:
-    #         rewards (B,): Rewards from rollout
-    #         values (B,): Estimated state values
-    #         dones (B,): Done flags (1 if episode ended at step t, else 0)
-    #         gamma (float): Discount factor
-    #         gae_lambda (float): GAE lambda
-
-    #     Returns:
-    #         advantages (T, N): Estimated advantage values
-    #         returns (T, N): TD(lambda) returns
-    #     """
-    #     B = rewards.shape[0]
-
-    #     advantages = torch.zeros((B), dtype=values.dtype, device=values.device)
-
-    #     for t in reversed(range(B)):
-    #         if dones[t]:
-    #             next_value = 0.0
-    #             next_advantage = 0.0
-    #         else:
-    #             next_value = values[t + 1]
-    #             next_advantage = advantages[t+1]
-            
-    #         delta = rewards[t] + gamma * next_value - values[t]
-    #         advantages[t] = delta + gamma * gae_lambda * next_advantage
-
-    #     return advantages
     
     
 class PolicyGradientTrajectory(PolicyGradient):

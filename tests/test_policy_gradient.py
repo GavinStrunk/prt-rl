@@ -1,15 +1,15 @@
 import torch
 import pytest
 from prt_rl.policy_gradient import PolicyGradient, PolicyGradientConfig
+from prt_rl.common.policies import DistributionPolicy
 from prt_rl.env.wrappers import GymnasiumWrapper
 
 
 def test_policy_gradient_discrete_actions():
     env = GymnasiumWrapper("CartPole-v1")
 
-    agent = PolicyGradient(
-        env_params=env.get_parameters(),
-    )
+    policy = DistributionPolicy(env_params=env.get_parameters())
+    agent = PolicyGradient(policy=policy)
 
     # Test agent completes a training step without errors
     agent.train(env=env, total_steps=1)
@@ -18,9 +18,8 @@ def test_policy_gradient_discrete_actions():
 def test_policy_gradient_continuous_actions():
     env = GymnasiumWrapper("InvertedPendulum-v5")
 
-    agent = PolicyGradient(
-        env_params=env.get_parameters(),
-    )
+    policy = DistributionPolicy(env_params=env.get_parameters())
+    agent = PolicyGradient(policy=policy)
 
     # Test agent completes a training step without errors
     agent.train(env=env, total_steps=1)
@@ -29,9 +28,8 @@ def test_policy_gradient_continuous_actions():
 def test_policy_gradient_multiple_envs():
     env = GymnasiumWrapper("CartPole-v1", num_envs=4)
 
-    agent = PolicyGradient(
-        env_params=env.get_parameters(),
-    )
+    policy = DistributionPolicy(env_params=env.get_parameters())
+    agent = PolicyGradient(policy=policy)
 
     # Test agent completes a training step without errors
     agent.train(env=env, total_steps=1)
@@ -43,9 +41,9 @@ def test_policy_gradient_gae():
     config = PolicyGradientConfig(
         use_gae=True,
     )
-
+    policy = DistributionPolicy(env_params=env.get_parameters())
     agent = PolicyGradient(
-        env_params=env.get_parameters(),
+        policy=policy,
         config=config
     )
 
@@ -60,8 +58,9 @@ def test_policy_gradient_reward_to_go():
         use_reward_to_go=True,
     )
 
+    policy = DistributionPolicy(env_params=env.get_parameters())
     agent = PolicyGradient(
-        env_params=env.get_parameters(),
+        policy=policy,
         config=config
     )
 
@@ -76,8 +75,9 @@ def test_policy_gradient_baseline():
         use_baseline=True,
     )
 
+    policy = DistributionPolicy(env_params=env.get_parameters())
     agent = PolicyGradient(
-        env_params=env.get_parameters(),
+        policy=policy,
         config=config
     )
 

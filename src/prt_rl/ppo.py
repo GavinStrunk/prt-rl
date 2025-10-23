@@ -55,7 +55,6 @@ class PPO(BaseAgent):
     Proximal Policy Optimization (PPO)
 
     Args:
-        env_params (EnvParams): Environment parameters.
         policy (ActorCriticPolicy | None): Policy to use. If None, a default ActorCriticPolicy will be created.
         steps_per_batch (int): Number of steps to collect per batch.
         mini_batch_size (int): Size of mini-batches for optimization.
@@ -70,17 +69,15 @@ class PPO(BaseAgent):
         device (str): Device to run the computations on ('cpu' or 'cuda').
     """
     def __init__(self,
-                 env_params: EnvParams,
-                 policy: ActorCriticPolicy | None = None,
+                 policy: ActorCriticPolicy,
                  config: PPOConfig = PPOConfig(),
                  device: str = 'cpu',
                  ) -> None:
         super().__init__()
-        self.env_params = env_params
         self.config = config
         self.device = torch.device(device)
 
-        self.policy = policy if policy is not None else ActorCriticPolicy(env_params=env_params)
+        self.policy = policy
         self.policy.to(self.device)
 
         # Configure optimizers

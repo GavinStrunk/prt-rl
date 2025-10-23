@@ -37,6 +37,7 @@ extensions = [
     'sphinx.ext.mathjax',       # Formats LaTex code using Jax
     'myst_parser',              # Allows parsing of README.md file
     'sphinxcontrib.mermaid',     # Allows for Mermaid diagrams to be rendered
+    'sphinxcontrib.pseudocode',  # Pseudocode rendering
     "sphinx_design",            # Enhanced layout design
     "nbsphinx",                 # Rendering jupyter notebooks
 ]
@@ -45,9 +46,9 @@ extensions = [
 intersphinx_mapping = {'python': ('https://docs.python.org/3', None),
                        'numpy': ('https://numpy.org/doc/stable/', None),
                        'scipy': ('http://docs.scipy.org/doc/scipy/reference/', None),
-                       'matplotlib': ('http://matplotlib.org/', None),
-                       'torch': ('https://pytorch.org/docs/stable/', None),
-                       'jax': ('https://jax.readthedocs.io/en/latest/', None)}
+                       'matplotlib': ('https://matplotlib.org/stable/', None),
+                       'torch': ('https://docs.pytorch.org/docs/stable/', None),
+                       }
 
 source_suffix = {
     '.rst': 'restructuredtext',
@@ -89,8 +90,8 @@ html_theme = "sphinx_book_theme"
 
 # Furo Theme
 # html_theme = "furo"
-html_logo = "_static/prt-rl-logo.jpg"
-html_favicon = "_static/prt-rl-logo.jpg"
+html_logo = "_static/prt-rl-logo.png"
+html_favicon = "_static/prt-rl-logo.png"
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

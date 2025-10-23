@@ -6,7 +6,7 @@
 
 My code related to learning and using RL outside of a specific project
 
-The documentation website is at [https://prt-rl.readthedocs.io](https://prt-rl.readthedocs.io/en/latest/)
+The full documentation website is at [https://prt-rl.readthedocs.io](https://prt-rl.readthedocs.io/en/latest/)
 
 # Installation
 Installing prt-rl from pypi as:
@@ -25,7 +25,6 @@ pip install prt-rl
 * [CleanRL](https://docs.cleanrl.dev/)
 * [SKRL](https://github.com/Toni-SM/skrl/tree/main)
 
-# Reference RL Repositories
 
 
 
