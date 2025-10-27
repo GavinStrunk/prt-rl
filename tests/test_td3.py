@@ -70,7 +70,8 @@ def test_td3_fails_on_discrete_actions():
     env = GymnasiumWrapper("CartPole-v1")
 
     with pytest.raises(ValueError):
-        TD3(env_params=env.get_parameters())
+        policy = TD3Policy(env_params=env.get_parameters())
+        TD3(policy=policy)
 
 def test_policy_gradient_continuous_actions():
     env = GymnasiumWrapper("InvertedPendulum-v5")
@@ -81,9 +82,11 @@ def test_policy_gradient_continuous_actions():
         mini_batch_size=1,
         delay_freq=1,
     )
-    agent = TD3(env_params=env.get_parameters(), 
-                config=config,
-                )
+    policy = TD3Policy(env_params=env.get_parameters())
+    agent = TD3(
+        policy=policy,
+        config=config,
+    )
 
     # Test agent completes a training step without errors
     agent.train(env=env, total_steps=1)

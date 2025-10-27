@@ -29,10 +29,12 @@ def test_stochastic_selection():
     # Sample with multiple environments
     action_pmf = torch.tensor([[0.5, 0.5], [0.7, 0.3], [1.0, 0.0]])
     assert action_pmf.shape == (3, 2)
+
+    torch.manual_seed(2)
     actions = df.stochastic_selection(action_pmf)
     assert actions.shape == (3, 1)
     assert actions[0] == 1
-    assert actions[1] == 1
+    assert actions[1] == 0
     assert actions[2] == 0
 
 def test_stochastic_selection_invalid_inputs():
@@ -103,9 +105,9 @@ def test_softmax_decision_function():
     action_vals = torch.tensor([[0.1, 0.2, 0.15]])
     dfunc = df.Softmax(tau=1.0)
 
-    torch.manual_seed(2)
+    torch.manual_seed(0)
     action = dfunc.select_action(action_vals)
-    assert action == 0
+    assert action == 2
 
     assert dfunc.tau == 1.0
     dfunc.set_parameter(name="tau", value=0.1)

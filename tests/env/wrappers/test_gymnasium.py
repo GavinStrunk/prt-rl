@@ -1,73 +1,13 @@
 import numpy as np
 import pytest
 import torch
-import vmas
 from prt_rl.env import wrappers
-from prt_rl.env.interface import MultiAgentEnvParams, MultiGroupEnvParams
-from prt_sim.jhu.bandits import KArmBandits
-from prt_sim.jhu.robot_game import RobotGame
-
-def test_jhu_wrapper_for_bandits():
-    env = wrappers.JhuWrapper(environment=KArmBandits())
-
-    # Check the EnvParams are filled out correctly
-    params = env.get_parameters()
-    assert params.action_len == 1
-    assert params.action_continuous is False
-    assert params.action_min == 0
-    assert params.action_max == 9
-    assert params.observation_shape == (1,)
-    assert params.observation_continuous is False
-    assert params.observation_min == 0
-    assert params.observation_max == 0
-
-    # Check interface
-    state, info = env.reset(seed=0)
-    assert state.shape == (1, *params.observation_shape)
-
-    # Check info
-    assert info['optimal_bandit'].shape == (1, 1)
-    assert info['optimal_bandit'] == np.array([[3]])
-    assert info['bandits'].shape == (1, 10)
-    np.testing.assert_allclose(info['bandits'], np.array([[1.7641,  0.4002,  0.9787,  2.2409,  1.8676, -0.9773,  0.9501, -0.1514, -0.1032,  0.4106]], dtype=np.float64), atol=1e-4)
-
-    action = np.array([[0]])
-    next_state, reward, done, info = env.step(action)
-    assert next_state.shape == (1, 1)
-    assert reward.shape == (1, 1)
-    assert done.shape == (1, 1)
-
-def test_jhu_wrapper_for_robot_game():
-    env = wrappers.JhuWrapper(environment=RobotGame(), render_mode="rgb_array")
-
-    # Check the EnvParams are filled out correctly
-    params = env.get_parameters()
-    assert params.action_len == 1
-    assert params.action_continuous is False
-    assert params.action_min == 0
-    assert params.action_max == 3
-    assert params.observation_shape == (1,)
-    assert params.observation_continuous is False
-    assert params.observation_min == 0
-    assert params.observation_max == 10
-
-    # Check interface
-    state, info = env.reset()
-    assert state.shape == (1, *params.observation_shape)
-    
-
-    action = np.array([[0]])
-    next_state, reward, done, info = env.step(action)
-    assert next_state.shape == (1, 1)
-    assert reward.shape == (1, 1)
-    assert done.shape == (1, 1)
-    assert info['rgb_array'].shape == (1, 800, 800, 3)
-    assert info['rgb_array'].dtype == np.uint8
+import prt_sim.gymnasium 
 
 def test_gymnasium_wrapper_for_cliff_walking():
     # Reference: https://gymnasium.farama.org/environments/toy_text/cliff_walking/
     env = wrappers.GymnasiumWrapper(
-        gym_name="CliffWalking-v0"
+        gym_name="CliffWalking-v1"
     )
 
     params = env.get_parameters()
@@ -248,70 +188,33 @@ def test_gymnasium_mujoco_types():
     assert state.shape == (1, 4)
     assert state.dtype == torch.float32
 
-def test_vmas_wrapper():
-    num_envs = 2
-    env = wrappers.VmasWrapper(
-        scenario="discovery",
-        num_envs=num_envs,
+def test_gymnasium_get_params_from_dict():
+    from gymnasium import spaces
+
+    action_space = spaces.Dict({
+            "algorithm": spaces.Discrete(3),
+            "parameters": spaces.Box(low=0.0, high=1.0, shape=(5,))  
+        })  
+
+    act_len, act_cont, act_min, act_max = wrappers.GymnasiumWrapper._get_params_from_dict(action_space, is_action=True)
+
+    assert act_len == 6
+    assert act_cont == [False, True, True, True, True, True]
+    assert act_min == [0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    assert act_max == [2, 1.0, 1.0, 1.0, 1.0, 1.0]
+
+@pytest.mark.skip("ImagePipeline-v0 requires downloading the BDD100K dataset.")
+def test_gymnasium_image_pipeline_dict():
+    env = wrappers.GymnasiumWrapper(
+        gym_name="prt-sim/ImagePipeline-v0"
     )
-
-    assert isinstance(env.env, vmas.simulator.environment.environment.Environment)
-
     params = env.get_parameters()
-    assert isinstance(params, MultiAgentEnvParams)
-    assert params.num_agents == 5
-    assert params.agent.action_len == 2
-    assert params.agent.action_continuous is True
-    assert params.agent.action_min == [-1.0, -1.0]
-    assert params.agent.action_max == [1.0, 1.0]
-    assert params.agent.observation_shape == (19,)
-    assert params.agent.observation_continuous is True
-    assert params.agent.observation_min == [-np.inf]*19
-    assert params.agent.observation_max == [np.inf]*19
+    assert params.action_len == 6
+    assert params.action_continuous == [False, True, True, True, True, True]
+    assert params.action_min == [0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    assert params.action_max == [3, 1.0, 1.0, 1.0, 1.0, 1.0]
+    assert params.observation_shape == (3, 720, 1280)
+    assert params.observation_continuous is True
+    assert params.observation_min == np.zeros((3, 720, 1280)).tolist()
+    assert params.observation_max == np.ones((3, 720, 1280)).tolist()
 
-    state_td = env.reset()
-    assert state_td.shape == (num_envs,)
-    assert state_td['observation'].shape == (num_envs, params.num_agents, *params.agent.observation_shape)
-    assert state_td['observation'].dtype == torch.float32
-
-    action = state_td
-    action['action'] = torch.zeros(num_envs, params.num_agents, params.agent.action_len)
-    trajectory_td = env.step(action)
-    assert trajectory_td.shape == (num_envs,)
-    assert trajectory_td['next', 'reward'].shape == (num_envs, params.num_agents)
-    assert trajectory_td['next', 'done'].shape == (num_envs, 1)
-
-def test_multigroup_vmas_wrapper():
-    num_envs = 1
-    env = wrappers.VmasWrapper(
-        scenario="kinematic_bicycle",
-        num_envs=num_envs,
-    )
-
-    assert isinstance(env.env, vmas.simulator.environment.environment.Environment)
-
-    params = env.get_parameters()
-    assert isinstance(params, MultiGroupEnvParams)
-    assert list(params.group.keys()) == ['bicycle', 'holo_rot']
-
-    ma_bike = params.group['bicycle']
-    assert ma_bike.num_agents == 1
-    assert ma_bike.agent.action_len == 2
-    assert ma_bike.agent.action_continuous is True
-    assert ma_bike.agent.action_min == [-1.0, -0.5235987901687622]
-    assert ma_bike.agent.action_max == [1.0, 0.5235987901687622]
-    assert ma_bike.agent.observation_shape == (4,)
-    assert ma_bike.agent.observation_continuous is True
-    assert ma_bike.agent.observation_min == [-np.inf]*4
-    assert ma_bike.agent.observation_max == [np.inf]*4
-
-    ma_holo = params.group['holo_rot']
-    assert ma_holo.num_agents == 1
-    assert ma_holo.agent.action_len == 3
-    assert ma_holo.agent.action_continuous is True
-    assert ma_holo.agent.action_min == [-1.0, -1.0, -1.0]
-    assert ma_holo.agent.action_max == [1.0, 1.0, 1.0]
-    assert ma_holo.agent.observation_shape == (4,)
-    assert ma_holo.agent.observation_continuous is True
-    assert ma_holo.agent.observation_min == [-np.inf]*4
-    assert ma_holo.agent.observation_max == [np.inf]*4

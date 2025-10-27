@@ -185,23 +185,20 @@ class TD3(BaseAgent):
     This class implements the TD3 algorithm, which is an off-policy actor-critic algorithm for continuous action spaces.
 
     Args:
-        env_params (EnvParams): Environment parameters.
         policy (TD3Policy | None): Custom TD3 policy. If None, a default TD3 policy will be created.
         config (TD3Config): Configuration for the TD3 agent.
         device (str): Device to run the agent on ('cpu' or 'cuda'). Default is 'cpu'.
     """
     def __init__(self,
-                 env_params: EnvParams,
-                 policy: TD3Policy | None = None,
+                 policy: TD3Policy,
                  config: TD3Config = TD3Config(),
                  device: str = 'cpu',
                  ) -> None:
         super().__init__()
-        self.env_params = env_params
         self.config = config
         self.device = torch.device(device)
 
-        self.policy = policy if policy is not None else TD3Policy(env_params=env_params, num_critics=self.config.num_critics, device=device)
+        self.policy = policy
         self.policy.to(self.device)
 
         self.actor_optimizer = torch.optim.Adam(self.policy.actor.parameters(), lr=self.config.learning_rate)
@@ -209,8 +206,8 @@ class TD3(BaseAgent):
             torch.optim.Adam(critic.parameters(), lr=self.config.learning_rate) for critic in self.policy.critic.critics
         ]
 
-        self.action_min = torch.tensor(env_params.action_min, device=self.device, dtype=torch.float32)
-        self.action_max = torch.tensor(env_params.action_max, device=self.device, dtype=torch.float32)
+        self.action_min = torch.tensor(self.policy.env_params.action_min, device=self.device, dtype=torch.float32)
+        self.action_max = torch.tensor(self.policy.env_params.action_max, device=self.device, dtype=torch.float32)
 
     def predict(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
         """

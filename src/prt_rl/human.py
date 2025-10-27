@@ -317,7 +317,6 @@ class KeyboardAgent(BaseAgent):
 
     """
     def __init__(self,
-                 env_params: EnvParams,
                  key_action_map: Dict[str, int],
                  blocking: bool = True,
                  ) -> None:

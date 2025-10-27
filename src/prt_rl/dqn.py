@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 from typing import Optional, List, Tuple
-from prt_rl.env.interface import EnvParams, EnvironmentInterface
+from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.common.buffers import ReplayBuffer, BaseBuffer, PrioritizedReplayBuffer
 from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.collectors import ParallelCollector
@@ -51,7 +51,6 @@ class DQN(BaseAgent):
     Deep Q-Network (DQN) agent for reinforcement learning.
 
     Args:
-        env_params (EnvParams): Environment parameters.
         alpha (float, optional): Learning rate. Defaults to 0.1.
         gamma (float, optional): Discount factor. Defaults to 0.99.
         buffer_size (int, optional): Size of the replay buffer. Defaults to 1_000_000.
@@ -70,42 +69,17 @@ class DQN(BaseAgent):
     [3] Mnih et al. (2015). Human-level control through deep reinforcement learning. Nature, 518(7540), 529-533.
     """
     def __init__(self,
-                 env_params: EnvParams,
-                 policy: QValuePolicy | None = None,
+                 policy: QValuePolicy,
                  replay_buffer: Optional[BaseBuffer] = None,
                  config: DQNConfig = DQNConfig(),
-                #  buffer_size: int = 1_000_000,
-                #  min_buffer_size: int = 10_000,
-                #  mini_batch_size: int = 32,                 
-                #  learning_rate: float = 0.1,
-                #  gamma: float = 0.99,
-                #  max_grad_norm: Optional[float] = 10.0,
-                #  target_update_freq: int = 1,
-                #  polyak_tau: Optional[float] = None,
-                #  train_freq: int = 1,
-                #  gradient_steps: int = 1,
                  device: str = "cpu",
                  ) -> None:
         super().__init__()
-        if env_params.action_continuous:
-            raise ValueError("DQN only supports discrete action spaces")
-        
-        self.env_params = env_params
         self.config = config
-        # self.learning_rate = learning_rate
-        # self.gamma = gamma
-        # self.buffer_size = buffer_size
-        # self.min_buffer_size = min_buffer_size
-        # self.mini_batch_size = mini_batch_size
-        # self.max_grad_norm = max_grad_norm
-        # self.target_update_freq = target_update_freq
-        # self.polyak_tau = polyak_tau
-        # self.train_freq = train_freq
-        # self.gradient_steps = gradient_steps
         self.device = torch.device(device)
         self._reset_env = True
 
-        self.policy = policy if policy is not None else QValuePolicy(env_params=env_params)
+        self.policy = policy 
         self.policy.to(self.device)
 
         # Initialize replay buffer
@@ -295,7 +269,6 @@ class DoubleDQN(DQN):
     Double DQN agent for reinforcement learning.
 
     Args:
-        env_params (EnvParams): Environment parameters.
         alpha (float, optional): Learning rate. Defaults to 0.1.
         gamma (float, optional): Discount factor. Defaults to 0.99.
         buffer_size (int, optional): Size of the replay buffer. Defaults to 1_000_000.
@@ -311,14 +284,12 @@ class DoubleDQN(DQN):
     [1] https://github.com/Curt-Park/rainbow-is-all-you-need
     """
     def __init__(self,
-                 env_params: EnvParams,
-                 policy: QValuePolicy | None = None,
+                 policy: QValuePolicy,
                  replay_buffer: Optional[BaseBuffer] = None,
                  config: DQNConfig = DQNConfig(),
                  device: str = "cpu",
                  ) -> None:
         super().__init__(
-            env_params=env_params,
             policy=policy,
             replay_buffer=replay_buffer,
             config=config,

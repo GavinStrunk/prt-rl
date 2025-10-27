@@ -1,7 +1,6 @@
 import torch
-from tensordict.tensordict import TensorDict
 from prt_rl.env.interface import EnvParams, MultiAgentEnvParams
-from prt_rl.agent import RandomAgent
+from prt_rl.random import RandomAgent
 
 def test_random_discrete_action_selection():
     # Create a fake environment that has 1 discrete action [0,...,3] and 1 discrete state with the same interval

@@ -51,21 +51,17 @@ class QTable:
         if self.track_visits:
             self.visit_table = torch.zeros((self.batch_size, self.state_dim, self.action_dim), dtype=torch.float32, device=device)
 
-    def init_args(self) -> dict:
+    def to(self, device: str) -> None:
         """
-        Returns the initialization arguments that are required to construct the QTable.
+        Moves the Q table to the specified device.
 
-        Returns:
-            dict: Initialization arguments
+        Args:
+            device (str): Device to move the Q table to.
         """
-        return {
-            'state_dim': self.state_dim,
-            'action_dim': self.action_dim,
-            'batch_size': self.batch_size,
-            'initial_value': self.initial_value,
-            'track_visits': self.track_visits,
-            'device': self.device
-        }
+        self.device = device
+        self.q_table = self.q_table.to(device)
+        if self.track_visits:
+            self.visit_table = self.visit_table.to(device)
 
     def get_action_values(self,
                           state: torch.Tensor
@@ -79,7 +75,6 @@ class QTable:
         Returns:
             torch.Tensor: action values for given state with shape (# env, # actions)
         """
-        assert state.dtype == torch.int, "State values must be integers."
         state = state.squeeze(-1)
         return self.q_table[torch.arange(self.q_table.size(0)), state]
 
@@ -97,8 +92,6 @@ class QTable:
         Returns:
             torch.Tensor: value for the given state-action pair with shape (# env, 1)
         """
-        assert state.dtype == torch.int, "State values must be integers."
-        assert action.dtype == torch.int, "Action values must be integers."
         state = state.squeeze(-1)
         action = action.squeeze(-1)
         return self.q_table[torch.arange(self.q_table.size(0)), state, action].unsqueeze(-1)
@@ -117,8 +110,6 @@ class QTable:
         Returns:
             torch.Tensor: number of visits for given state-action pair with shape (# env, 1))
         """
-        assert state.dtype == torch.int, "State values must be integers."
-        assert action.dtype == torch.int, "Action values must be integers."
         state = state.squeeze(-1)
         action = action.squeeze(-1)
         return self.visit_table[torch.arange(self.visit_table.size(0)), state, action].unsqueeze(-1)
@@ -136,9 +127,6 @@ class QTable:
             q_value (torch.Tensor): q-value to update the Q table for with shape (# env, 1)
 
         """
-        assert state.dtype == torch.int, "State values must be integers."
-        assert action.dtype == torch.int, "Action values must be integers."
-
         state = state.squeeze(-1)
         action = action.squeeze(-1)
         q_value = q_value.squeeze(-1)
@@ -157,8 +145,6 @@ class QTable:
             state (torch.Tensor): state value to update the Visit table for with shape (# env, 1)
             action (torch.Tensor): action value to update the Visit table for with shape (# env, 1)
         """
-        assert state.dtype == torch.int, "State values must be integers."
-        assert action.dtype == torch.int, "Action values must be integers."
         state = state.squeeze(-1)
         action = action.squeeze(-1)
         self.visit_table[torch.arange(self.visit_table.size(0)), state, action] += 1.0
