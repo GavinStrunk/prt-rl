@@ -16,7 +16,6 @@ dependencies = [
     "mlflow>=2.20.4",
     "numpy>=2.2.3",
     "optuna>=4.3.0",
-    "prt-sim",
     "psutil>=7.0.0",
     "pygame>=2.6.1",
     "pynput>=1.8.0",
@@ -37,6 +36,7 @@ dev = [
     "myst-parser>=4.0.1",
     "nbsphinx>=0.9.6",
     "notebook>=7.3.3",
+    "prt-sim>=0.1.8",
     "pytest>=8.3.5",
     "sphinx>=8.2.3",
     "sphinx-book-theme>=1.1.4",
@@ -49,6 +49,3 @@ sb3 = [
     "sb3-contrib>=2.6.0",
     "stable-baselines3>=2.6.0",
 ]
-
-[tool.uv.sources]
-prt-sim = { path = "../prt-sim", editable = true }
