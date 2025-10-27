@@ -203,6 +203,7 @@ def test_gymnasium_get_params_from_dict():
     assert act_min == [0, 0.0, 0.0, 0.0, 0.0, 0.0]
     assert act_max == [2, 1.0, 1.0, 1.0, 1.0, 1.0]
 
+@pytest.mark.skip("ImagePipeline-v0 requires downloading the BDD100K dataset.")
 def test_gymnasium_image_pipeline_dict():
     env = wrappers.GymnasiumWrapper(
         gym_name="prt-sim/ImagePipeline-v0"
