@@ -1,3 +1,6 @@
+"""
+Vectorized Multi-Agent Simulator (VMAS) Environment Wrapper
+"""
 from collections import Counter
 import torch
 from typing import Optional, Tuple, List, Union, Dict, Any, Callable
@@ -9,6 +12,21 @@ from prt_rl.env.wrappers.gymnasium import GymnasiumWrapper
 class VmasWrapper(MultiAgentEnvironmentInterface):
     """
     Vectorized Multi-Agent Simulator (VMAS)
+
+    The VMAS wrapper provides an interface to VMAS multi-agent environments where all agents belong to a single group. VmasMultiGroupWrapper should be used for environments with multiple agent groups.
+
+    Examples:
+        .. code-block:: python
+            from prt_rl.env.wrappers import VmasWrapper
+
+            env = VmasWrapper(
+                scenario="discovery",
+                num_envs=4,
+            )
+
+    Args:
+        scenario (str): Name of the VMAS environment
+        render_mode (str): Render mode for the environment. Options are None or 'rgb_array'.
 
     References:
         [1] https://github.com/proroklab/VectorizedMultiAgentSimulator
@@ -144,8 +162,23 @@ class VmasMultiGroupWrapper(MultiGroupEnvironmentInterface):
     """
     Vectorized Multi-Agent Simulator (VMAS) Multi-Group Environment Wrapper
 
+    The VMAS Multi-Group wrapper provides an interface to VMAS multi-agent environments where agents belong to multiple groups. This wrapper implements the MultiGroupEnvironmentInterface.
+    
+    Examples:
+        .. code-block:: python
+            from prt_rl.env.wrappers import VmasMultiGroupWrapper
+
+            env = VmasMultiGroupWrapper(
+                scenario="kinematic_bicycle",
+                num_envs=4,
+            )
+
+    Args:
+        scenario (str): Name of the VMAS environment
+        render_mode (str): Render mode for the environment. Options are None or 'rgb_array'.
+
     References:
-        [1] 
+        [1] https://github.com/proroklab/VectorizedMultiAgentSimulator
     """
     def __init__(self,
                  scenario: str,
