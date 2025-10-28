@@ -1,44 +1,34 @@
 """
-Proximal Policy Optimization (PPO)
-
-PPO is an on-policy actor critic algorithm that uses clipped surrogate objectives to ensure stable policy updates.
-
-Reference:
-[1] https://arxiv.org/abs/1707.06347
+Indepdent Proximal Policy Optimization (IPPO) agent for multi-agent reinforcement learning.
 """
 from dataclasses import dataclass
 import numpy as np
 import torch
 import torch.nn.functional as F
-from typing import Optional, List
+from typing import Tuple, Optional, List
 from prt_rl.agent import BaseAgent
-from prt_rl.env.interface import EnvParams, EnvironmentInterface
-from prt_rl.common.collectors import ParallelCollector
-from prt_rl.common.buffers import RolloutBuffer
+from prt_rl.env.interface import MultiAgentEnvParams, MultiAgentEnvironmentInterface
+from prt_rl.common.policies import BasePolicy
+from prt_rl.common.networks import BaseEncoder
 from prt_rl.common.loggers import Logger
 from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.progress_bar import ProgressBar
 from prt_rl.common.evaluators import Evaluator
+from prt_rl.common.policies.distribution import DistributionPolicy
+from prt_rl.common.policies.value_critic import ValueCritic
+from prt_rl.common.collectors import ParallelCollector
+from prt_rl.common.buffers import RolloutBuffer
 import prt_rl.common.utils as utils
 
-from prt_rl.common.policies import ActorCriticPolicy
-
 @dataclass
-class PPOConfig:
+class IPPOConfig:
     """
-    Configuration for the PPO agent.
+    Configuration for the IPPO agent.
 
     Args:
         steps_per_batch (int): Number of steps to collect per batch.
         mini_batch_size (int): Size of mini-batches for optimization.
         learning_rate (float): Learning rate for the optimizer.
-        gamma (float): Discount factor for future rewards.
-        epsilon (float): Clipping parameter for PPO.
-        gae_lambda (float): Lambda parameter for Generalized Advantage Estimation.
-        entropy_coef (float): Coefficient for the entropy term in the loss function.
-        value_coef (float): Coefficient for the value loss term in the loss function.
-        num_optim_steps (int): Number of optimization steps per batch.
-        normalize_advantages (bool): Whether to normalize advantages.
     """
     steps_per_batch: int = 2048
     mini_batch_size: int = 32
@@ -51,36 +41,109 @@ class PPOConfig:
     num_optim_steps: int = 10
     normalize_advantages: bool = False
 
-
-class PPO(BaseAgent):
+class IPPOPolicy(BasePolicy):
     """
-    Proximal Policy Optimization (PPO)
+    IPPO-specific policy class.
+    """
+    def __init__(self, 
+                 env_params: MultiAgentEnvParams,
+                 encoder: BaseEncoder | None = None,
+                 ) -> None:
+        super().__init__(env_params)
+        self.encoder = encoder
 
-    Examples:
-        .. code-block:: python
-            from prt_rl.ppo import PPOConfig, PPO
-            config = PPOConfig(
-                steps_per_batch=4096,
-                mini_batch_size=64,
-                learning_rate=2.5e-4,
-                gamma=0.99,
-                epsilon=0.2,
-                gae_lambda=0.95,
-                entropy_coef=0.01,
-                value_coef=0.5,
-                num_optim_steps=4,
-                normalize_advantages=True
-            )
-            ppo_agent = PPO(config=config)    
+        self.actors = torch.nn.ModuleList()
+        self.critics = torch.nn.ModuleList()
+        for _ in range(env_params.num_agents):
+            actor = DistributionPolicy(env_params=env_params.agent)
+            critic = ValueCritic(env_params=env_params.agent)
+            self.actors.append(actor)
+            self.critics.append(critic)
+
+    def predict(self,
+                state: torch.Tensor,
+                deterministic: bool = False
+                ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Chooses an action based on the current state and returns the action, value estimate, and log probability.
+        
+        Args:
+            state (torch.Tensor): Current state tensor.
+            deterministic (bool): If True, choose the action deterministically. Default is False.
+            
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the chosen action, value estimate, and action log probability.
+                - action (torch.Tensor): Tensor with the chosen action. Shape (B, action_dim)
+                - value_estimate (torch.Tensor): Tensor with the estimated value of the state. Shape (B, 1)
+                - log_prob (torch.Tensor): Tensor with the log probability of the chosen action. Shape (B, 1)
+        """
+        if self.encoder is not None:
+            latent_state = self.encoder(state)
+        else:
+            latent_state = state
+
+        actions = []
+        values = []
+        log_probs = []
+        for i in range(len(self.actors)):
+            action, _, log_prob = self.actors[i].predict(latent_state, deterministic=deterministic)
+            value = self.critics[i](latent_state)
+            actions.append(action)
+            values.append(value)
+            log_probs.append(log_prob)
+
+        return torch.stack(actions, dim=1), torch.stack(values, dim=1), torch.stack(log_probs, dim=1)
+
+    def evaluate_actions(self,
+                         state: torch.Tensor,
+                         action: torch.Tensor
+                        ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Evaluates the value, log probability and entropy of the given action under the policy.
+        
+        Args:
+            state (torch.Tensor): Current state tensor.
+            action (torch.Tensor): Action tensor to evaluate.
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the value estimate, log probability, and entropy.
+                - value_estimate (torch.Tensor): Tensor with the estimated value of the state. Shape (B, num_agents, 1)
+                - log_prob (torch.Tensor): Tensor with the log probability of the given action. Shape (B, num_agents, 1)
+                - entropy (torch.Tensor): Tensor with the entropy of the policy. Shape (B, num_agents, 1)
+        """
+        if self.encoder is not None:
+            latent_state = self.encoder(state)
+        else:
+            latent_state = state
+
+        values = []
+        log_probs = []
+        entropies = []
+        for i in range(len(self.actors)):
+            log_prob, entropy = self.actors[i].evaluate_actions(latent_state, action[:, i, :])
+            value = self.critics[i](latent_state)
+            values.append(value)
+            log_probs.append(log_prob)
+            entropies.append(entropy)
+
+        return (torch.stack(values, dim=1), 
+                torch.stack(log_probs, dim=1), 
+                torch.stack(entropies, dim=1))    
+
+
+class IPPO(BaseAgent):
+    """
+    Independent Proximal Policy Optimization (IPPO)
+
+    IPPO applies the PPO algorithm independently to each agent in a multi-agent environment.
 
     Args:
-        policy (ActorCriticPolicy | None): Policy to use. If None, a default ActorCriticPolicy will be created.
-        config (PPOConfig): Configuration for the PPO agent.
+        policy (IPPOPolicy): Policy to use.
+        config (IPPOConfig): Configuration for the IPPO agent.
         device (str): Device to run the computations on ('cpu' or 'cuda').
     """
     def __init__(self,
-                 policy: ActorCriticPolicy,
-                 config: PPOConfig = PPOConfig(),
+                 policy: IPPOPolicy,
+                 config: IPPOConfig = IPPOConfig(),
                  device: str = 'cpu',
                  ) -> None:
         super().__init__()
@@ -90,8 +153,12 @@ class PPO(BaseAgent):
         self.policy = policy
         self.policy.to(self.device)
 
-        # Configure optimizers
-        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.config.learning_rate)
+        # Create separate optimizers for each agent's actor and critic
+        self.optimizers = []
+        for i in range(len(self.policy.actors)):
+            optimizer = torch.optim.Adam([*self.policy.actors[i].parameters(), *self.policy.critics[i].parameters()], lr=self.config.learning_rate)
+            self.optimizers.append(optimizer)
+
 
     def predict(self, 
                 state: torch.Tensor, 
@@ -109,9 +176,9 @@ class PPO(BaseAgent):
         """
         with torch.no_grad():
             return self.policy(state, deterministic=deterministic)  
-    
+
     def train(self,
-              env: EnvironmentInterface,
+              env: MultiAgentEnvironmentInterface,
               total_steps: int,
               schedulers: Optional[List[ParameterScheduler]] = None,
               logger: Optional[Logger] = None,
@@ -134,9 +201,9 @@ class PPO(BaseAgent):
         if show_progress:
             progress_bar = ProgressBar(total_steps=total_steps)
 
-        num_steps = 0
+        num_steps = 0      
 
-        # Make collector and do not flatten the experience so the shape is (N, T, ...)
+        # Make collector and do not flatten the experience so the shape is (N, T, A, ...)
         collector = ParallelCollector(env=env, logger=logger, flatten=False)
         rollout_buffer = RolloutBuffer(capacity=self.config.steps_per_batch, device=self.device)
 
@@ -144,9 +211,9 @@ class PPO(BaseAgent):
             # Update Schedulers if provided
             if schedulers is not None:
                 for scheduler in schedulers:
-                    scheduler.update(current_step=num_steps)
-
-            # Collect experience dictionary with shape (N, T, ...)
+                    scheduler.step(num_steps)
+            
+            # Collect experience dictionary with shape (N, T, A, ...)
             experience = collector.collect_experience(policy=self.policy, num_steps=self.config.steps_per_batch)
 
             # Compute Advantages and Returns under the current policy
@@ -156,12 +223,14 @@ class PPO(BaseAgent):
                 dones=experience['done'],
                 last_values=experience['last_value_est'],
                 gamma=self.config.gamma,
-                gae_lambda=self.config.gae_lambda
+                gae_lambda=self.config.gae_lambda,
             )
-            
+
+            # Optionally normalize advantages
             if self.config.normalize_advantages:
                 advantages = utils.normalize_advantages(advantages)
 
+            # Add the advantages and returns to the experience tuple
             experience['advantages'] = advantages.detach()
             experience['returns'] = returns.detach()
 
@@ -231,9 +300,4 @@ class PPO(BaseAgent):
                 evaluator.evaluate(agent=self.policy, iteration=num_steps)
 
         if evaluator is not None:
-            evaluator.close()
-
-
-
-
-
+            evaluator.close()            
