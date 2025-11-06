@@ -27,7 +27,7 @@ class IsaaclabWrapper(EnvironmentInterface):
         sys.argv.append(env_name)
         sys.argv.append("--num_envs")
         sys.argv.append(str(num_envs))
-        # sys.argv.append("--headless")
+        sys.argv.append("--headless")
 
         # Create argument parsing object
         parser = argparse.ArgumentParser("Isaac Lab")
@@ -64,6 +64,10 @@ class IsaaclabWrapper(EnvironmentInterface):
 
         # Create environment parameter object  
         self.env_params = self._make_env_params()
+
+        self.first_reset = True
+        self.state = None
+        self.info = {}
 
     def _make_env_params(self) -> EnvParams:
         """
@@ -120,10 +124,31 @@ class IsaaclabWrapper(EnvironmentInterface):
         Returns:
             Tuple: Tuple of tensors containing the initial observation and info dictionary
         """
-        state, info = self.env.reset(seed=seed)
+        if self.first_reset:
+            state, self.info = self.env.reset(seed=seed)
+            self.state = state['policy']
+            self.first_reset = False
 
         # The state is a dictionary and the observation is in the key 'policy'. Sometimes there is also a 'critic' key for separate actor/critic observations.
-        return state['policy'], info
+        return self.state, self.info
+    
+    def reset_index(self, index: int, seed: int | None = None) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        """
+        Resets only the environments that are done.
+
+        Args:
+            done (torch.Tensor): Boolean tensor of shape (num_envs, 1) or (num_envs,)
+
+        Returns:
+            Tuple[torch.Tensor, Dict[str, Any]]: The new observations and info dict
+        """
+        if self.first_reset:
+            state, self.info = self.env.reset(seed=seed)
+            self.state = state['policy']
+            self.first_reset = False
+
+        return self.state[index], self.info
+
 
     def step(self, action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """
@@ -135,11 +160,12 @@ class IsaaclabWrapper(EnvironmentInterface):
         Returns:
             Tuple: Tuple of tensors containing the next state, reward, done, and info dictionary
         """
-        next_state, reward, terminated, truncated, info = self.env.step(action)
+        next_state, reward, terminated, truncated, self.info = self.env.step(action)
 
         done = torch.logical_or(terminated, truncated)
+        self.state = next_state['policy']
 
-        return next_state['policy'], reward, done, info
+        return next_state['policy'], reward.unsqueeze(-1), done.unsqueeze(-1), self.info
     
     def close(self) -> None:
         """
