@@ -2,7 +2,7 @@ import pytest
 import torch
 import numpy as np
 import tempfile
-from prt_rl.common.loggers import Logger, BlankLogger, FileLogger
+from prt_rl.common.loggers import Logger, BlankLogger, FileLogger, ClearMLLogger
 
 def test_create_blank_logger():
     # Test Logger
@@ -26,3 +26,12 @@ def test_file_logger_json_serialization_error():
         logger.close()
 
     assert True
+
+@pytest.mark.skip(reason="Requires ClearML server setup")
+def test_clearml_logger():
+    logger = ClearMLLogger(project_name="test_project", task_name="test_task")
+    logger.log_parameters({"param1": 10, "param2": 0.01})
+    logger.log_scalar("accuracy", 0.95, iteration=1)
+    logger.log_scalar("loss", 0.05, iteration=1)
+    logger.log_scalar("accuracy", 0.96, iteration=2)
+    logger.close()
