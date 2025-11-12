@@ -1,6 +1,6 @@
 [project]
 name = "prt-rl"
-version = "0.5.5"
+version = "0.5.6"
 description = "Python Research Toolkit - Reinforcement Learning"
 readme = "README.md"
 authors = [
@@ -32,6 +32,7 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    "clearml>=2.0.2",
     "gymnasium[mujoco]>=1.1.1",
     "myst-parser>=4.0.1",
     "nbsphinx>=0.9.6",
