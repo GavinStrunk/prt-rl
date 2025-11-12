@@ -927,10 +927,11 @@ class ParallelCollector:
                     # Update the previous experience for this index
                     state[i] = reset_state
 
-        action, value_est, log_prob = get_action_from_policy(policy, state, self.env_params)
+        with torch.no_grad():
+            action, value_est, log_prob = get_action_from_policy(policy, state, self.env_params)
 
-        # Step the environment with the action
-        next_state, reward, done, _ = self.env.step(action)
+            # Step the environment with the action
+            next_state, reward, done, _ = self.env.step(action)
 
         # Update the Metrics tracker and logging
         self.metric.update(reward, done)

@@ -173,7 +173,7 @@ class PPO(BaseAgent):
                     old_log_prob = batch['log_prob'].detach()
 
                     # Ratio between new and old policy
-                    ratio = torch.exp(new_log_prob.detach() - old_log_prob)
+                    ratio = torch.exp(new_log_prob - old_log_prob)
 
                     # Clipped surrogate loss
                     batch_advantages = batch['advantages']

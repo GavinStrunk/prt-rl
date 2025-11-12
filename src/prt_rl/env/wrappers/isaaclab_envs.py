@@ -19,6 +19,7 @@ class IsaaclabWrapper(EnvironmentInterface):
                  env_name: str,
                  render_mode: Optional[str] = None,
                  num_envs: int = 1,
+                 headless: bool = True
                 ) -> None:
         super().__init__(render_mode, num_envs=num_envs)
 
@@ -27,7 +28,9 @@ class IsaaclabWrapper(EnvironmentInterface):
         sys.argv.append(env_name)
         sys.argv.append("--num_envs")
         sys.argv.append(str(num_envs))
-        sys.argv.append("--headless")
+
+        if headless:
+            sys.argv.append("--headless")
 
         # Create argument parsing object
         parser = argparse.ArgumentParser("Isaac Lab")
