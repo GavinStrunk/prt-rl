@@ -40,6 +40,7 @@ class IPPOConfig:
     value_coef: float = 0.5
     num_optim_steps: int = 10
     normalize_advantages: bool = False
+    
 
 class IPPOPolicy(BasePolicy):
     """
@@ -48,6 +49,8 @@ class IPPOPolicy(BasePolicy):
     def __init__(self, 
                  env_params: MultiAgentEnvParams,
                  encoder: BaseEncoder | None = None,
+                 actor_kwargs: dict = {},
+                 critic_kwargs: dict = {}
                  ) -> None:
         super().__init__(env_params)
         self.encoder = encoder
@@ -55,8 +58,8 @@ class IPPOPolicy(BasePolicy):
         self.actors = torch.nn.ModuleList()
         self.critics = torch.nn.ModuleList()
         for _ in range(env_params.num_agents):
-            actor = DistributionPolicy(env_params=env_params.agent)
-            critic = ValueCritic(env_params=env_params.agent)
+            actor = DistributionPolicy(env_params=env_params.agent, **actor_kwargs)
+            critic = ValueCritic(env_params=env_params.agent, **critic_kwargs)
             self.actors.append(actor)
             self.critics.append(critic)
 
@@ -86,7 +89,7 @@ class IPPOPolicy(BasePolicy):
         values = []
         log_probs = []
         for i in range(len(self.actors)):
-            action, _, log_prob = self.actors[i].predict(latent_state, deterministic=deterministic)
+            action, _, log_prob = self.actors[i].predict(latent_state[:, i, :], deterministic=deterministic)
             value = self.critics[i](latent_state)
             actions.append(action)
             values.append(value)
@@ -252,7 +255,7 @@ class IPPO(BaseAgent):
                     old_log_prob = batch['log_prob'].detach()
 
                     # Ratio between new and old policy
-                    ratio = torch.exp(new_log_prob.detach() - old_log_prob)
+                    ratio = torch.exp(new_log_prob - old_log_prob)
 
                     # Clipped surrogate loss
                     batch_advantages = batch['advantages']

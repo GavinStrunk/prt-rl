@@ -229,3 +229,101 @@ class TanhGaussian(Normal):
         # Non-reparameterized sample and then squash with tanh
         return torch.tanh(super().rsample())
 
+class Beta(Distribution, tdist.Independent):
+    r"""
+    Multivariate (factorized) Beta distribution over actions in [0, 1].
+
+    This distribution is parameterized by per-dimension concentrations
+    :math:`\alpha, \beta > 0`. We wrap `torch.distributions.Beta` with
+    `torch.distributions.Independent` so that `log_prob` sums across
+    action dimensions, mirroring a diagonal Gaussian.
+
+    Args:
+        conc1 (torch.Tensor): Alpha concentrations, shape (B, action_dim)
+        conc0 (torch.Tensor): Beta  concentrations, shape (B, action_dim)
+    """
+    def __init__(self,
+                 alpha: torch.Tensor,
+                 beta: torch.Tensor
+                 ) -> None:
+        if alpha.ndim != 2 or beta.ndim != 2:
+            raise ValueError("Beta requires alpha/beta to have shape (B, action_dim).")
+        if alpha.shape != beta.shape:
+            raise ValueError("alpha and beta must have the same shape.")
+        
+        base = tdist.Beta(alpha, beta)
+        super().__init__(base, reinterpreted_batch_ndims=1)  # event_dim = 1
+
+    @staticmethod
+    def get_action_dim(env_params) -> int:
+        """
+        Returns the number of *network outputs* needed for this distribution.
+
+        For Beta, we need two parameters per action-dimension (alpha, beta),
+        so this is 2 * action_len.
+        """
+        if not getattr(env_params, "action_continuous", False):
+            raise ValueError("Beta distribution is only suitable for continuous action spaces.")
+        return 2 * env_params.action_len
+
+    @staticmethod
+    def last_network_layer(feature_dim: int,
+                           action_dim: int,
+                           min_conc: float = 1e-3
+                           ) -> Tuple[torch.nn.Module, torch.nn.Parameter]:
+        """
+        Returns the final layer that produces raw parameters for the Beta.
+
+        For Beta, we emit 2 * action_dim outputs (alpha_raw, beta_raw).
+        These raw outputs should be mapped with softplus + min_conc to
+        get valid concentrations.
+
+        Returns:
+            nn.Module: Linear head with out_features = 2 * action_dim
+            torch.nn.Parameter: Dummy parameter (kept for API symmetry)
+        """
+        head = torch.nn.Linear(in_features=feature_dim, out_features=2 * action_dim)
+        return head, None
+
+    @staticmethod
+    def params_from_head_output(head_out: torch.Tensor,
+                                action_dim: int,
+                                min_conc: float = 1e-3
+                                ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Split and map the linear head output into valid (alpha, beta) concentrations.
+
+        Args:
+            head_out: Tensor of shape (B, 2 * action_dim)
+            action_dim: Number of action dimensions
+            min_conc: Small positive added after softplus
+
+        Returns:
+            conc1 (alpha), conc0 (beta): tensors, shape (B, action_dim)
+        """
+        if head_out.ndim != 2 or head_out.size(-1) != 2 * action_dim:
+            raise ValueError("Expected head_out to have shape (B, 2 * action_dim).")
+        alpha_raw, beta_raw = torch.split(head_out, action_dim, dim=-1)
+        conc1 = F.softplus(alpha_raw) + min_conc
+        conc0 = F.softplus(beta_raw) + min_conc
+        return conc1, conc0
+
+    # ---------- Convenience methods to mirror your Normal ----------
+
+    def deterministic_action(self) -> torch.Tensor:
+        """
+        Return the mean action of the Beta distribution, which lies in (0, 1):
+            mean = alpha / (alpha + beta)
+        """
+        c1 = self.base_dist.concentration1
+        c0 = self.base_dist.concentration0
+        mean = c1 / (c1 + c0)
+        # Keep strictly within (0,1) for simulator robustness
+        return mean.clamp(1e-6, 1 - 1e-6)
+
+    def sample(self):
+        """
+        Draw a sample (non-reparameterized). PyTorch's Beta does not
+        support rsample() with pathwise gradients.
+        """
+        return super().sample()

@@ -35,11 +35,13 @@ class VmasWrapper(MultiAgentEnvironmentInterface):
     def __init__(self,
                  scenario: str,
                  render_mode: Optional[str] = None,
+                 device: str = 'cpu',
                  **kwargs
                  ) -> None:
         super().__init__(render_mode)
         self.env = vmas.make_env(
-            scenario,
+            scenario=scenario,
+            device=device,
             **kwargs,
         )
         self.env_params = self._make_env_params()
