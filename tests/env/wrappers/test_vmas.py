@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import torch
 import vmas
-from prt_rl.env.wrappers.vmas import VmasWrapper, VmasMultiGroupWrapper
+from prt_rl.env.wrappers.vmas_envs import VmasWrapper, VmasMultiGroupWrapper
 from prt_rl.env.interface import MultiAgentEnvParams, MultiGroupEnvParams
 
 def test_vmas_wrapper():
