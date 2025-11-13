@@ -6,7 +6,7 @@ import torch
 from typing import Optional, Tuple, List, Union, Dict, Any, Callable
 import vmas
 from prt_rl.env.interface import MultiAgentEnvironmentInterface, MultiAgentEnvParams, EnvParams, MultiGroupEnvironmentInterface, MultiGroupEnvParams
-from prt_rl.env.wrappers.gymnasium import GymnasiumWrapper
+from prt_rl.env.wrappers.gymnasium_envs import GymnasiumWrapper
 
 
 class VmasWrapper(MultiAgentEnvironmentInterface):
