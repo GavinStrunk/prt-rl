@@ -2,6 +2,7 @@
 Collectors gather experience from environments using the provided policy/agent.
 """
 import contextlib
+from flask import ctx
 import torch
 from typing import Dict, Optional, List, Tuple, Any
 from prt_rl.env.interface import EnvironmentInterface, EnvParams, MultiAgentEnvParams
@@ -239,7 +240,8 @@ class SequentialCollector:
     def collect_experience(self,
                            policy: 'BaseAgent | BasePolicy | None' = None,
                            num_steps: int = 1,
-                           bootstrap: bool = True
+                           bootstrap: bool = True,
+                           inference_mode: bool = True
                            ) -> Dict[str, torch.Tensor]:
         """
         Collects the given number of environment steps using the provided policy. 
@@ -250,7 +252,8 @@ class SequentialCollector:
             policy (BaseAgent | BasePolicy | None): An agent or policy that takes a state and returns an action.
             num_steps (int): The number of steps to collect experience for. Defaults to 1.
             bootstrap (bool): Whether to compute the last value estimate V(s_{T+1}) for bootstrapping if the last step is not done and the policy provides value estimates. Defaults to True.
-
+            inference_mode (bool): Whether to collect experience in inference mode (no gradients). Defaults to True.
+            
         Returns:
             Dict[str, torch.Tensor]: A dictionary containing the collected experience with keys (B=T):
                 - 'state': The states collected. Shape (B, state_dim)
@@ -272,8 +275,11 @@ class SequentialCollector:
         last_value_estimate = None
 
         for _ in range(num_steps):
-            # Collect a single step
-            state, action, next_state, reward, done, value_est, log_prob = self._collect_step(policy)
+
+            ctx = torch.no_grad() if inference_mode else contextlib.nullcontext()
+            with ctx:
+                # Collect a single step
+                state, action, next_state, reward, done, value_est, log_prob = self._collect_step(policy)
 
             states.append(state)
             actions.append(action)
@@ -310,7 +316,8 @@ class SequentialCollector:
     def collect_trajectory(self, 
                         policy: 'BaseAgent | BasePolicy | None' = None,
                         num_trajectories: int | None = None,
-                        min_num_steps: int | None = None
+                        min_num_steps: int | None = None,
+                        inference_mode: bool = True
                         ) -> Dict[str, torch.Tensor]:
         """
         Collects one or more full trajectories and returns a single stacked/batched dictionary.
@@ -325,6 +332,7 @@ class SequentialCollector:
             policy (BaseAgent | BasePolicy | None): Policy used to act in the environment.
             num_trajectories (int | None): Number of full trajectories to collect.
             min_num_steps (int | None): Minimum total steps to collect (last trajectory finished).
+            inference_mode (bool): Whether to collect experience in inference mode (no gradients). Defaults to True.
 
         Returns:
             Dict[str, torch.Tensor]: A dictionary containing the collected trajectory with keys:
@@ -348,7 +356,10 @@ class SequentialCollector:
 
         if num_trajectories is not None:
             for _ in range(num_trajectories):
-                traj = self._collect_single_trajectory(policy)
+
+                ctx = torch.no_grad() if inference_mode else contextlib.nullcontext()
+                with ctx:
+                    traj = self._collect_single_trajectory(policy)
 
                 states.append(traj['state'])
                 actions.append(traj['action'])
@@ -555,7 +566,8 @@ class ParallelCollector:
     def collect_experience(self,
                            policy: 'BaseAgent | BasePolicy | None' = None,
                            num_steps: int = 1,
-                           bootstrap: bool = True
+                           bootstrap: bool = True,
+                           inference_mode: bool = True
                            ) -> Dict[str, torch.Tensor]:
         """
         Collects the given number of experiences from the environment using the provided policy.
@@ -566,7 +578,8 @@ class ParallelCollector:
             policy (BaseAgent | BasePolicy | None): An agent or policy that takes a state and returns an action.
             num_steps (int): The number of steps to collect experience for. Defaults to 1.
             bootstrap (bool): Whether to compute the last value estimate V(s_{T+1}) for bootstrapping if the last step is not done and the policy provides value estimates. Defaults to True.
-
+            inference_mode (bool): Whether to collect experience in inference mode (no gradients). Defaults to True.
+            
         Returns:
             Dict[str, torch.Tensor]: A dictionary containing the collected experience with keys:
                 - 'state': The states collected. Shape (T, N, ...), or (N*T, ...) if flattened.
@@ -593,8 +606,11 @@ class ParallelCollector:
         last_value_estimate = None
 
         for _ in range(T):
-            # Collect a single step
-            state, action, next_state, reward, done, value_estimate, log_prob = self._collect_step(policy)
+
+            ctx = torch.no_grad() if inference_mode else contextlib.nullcontext()
+            with ctx:
+                # Collect a single step
+                state, action, next_state, reward, done, value_estimate, log_prob = self._collect_step(policy)
 
             # Append the tensors to the lists with shape (N, ...)
             states.append(state)
@@ -651,7 +667,8 @@ class ParallelCollector:
     def collect_trajectory(self, 
                         policy: 'BaseAgent | BasePolicy | None' = None,
                         num_trajectories: int | None = None,
-                        min_num_steps: int | None = None
+                        min_num_steps: int | None = None,
+                        inference_mode: bool = True
                         ) -> Tuple[Dict[str, List[torch.Tensor]], int]:
         """
         Collects full trajectories in parallel from the environment using the provided policy.
@@ -667,7 +684,8 @@ class ParallelCollector:
             policy (BaseAgent | BasePolicy | None): The policy or agent to use.
             num_trajectories (int | None): The total number of complete trajectories to collect.
             min_num_steps (int | None): The minimum number of steps to collect before completing the trajectories. If specified, will collect until the minimum number of steps is reached, then complete the last trajectory.
-
+            inference_mode (bool): Whether to collect experience in inference mode (no gradients). Defaults to True.
+            
         Returns:
             Dict[str, torch.Tensor]: A dictionary containing the collected experience with keys:
                 - state: The current state of the environment. Shape (B, state_dim)
@@ -704,7 +722,10 @@ class ParallelCollector:
         completed_total = 0
 
         while True:
-            state, action, next_state, reward, done, value_est, log_prob = self._collect_step(policy)
+
+            ctx = torch.no_grad() if inference_mode else contextlib.nullcontext()
+            with ctx:
+                state, action, next_state, reward, done, value_est, log_prob = self._collect_step(policy)
 
             states_steps.append(state)           # (N, *state_shape)
             actions_steps.append(action)         # (N, action_len)
@@ -927,11 +948,10 @@ class ParallelCollector:
                     # Update the previous experience for this index
                     state[i] = reset_state
 
-        with torch.no_grad():
-            action, value_est, log_prob = get_action_from_policy(policy, state, self.env_params)
+        action, value_est, log_prob = get_action_from_policy(policy, state, self.env_params)
 
-            # Step the environment with the action
-            next_state, reward, done, _ = self.env.step(action)
+        # Step the environment with the action
+        next_state, reward, done, _ = self.env.step(action)
 
         # Update the Metrics tracker and logging
         self.metric.update(reward, done)

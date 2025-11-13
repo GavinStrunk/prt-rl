@@ -161,7 +161,7 @@ class PolicyGradient(BaseAgent):
                 scheduler.update(current_step=num_steps)
 
             # Collect experience using the current policy
-            trajectories = collector.collect_trajectory(policy=self.policy, min_num_steps=self.config.batch_size)
+            trajectories = collector.collect_trajectory(policy=self.policy, min_num_steps=self.config.batch_size, inference_mode=False)
             num_steps += trajectories['state'].shape[0]  
 
             # Compute Monte Carlo estimate of the Q function
