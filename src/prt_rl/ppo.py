@@ -273,6 +273,8 @@ class PPO(BaseAgent):
 
             # Flatten the experience batch (N, T, ...) -> (N*T, ...) and remove the last_value_est key because we don't need it anymore
             experience = {k: v.reshape(-1, *v.shape[2:]) for k, v in experience.items() if k != 'last_value_est'}
+
+            # Update the total number of steps collected so far
             num_steps += experience['state'].shape[0]
 
             # Add experience to the rollout buffer
