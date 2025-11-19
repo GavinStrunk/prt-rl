@@ -1,33 +1,28 @@
 <p align="center">
 <picture>
-<img src="docs/_static/prt-rl-logo-title.png" width="1024" style="max-width: 100%;">
+<img src="docs/_static/prt-rl-logo-title.png" width="400" style="max-width: 100%;">
 </picture>
 </p>
 
-My code related to learning and using RL outside of a specific project
+**prt-rl** is part of the broader *Python Research Toolkit* ecosystem and provides a clean, mathematically grounded collection of reinforcement learning algorithms.  
+Its primary goal is **clarity, pedagogy, and research exploration**—not raw performance.
 
-The full documentation website is at [https://prt-rl.readthedocs.io](https://prt-rl.readthedocs.io/en/latest/)
+This library is designed for researchers, students, and practitioners who want to understand *why* RL algorithms work, how their mathematics map to code, and what practical implementation details matter in real systems.
 
-# Installation
-Installing prt-rl from pypi as:
-```shell
-pip install prt-rl
-```
+Unlike high-performance libraries such as **TorchRL**, **RLlib**, and **skrl**, **prt-rl focuses on transparency, composability, and conceptual depth**. Every algorithm is implemented with an emphasis on readability, modularity, and annotated code that highlights both the underlying equations and the implementation tips that make them work in practice.
 
-# Getting Started
-
-# Related Libraries
-* [Stable Baselines 3](https://stable-baselines3.readthedocs.io/en/master/index.html)
-* openai spinup
-* TorchRL
-* RLlib
-* Tianshou
-* [CleanRL](https://docs.cleanrl.dev/)
-* [SKRL](https://github.com/Toni-SM/skrl/tree/main)
+>⚠️ **Note:** This repository is under active development. APIs, file structure, and module organization may change as the project evolves. Backward compatibility is not guaranteed until version 1.0.
 
 
+## Documentation
 
+**Installation, Getting Started, and API guides can be found in the full documentation:**
 
-# Contributing
-Contributions are welcome, but please submit an issue prior to submitting a PR so the feature or bug can be discussed. 
-This repository follows semantic versioning with the format major.minor.patch. The patch version bumping is automatically handled by the action workflow, and major/minor bumps can be performed by adding #major or #minor to the commit message. The tag must be in the commit short message for the action to correctly pick it up.
+➡️ https://prt-rl.readthedocs.io/en/latest/
+
+---
+
+## Contributing
+
+Contributions are welcome!  
+Please open an issue before submitting a pull request so that new features or bug fixes can be discussed beforehand.

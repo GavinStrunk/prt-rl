@@ -92,6 +92,11 @@ html_theme = "sphinx_book_theme"
 # html_theme = "furo"
 html_logo = "_static/prt-rl-logo.png"
 html_favicon = "_static/prt-rl-logo.png"
+html_theme_options = {
+    "logo": {
+        "text": f"<div style='text-align: center;'><strong>prt-rl</strong> ({version})</div>"
+    }
+}
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
