@@ -1,8 +1,5 @@
 """
-Proximal Policy Optimization (PPO)
-
-Reference:
-[1] https://arxiv.org/abs/1707.06347
+Implementation of the Advantage Actor-Critic (A2C) algorithm.
 """
 from dataclasses import dataclass
 import numpy as np
@@ -26,20 +23,19 @@ from prt_rl.common.policies.distribution import DistributionPolicy
 from prt_rl.common.policies.value_critic import ValueCritic
 
 @dataclass
-class PPOConfig:
+class A2CConfig:
     """
-    Configuration for the PPO agent.
-
-    Args:
-        steps_per_batch (int): Number of steps to collect per batch.
-        mini_batch_size (int): Size of mini-batches for optimization.
+    Configuration parameters for the A2C agent.
+    
+    Attributes:
+        steps_per_batch (int): Number of steps to collect per training batch.
+        mini_batch_size (int): Size of each mini-batch for optimization.
         learning_rate (float): Learning rate for the optimizer.
         gamma (float): Discount factor for future rewards.
-        epsilon (float): Clipping parameter for PPO.
+        epsilon (float): Clipping parameter for PPO (not used in A2C).
         gae_lambda (float): Lambda parameter for Generalized Advantage Estimation.
-        entropy_coef (float): Coefficient for the entropy term in the loss function.
-        value_coef (float): Coefficient for the value loss term in the loss function.
-        num_optim_steps (int): Number of optimization steps per batch.
+        entropy_coef (float): Coefficient for the entropy bonus.
+        value_coef (float): Coefficient for the value loss.
         normalize_advantages (bool): Whether to normalize advantages.
     """
     steps_per_batch: int = 2048
@@ -50,32 +46,9 @@ class PPOConfig:
     gae_lambda: float = 0.95
     entropy_coef: float = 0.01
     value_coef: float = 0.5
-    num_optim_steps: int = 10
     normalize_advantages: bool = False
 
-class PPOPolicy(BasePolicy):
-    """
-    PPOPolicy is a policy that combines an actor and a critic network. It can optionally use an encoder network to process the input state before passing it to the actor and critic heads.
-
-    The PPOPolicy is a combination of a DistributionPolicy for the actor and a ValueCritic for the critic. It can handle both discrete and continuous action spaces.
-    
-    The architecture of the policy is as follows:
-        - Encoder Network (optional): Processes the input state.
-        - Actor Head: Computes actions based on the latent state.
-        - Critic Head: Computes the value for the given state.
-
-    .. image:: /_static/actorcriticpolicy.png
-        :alt: ActorCriticPolicy Architecture
-        :width: 100%
-        :align: center
-
-    Args:
-        env_params (EnvParams): Environment parameters.
-        encoder (BaseEncoder | None): Encoder network to process the input state. If None, the input state is used directly.
-        actor (DistributionPolicy | None): Actor network to compute actions. If None, a default DistributionPolicy is created.
-        critic (ValueCritic | None): Critic network to compute values. If None, a default ValueCritic is created.
-        share_encoder (bool): If True, share the encoder between actor and critic. Default is False.
-    """
+class A2CPolicy(BasePolicy):
     def __init__(self,
                  env_params: EnvParams,
                  encoder: BaseEncoder | None = None,
@@ -166,27 +139,19 @@ class PPOPolicy(BasePolicy):
 
         return value, log_probs, entropy
 
-class PPO(BaseAgent):
+class A2C(BaseAgent):
     """
-    Proximal Policy Optimization (PPO)
-
+    Advantage Actor-Critic (A2C) agent implementation.
+    
     Args:
-        policy (ActorCriticPolicy | None): Policy to use. If None, a default ActorCriticPolicy will be created.
-        steps_per_batch (int): Number of steps to collect per batch.
-        mini_batch_size (int): Size of mini-batches for optimization.
-        learning_rate (float): Learning rate for the optimizer.
-        gamma (float): Discount factor for future rewards.
-        epsilon (float): Clipping parameter for PPO.
-        gae_lambda (float): Lambda parameter for Generalized Advantage Estimation.
-        entropy_coef (float): Coefficient for the entropy term in the loss function.
-        value_coef (float): Coefficient for the value loss term in the loss function.
-        num_optim_steps (int): Number of optimization steps per batch.
-        normalize_advantages (bool): Whether to normalize advantages.
-        device (str): Device to run the computations on ('cpu' or 'cuda').
+        policy (A2CPolicy): The policy network used by the agent.
+        config (A2CConfig): Configuration parameters for the A2C agent.
+        device (str): The device to run the agent on ('cpu' or 'cuda').
+    
     """
     def __init__(self,
-                 policy: PPOPolicy,
-                 config: PPOConfig = PPOConfig(),
+                 policy: A2CPolicy,
+                 config: A2CConfig = A2CConfig(),
                  device: str = 'cpu',
                  ) -> None:
         super().__init__()
@@ -197,7 +162,7 @@ class PPO(BaseAgent):
         self.policy.to(self.device)
 
         # Configure optimizers
-        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.config.learning_rate)
+        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.config.learning_rate)   
 
     def predict(self, 
                 state: torch.Tensor, 
@@ -273,48 +238,36 @@ class PPO(BaseAgent):
 
             # Flatten the experience batch (N, T, ...) -> (N*T, ...) and remove the last_value_est key because we don't need it anymore
             experience = {k: v.reshape(-1, *v.shape[2:]) for k, v in experience.items() if k != 'last_value_est'}
-
-            # Update the total number of steps collected so far
             num_steps += experience['state'].shape[0]
 
             # Add experience to the rollout buffer
             rollout_buffer.add(experience)
 
             # Optimization Loop
-            clip_losses = []
+            policy_losses = []
             entropy_losses = []
             value_losses = []
             losses = []
-            for _ in range(self.config.num_optim_steps):
-                for batch in rollout_buffer.get_batches(batch_size=self.config.mini_batch_size):
-                    new_value_est, new_log_prob, entropy = self.policy.evaluate_actions(batch['state'], batch['action'])
-                    old_log_prob = batch['log_prob'].detach()
+            for batch in rollout_buffer.get_batches(batch_size=self.config.mini_batch_size):
+                new_value_est, new_log_prob, entropy = self.policy.evaluate_actions(batch['state'], batch['action'])
+                
+                batch_advantages = batch['advantages']
+                policy_loss = -(new_log_prob * batch_advantages).mean()
 
-                    # Ratio between new and old policy
-                    ratio = torch.exp(new_log_prob - old_log_prob)
+                entropy_loss = -entropy.mean()
+                value_loss = F.mse_loss(new_value_est, batch['returns'])
+                loss = policy_loss + self.config.entropy_coef*entropy_loss + self.config.value_coef * value_loss
+                
+                policy_losses.append(policy_loss.item())
+                entropy_losses.append(entropy_loss.item())
+                value_losses.append(value_loss.item())
+                losses.append(loss.item())
 
-                    # Clipped surrogate loss
-                    batch_advantages = batch['advantages']
-                    clip_loss = batch_advantages * ratio
-                    clip_loss2 = batch_advantages * torch.clamp(ratio, 1 - self.config.epsilon, 1 + self.config.epsilon)
-                    clip_loss = -torch.min(clip_loss, clip_loss2).mean()
-
-                    entropy_loss = -entropy.mean()
-
-                    value_loss = F.mse_loss(new_value_est, batch['returns'])
-
-                    loss = clip_loss + self.config.entropy_coef*entropy_loss + self.config.value_coef * value_loss
-                    
-                    clip_losses.append(clip_loss.item())
-                    entropy_losses.append(entropy_loss.item())
-                    value_losses.append(value_loss.item())
-                    losses.append(loss.item())
-
-                    # Optimize
-                    self.optimizer.zero_grad()
-                    loss.backward()
-                    # torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
-                    self.optimizer.step()
+                # Optimize
+                self.optimizer.zero_grad()
+                loss.backward()
+                # torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                self.optimizer.step()
 
             # Clear the buffer after optimization
             rollout_buffer.clear()
@@ -327,7 +280,7 @@ class PPO(BaseAgent):
                                                                    f"Loss: {np.mean(losses):.4f},")
             # Log metrics
             if logger.should_log(num_steps):
-                logger.log_scalar('clip_loss', np.mean(clip_losses), num_steps)
+                logger.log_scalar('clip_loss', np.mean(policy_losses), num_steps)
                 logger.log_scalar('entropy_loss', np.mean(entropy_losses), num_steps)
                 logger.log_scalar('value_loss', np.mean(value_losses), num_steps)
                 logger.log_scalar('loss', np.mean(losses), num_steps)
@@ -339,9 +292,4 @@ class PPO(BaseAgent):
                 evaluator.evaluate(agent=self.policy, iteration=num_steps)
 
         if evaluator is not None:
-            evaluator.close()
-
-
-
-
-
+            evaluator.close()             

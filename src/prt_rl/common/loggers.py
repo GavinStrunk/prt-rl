@@ -375,3 +375,177 @@ class MLFlowLogger(Logger):
             metadata=policy_metadata,
         )
 
+@Logger.register('clearml')
+class ClearMLLogger(Logger):
+    """
+    A lightweight adapter that logs training runs to **ClearML**.
+
+    This logger mirrors the behavior of an MLflow-style logger while taking
+    advantage of ClearML primitives:
+
+    - Creates and manages a ClearML **Task** under the specified project.
+    - Logs **parameters** as static configuration (via ClearML configuration /
+      hyperparameters panels).
+    - Logs **scalars** (metrics) with optional `"group/metric"` naming that maps
+      to ClearML's *(title, series)* convention.
+    - Saves an **agent** object as a versioned artifact attached to the Task.
+    - Registers a **policy** as a first-class ClearML **Model** in the Model
+      Registry (including design/metadata and uploaded weights), so it is
+      discoverable and diffable alongside other models.
+
+    The class expects ClearML to be installed and configured (e.g., via
+    `clearml-init` or environment variables). It does **not** start or manage
+    any background queues; uploads occur synchronously within each call.
+
+    Attributes
+    ----------
+    project_name : str
+        Name of the ClearML project under which the Task will be created.
+    task_name : str
+        Name of the ClearML Task (run) created for this logger instance.
+    logging_freq : int
+        Frequency hint inherited from :class:`Logger`. If your training loop
+        calls `log_scalar` every step, you may use this value to conditionally
+        log every *n*-th step (your loop is responsible for honoring it).
+    iteration : int
+        Monotonically increasing counter used as the default `iteration` (step)
+        for scalar logging when none is supplied explicitly.
+    task : clearml.Task
+        The underlying ClearML Task object created during initialization.
+    _logger : clearml.Logger
+        The ClearML experiment logger obtained from `task.get_logger()`.
+
+    Notes
+    -----
+    - **Scalar naming:** If you pass `"loss/train"` to `log_scalar`, it will be
+      stored with `title="loss"` and `series="train"`. If no slash is present,
+      the title defaults to `"metrics"` and the entire name becomes the series.
+    - **Parameters:** Parameters are intended to be *static* (do not change over
+      training). They are recorded into ClearML's configuration/hyperparameters
+      view to support comparison and reproducibility.
+    - **Models vs. Artifacts:** `save_policy` registers a ClearML *Model*
+      (appears in the Model Registry) and uploads weights (e.g., a PyTorch
+      `state_dict` or a pickle fallback). `save_agent` uploads a file or object
+      as a Task *artifact* (appears under the run’s Artifacts panel).
+    - **Environment:** Ensure ClearML is configured to point at your server
+      (self-hosted or SaaS) via `clearml-init` or environment variables
+      (`CLEARML_API_HOST`, `CLEARML_API_ACCESS_KEY`, `CLEARML_API_SECRET_KEY`).
+
+    Examples
+    --------
+    Basic usage in a training loop:
+
+    >>> logger = ClearMLLogger(project_name="Demo/PRT", task_name="PPO CartPole")
+    >>> logger.log_parameters({"algo": "PPO", "seed": 42, "lr": 3e-4})
+    >>> for step in range(1000):
+    ...     loss = 1.0 / (step + 1)
+    ...     reward = step * 0.1
+    ...     logger.log_scalar("loss/train", loss)         # auto step (0,1,2,...)
+    ...     logger.log_scalar("reward/mean", reward)
+    >>> # Save objects
+    >>> agent = {"type": "ppo", "notes": "demo"}
+    >>> logger.save_agent(agent)                          # artifact on the Task
+    >>> policy = my_policy                                # your BasePolicy impl
+    >>> logger.save_policy(policy)                        # Model in Registry
+    >>> logger.close()
+
+    See Also
+    --------
+    clearml.Task : Underlying experiment/run object.
+    clearml.OutputModel : Used for registering models in the ClearML registry.
+
+    Raises
+    ------
+    ImportError
+        If the `clearml` package is not installed or cannot be imported.
+    """
+    def __init__(self,
+                 project_name: str,
+                 task_name: str,
+                 logging_freq: int = 1,
+                 ) -> None:
+        try:
+            import clearml
+            self.clearml = clearml
+        except ImportError as e:
+            raise ImportError("You need to install clearml to use this logger.") from e
+
+        super().__init__(logging_freq=logging_freq)
+        self.project_name = project_name
+        self.task_name = task_name
+
+        self.task = self.clearml.Task.init(project_name=self.project_name, task_name=self.task_name)
+        self._logger = self.task.get_logger()
+
+    def close(self):
+        """
+        Closes and cleans up the ClearML logger.
+        """
+        self.task.close()
+
+    def log_parameters(self,
+                       params: dict,
+                       ) -> None:
+        """
+        Logs a dictionary of parameters. Parameters are values used to initialize but do not change throughout training.
+
+        Args:
+            params (dict): Dictionary of parameters.
+        """
+        self.task.set_parameters_as_dict(params)
+
+    def log_scalar(self,
+                   name: str,
+                   value: float,
+                   iteration: Optional[int] = None,
+                   ) -> None:
+        """
+        Logs a scalar value. Scalar values are any metric or value that changes throughout training.
+
+        Args:
+            name (str): Name of the scalar value.
+            value (float): Value of the scalar value.
+            iteration (int, optional): Iteration number.
+        """
+        # ClearML expects a (title, series) breakdown. Allow "group/metric" syntax; otherwise use a default group.
+        if "/" in name:
+            title, series = name.split("/", 1)
+        else:
+            title, series = "metrics", name
+
+        step = self.iteration if iteration is None else iteration
+        self._logger.report_scalar(title=title, series=series, value=value, iteration=step)
+
+        # Keep our local iteration in sync like your MLFlowLogger
+        if iteration is None:
+            self.iteration += 1
+        else:
+            self.iteration = iteration
+
+    def save_policy(self,
+                    policy: BasePolicy,
+                    ) -> None:
+        """
+        Saves the policy to the logger.
+
+        Args:
+            policy (BasePolicy): Policy to save.
+        """
+        raise NotImplementedError("save_policy must be implemented in subclasses.")
+    
+    def save_agent(self,
+                    agent: object,
+                    ) -> None:
+        """
+        Saves the agent to the logger.
+
+        Args:
+            agent (object): Agent to save.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            filename = "agent.pt" 
+            save_path = os.path.join(tmpdir, filename)
+            torch.save(agent, save_path)
+
+            # Upload file as an artifact (keeps original filename)
+            self.task.upload_artifact(name="agent", artifact_object=save_path, metadata={"filename": filename})
