@@ -66,7 +66,7 @@ class Categorical(Distribution, tdist.Categorical):
         return env_params.action_max - env_params.action_min + 1
 
     @staticmethod
-    def last_network_layer(feature_dim: int, action_dim: int) -> torch.nn.Module:
+    def last_network_layer(action_dim: int) -> torch.nn.Module:
         """
         Returns the last layer of the network that produces the parameters for this distribution.
         For Categorical, this is a linear layer with num_actions outputs.
@@ -74,7 +74,7 @@ class Categorical(Distribution, tdist.Categorical):
             num_actions (int): The number of actions in the environment.
         """
         return torch.nn.Sequential(
-            torch.nn.Linear(in_features=feature_dim, out_features=action_dim),
+            torch.nn.LazyLinear(out_features=action_dim),
             torch.nn.Softmax(dim=-1)
         )
     
@@ -136,7 +136,7 @@ class Normal(Distribution, tdist.Normal):
         return env_params.action_len
 
     @staticmethod
-    def last_network_layer(feature_dim: int, action_dim: int, log_std_init: float = 0.0) -> Tuple[torch.nn.Module, torch.nn.Parameter]:
+    def last_network_layer(action_dim: int, log_std_init: float = 0.0) -> Tuple[torch.nn.Sequential, torch.nn.Parameter]:
         """
         Returns the last layer of the network that produces the parameters for this distribution.
         For Normal, this is a linear layer with num_actions outputs (mean). The log standard deviation is treated as a free parameter and is initialized to zero by default.
@@ -148,7 +148,7 @@ class Normal(Distribution, tdist.Normal):
         """
         log_std = torch.nn.Parameter(torch.ones(action_dim) * log_std_init, requires_grad=True)
         
-        return torch.nn.Linear(in_features=feature_dim, out_features=action_dim), log_std
+        return torch.nn.Sequential(torch.nn.LazyLinear(out_features=action_dim)), log_std
     
     def deterministic_action(self) -> torch.Tensor:
         """

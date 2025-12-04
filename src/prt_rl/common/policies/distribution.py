@@ -6,6 +6,63 @@ from prt_rl.common.networks import MLP, BaseEncoder
 import prt_rl.common.distributions as dist
 
 
+class DistributionActor(torch.nn.Module):
+    def __init__(self,
+                 env_params: EnvParams,
+                 distribution: dist.Distribution | None = None,
+                 ) -> None:
+        super().__init__()
+        self.env_params = env_params
+
+        # Default distributions for discrete and continuous action spaces
+        if distribution is None:
+            if self.env_params.action_continuous:
+                self.distribution = dist.Normal
+            else:
+                self.distribution = dist.Categorical
+        else:
+            self.distribution = distribution
+
+        action_dim = self.distribution.get_action_dim(self.env_params)
+        dist_network = self.distribution.last_network_layer(action_dim=action_dim)
+
+        # Support both interfaces: torch.nn.Sequential and Tuple[torch.nn.Sequential, torch.nn.Parameter]
+        if isinstance(dist_network, tuple):
+            self.distribution_head = dist_network[0]
+            self.distribution_params = dist_network[1]
+        else:
+            self.distribution_head = dist_network
+            self.distribution_params = None   
+
+    def act(self,
+            state: torch.Tensor,
+            deterministic: bool = False
+            ) -> Tuple[torch.Tensor, torch.Tensor]:
+        # Construct the distribution from the state
+        distribution = self.get_distribution(state)
+
+        # Either sample the distribution for the action or get the deterministic action
+        action = distribution.sample() if not deterministic else distribution.deterministic_action()
+
+        # Compute the log probabilities for the entire action vector
+        log_probs = distribution.log_prob(action).sum(dim=-1, keepdim=True)
+
+        return action, log_probs   
+
+    def get_distribution(self,
+                         state: torch.Tensor
+                         ) -> dist.Distribution:
+        # Get the distribution variables from the distribution head network
+        distribution_vars = self.distribution_head(state)
+
+        # If the distribution has additional parameters, we use them to create the distribution
+        if self.distribution_params is not None:
+            distribution = self.distribution(distribution_vars, self.distribution_params)
+        else:
+            distribution = self.distribution(distribution_vars)
+
+        return distribution
+
 class DistributionPolicy(BasePolicy):
     """
     The DistributionPolicy class implements a policy that uses a neural network to compute action distributions for both discrete and continuous action spaces. It can optionally use an encoder network to process the input state before passing it to the policy head.

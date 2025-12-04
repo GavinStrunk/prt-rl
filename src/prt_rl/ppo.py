@@ -19,11 +19,10 @@ from prt_rl.common.progress_bar import ProgressBar
 from prt_rl.common.evaluators import Evaluator
 import prt_rl.common.utils as utils
 
-import copy
-from prt_rl.common.networks import BaseEncoder
+from prt_rl.common.networks import LazyMLP
 from prt_rl.common.policies.base import BasePolicy
-from prt_rl.common.policies.distribution import DistributionPolicy
-from prt_rl.common.policies.value_critic import ValueCritic
+from prt_rl.common.policies.distribution import DistributionActor
+from prt_rl.common.distributions import Distribution
 
 @dataclass
 class PPOConfig:
@@ -77,37 +76,28 @@ class PPOPolicy(BasePolicy):
         share_encoder (bool): If True, share the encoder between actor and critic. Default is False.
     """
     def __init__(self,
-                 env_params: EnvParams,
-                 encoder: BaseEncoder | None = None,
-                 actor: DistributionPolicy | None = None,
-                 critic: ValueCritic | None = None,
-                 share_encoder: bool = False,
+                env_params: EnvParams,
+                *,
+                encoder: torch.nn.Module | None = None,
+                network_arch: List[int] = [64, 64],
+                activation: torch.nn.Module = torch.nn.ReLU,
+                distribution: Distribution | None = None,
+                share_parameters: bool = False,
                  ) -> None:
         super().__init__(env_params=env_params)
         self.env_params = env_params
-        self.encoder = encoder
-        self.critic_encoder = None
-        self.share_encoder = share_encoder
-        
-        # If no actor is provided, create a default DistributionPolicy without an encoder
-        if actor is None:
-            self.actor = DistributionPolicy(
-                env_params=env_params,
-            )
-        else:
-            self.actor = actor
+        self.encoder = encoder      
 
-        # If no critic is provided, create a default ValueCritic without an encoder
-        if critic is None:
-            self.critic = ValueCritic(
-                env_params=env_params,
-            )
-        else:
-            self.critic = critic
+        # Build Base Network(s)
+        self.base = LazyMLP(network_arch=network_arch, hidden_activation=activation)
+        self.critic_base = None if not share_parameters else LazyMLP(network_arch=network_arch, hidden_activation=activation)
 
-        # If the encoder is not shared, but one exists then make a copy for the critic
-        if not share_encoder and self.encoder is not None:
-            self.critic_encoder = copy.deepcopy(self.encoder)  
+        # Create Critic Head: Add a Linear layer to output a single value
+        self.critic_head = torch.nn.LazyLinear(out_features=1)
+
+        # Create Actor Head: Layers depend on the type of distribution
+        self.actor_head = DistributionActor(env_params=env_params, distribution=distribution)
+    
     
     def predict(self,
                    state: torch.Tensor,
@@ -123,48 +113,50 @@ class PPOPolicy(BasePolicy):
         Returns:
             Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the chosen action, value_estimate, and aciton log probability.
         """
-        if self.encoder is not None:
-            latent_state = self.encoder(state)
-        else:
-            latent_state = state
+        # Run state through encoder if available
+        latent_state = self.encoder(state) if self.encoder is not None else state
 
-        action, _, log_probs = self.actor.predict(latent_state, deterministic=deterministic)
+        # Pass latent state through base network
+        latent_state = self.base(latent_state)
 
-        if self.critic_encoder is not None:
-            critic_latent_state = self.critic_encoder(state)
-        else:
-            critic_latent_state = latent_state
+        # Get action and log probability from actor head
+        action, log_probs = self.actor_head.act(latent_state, deterministic=deterministic)
 
-        value = self.critic(critic_latent_state) 
+        critic_latent_state = latent_state if self.critic_base is None else self.critic_base(latent_state)
+
+        value = self.critic_head(critic_latent_state) 
         return action, value, log_probs
     
     def evaluate_actions(self,
                          state: torch.Tensor,
                          action: torch.Tensor
-                        ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                        ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Evaluates the value, log probability and entropy of the given action under the policy.
+        Evaluates the log probability and entropy of the given action under the policy.
         Args:
             state (torch.Tensor): Current state tensor.
             action (torch.Tensor): Action tensor to evaluate.
         Returns:
-            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the value estimate, log probability, and entropy. All tensors have shape (B, 1).
+            Tuple[torch.Tensor, torch.Tensor]: A tuple containing the log probability and entropy. All tensors have shape (B, 1).
         """
-        if self.encoder is not None:
-            latent_state = self.encoder(state)
-        else:
-            latent_state = state
-        
-        log_probs, entropy = self.actor.evaluate_actions(latent_state, action)
+        latent_state = self.encoder(state) if self.encoder is not None else state
+        latent_state = self.base(latent_state)
+        distribution = self.actor_head.get_distribution(latent_state)
 
-        if self.critic_encoder is not None:
-            critic_latent_state = self.critic_encoder(state)
-        else:
-            critic_latent_state = latent_state
-        
-        value = self.critic(critic_latent_state)
+        # Compute log probabilities and entropy for the entire action vector
+        entropy = distribution.entropy().sum(dim=-1, keepdim=True)
+        log_probs = distribution.log_prob(action.squeeze()).sum(dim=-1, keepdim=True)   
 
-        return value, log_probs, entropy
+        return log_probs, entropy
+    
+    def get_state_value(self,
+                         state: torch.Tensor,
+                         ) -> torch.Tensor:
+        latent_state = self.encoder(state) if self.encoder is not None else state
+        critic_latent_state = latent_state if self.critic_base is None else self.critic_base(latent_state)
+        value = self.critic_head(critic_latent_state)
+        return value
+    
 
 class PPO(BaseAgent):
     """
@@ -268,8 +260,8 @@ class PPO(BaseAgent):
             if self.config.normalize_advantages:
                 advantages = utils.normalize_advantages(advantages)
 
-            experience['advantages'] = advantages.detach()
-            experience['returns'] = returns.detach()
+            experience['advantages'] = advantages
+            experience['returns'] = returns
 
             # Flatten the experience batch (N, T, ...) -> (N*T, ...) and remove the last_value_est key because we don't need it anymore
             experience = {k: v.reshape(-1, *v.shape[2:]) for k, v in experience.items() if k != 'last_value_est'}
@@ -287,22 +279,30 @@ class PPO(BaseAgent):
             losses = []
             for _ in range(self.config.num_optim_steps):
                 for batch in rollout_buffer.get_batches(batch_size=self.config.mini_batch_size):
-                    new_value_est, new_log_prob, entropy = self.policy.evaluate_actions(batch['state'], batch['action'])
+                    # Treat the previous policy's log probabilities as constant, as well as the advantages and returns
                     old_log_prob = batch['log_prob'].detach()
+                    advantages = batch['advantages'].detach()
+                    returns = batch['returns'].detach()
 
+                    # Get the log probability and entropy of the actions under the current policy
+                    new_log_prob, entropy = self.policy.evaluate_actions(batch['state'], batch['action'])
+                    
                     # Ratio between new and old policy
                     ratio = torch.exp(new_log_prob - old_log_prob)
 
                     # Clipped surrogate loss
-                    batch_advantages = batch['advantages']
-                    clip_loss = batch_advantages * ratio
-                    clip_loss2 = batch_advantages * torch.clamp(ratio, 1 - self.config.epsilon, 1 + self.config.epsilon)
+                    clip_loss = advantages * ratio
+                    clip_loss2 = advantages * torch.clamp(ratio, 1 - self.config.epsilon, 1 + self.config.epsilon)
                     clip_loss = -torch.min(clip_loss, clip_loss2).mean()
 
+                    # Compute entropy loss
                     entropy_loss = -entropy.mean()
 
-                    value_loss = F.mse_loss(new_value_est, batch['returns'])
+                    # Compute the value loss function
+                    new_value_est = self.policy.get_state_value(batch['state'])
+                    value_loss = F.mse_loss(new_value_est, returns)
 
+                    # Compute total clipped PPO loss
                     loss = clip_loss + self.config.entropy_coef*entropy_loss + self.config.value_coef * value_loss
                     
                     clip_losses.append(clip_loss.item())

@@ -249,13 +249,21 @@ class A2C(BaseAgent):
             value_losses = []
             losses = []
             for batch in rollout_buffer.get_batches(batch_size=self.config.mini_batch_size):
-                new_value_est, new_log_prob, entropy = self.policy.evaluate_actions(batch['state'], batch['action'])
-                
-                batch_advantages = batch['advantages']
-                policy_loss = -(new_log_prob * batch_advantages).mean()
+                advantages = batch['advantages'].detach()
+                returns = batch['returns'].detach()
 
+                # Get the log probability and entropy of the actions under the current policy
+                new_log_prob, entropy = self.policy.evaluate_actions(batch['state'], batch['action'])
+                
+                policy_loss = self._compute_policy_loss(new_log_prob, advantages)
+
+                # Compute entropy loss
                 entropy_loss = -entropy.mean()
-                value_loss = F.mse_loss(new_value_est, batch['returns'])
+
+                # Compute the value loss function
+                new_value_est = self.policy.get_state_value(batch['state'])
+                value_loss = F.mse_loss(new_value_est, returns)
+
                 loss = policy_loss + self.config.entropy_coef*entropy_loss + self.config.value_coef * value_loss
                 
                 policy_losses.append(policy_loss.item())
@@ -292,4 +300,11 @@ class A2C(BaseAgent):
                 evaluator.evaluate(agent=self.policy, iteration=num_steps)
 
         if evaluator is not None:
-            evaluator.close()             
+            evaluator.close()  
+
+    def _compute_policy_loss(self,
+                             new_log_prob: torch.Tensor,
+                             batch_advantages: torch.Tensor
+                             ) -> torch.Tensor:
+        policy_loss = -(new_log_prob * batch_advantages).mean()
+        return policy_loss     

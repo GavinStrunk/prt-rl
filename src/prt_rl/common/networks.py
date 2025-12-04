@@ -49,6 +49,33 @@ class MLP(nn.Module):
         if self.final_activation is not None:
             x = self.final_activation(x)
         return x
+    
+class LazyMLP(nn.Sequential):
+    """
+    Lazy Multi-layer perceptron network
+
+    Args:
+        output_dim (int): Number of output features
+        network_arch (List[int], optional): Hidden layer sizes. Defaults to [64, 64].
+        hidden_activation (nn.Module): Activation function for hidden layers.
+        final_activation (Optional[nn.Module]): Optional activation after final layer.
+    """
+    def __init__(self,
+                 output_dim: int | None = None,
+                 network_arch: Optional[List[int]] = [64, 64],
+                 hidden_activation: nn.Module = nn.ReLU(),
+                 ) -> None:
+        layers = []
+
+        for dim in network_arch:
+            layers.append(nn.LazyLinear(dim))
+            layers.append(hidden_activation)
+
+        if output_dim is not None:
+            layers.append(nn.LazyLinear(output_dim))
+
+        super().__init__(*layers)
+
 
 class DuelingMLP(nn.Module):
     """
