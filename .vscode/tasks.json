@@ -1,0 +1,19 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "PRT-RL: Generate Algorithm Template",
+      "type": "shell",
+      "command": "uv run prt-rl algorithm \"${input:algoName}\"",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "algoName",
+      "type": "promptString",
+      "description": "Algorithm name (e.g., PPO, TD3, my_new_algo)",
+    }
+  ]
+}

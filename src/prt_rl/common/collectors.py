@@ -7,7 +7,7 @@ import torch
 from typing import Dict, Optional, List, Tuple, Any
 from prt_rl.env.interface import EnvironmentInterface, EnvParams, MultiAgentEnvParams
 from prt_rl.common.loggers import Logger
-from prt_rl.common.policies import BasePolicy
+from prt_rl.common.policies import PolicyModule
 
 def random_action(env_params: EnvParams, state: torch.Tensor) -> torch.Tensor:
     """
@@ -46,7 +46,7 @@ def random_action(env_params: EnvParams, state: torch.Tensor) -> torch.Tensor:
     return action 
 
 def get_action_from_policy(
-        policy, 
+        policy: PolicyModule | None, 
         state: torch.Tensor, 
         env_params: EnvParams = None,
         deterministic: bool = False,
@@ -77,7 +77,7 @@ def get_action_from_policy(
         if policy is None:
             return random_action(env_params, state), None, None
         else:
-            prediction = policy.predict(state, deterministic=deterministic)
+            prediction = policy.act(state, deterministic=deterministic)
 
             # If only the action is returned then set the value estimate and log probs to None
             if len(prediction) == 1:
@@ -233,12 +233,12 @@ class SequentialCollector:
                  ) -> None:
         self.env = env
         self.env_params = env.get_parameters()
-        self.logger = logger if logger is not None else Logger.create('blank')
+        self.logger = logger if logger is not None else Logger()
         self.metric_tracker = MetricsTracker(num_envs=1, logger=self.logger)
         self.previous_experience = None
 
     def collect_experience(self,
-                           policy: 'BaseAgent | BasePolicy | None' = None,
+                           policy: PolicyModule | None = None,
                            num_steps: int = 1,
                            bootstrap: bool = True,
                            inference_mode: bool = True
@@ -249,7 +249,7 @@ class SequentialCollector:
         Since the experiences are collected sequentially, the output shape is (B, ...) where the batch size, B, is equal to the number of time steps, T, collected. This method collects exactly the number of steps specified, so it is possible to get multiple trajectories and the last one can be a partial trajectory.
 
         Args:
-            policy (BaseAgent | BasePolicy | None): An agent or policy that takes a state and returns an action.
+            policy (PolicyModule | None): An agent or policy that takes a state and returns an action.
             num_steps (int): The number of steps to collect experience for. Defaults to 1.
             bootstrap (bool): Whether to compute the last value estimate V(s_{T+1}) for bootstrapping if the last step is not done and the policy provides value estimates. Defaults to True.
             inference_mode (bool): Whether to collect experience in inference mode (no gradients). Defaults to True.
@@ -314,7 +314,7 @@ class SequentialCollector:
         return exp
     
     def collect_trajectory(self, 
-                        policy: 'BaseAgent | BasePolicy | None' = None,
+                        policy: PolicyModule | None = None,
                         num_trajectories: int | None = None,
                         min_num_steps: int | None = None,
                         inference_mode: bool = True
@@ -329,7 +329,7 @@ class SequentialCollector:
         where B is the total number of steps across all collected trajectories.
 
         Args:
-            policy (BaseAgent | BasePolicy | None): Policy used to act in the environment.
+            policy (PolicyModule | None): Policy used to act in the environment.
             num_trajectories (int | None): Number of full trajectories to collect.
             min_num_steps (int | None): Minimum total steps to collect (last trajectory finished).
             inference_mode (bool): Whether to collect experience in inference mode (no gradients). Defaults to True.
@@ -423,13 +423,13 @@ class SequentialCollector:
         return self.metric_tracker
 
     def _collect_single_trajectory(self, 
-                                   policy: 'BaseAgent | BasePolicy | None' = None
+                                   policy: PolicyModule | None = None
                                    ) -> Dict[str, torch.Tensor]:
         """
         Collects a single trajectory from the environment using the provided policy.
 
         Args:
-            policy (BaseAgent | BasePolicy | None): An agent or policy that takes a state and returns an action.
+            policy (PolicyModule | None): An agent or policy that takes a state and returns an action.
 
         Returns:
             Dict[str, torch.Tensor]: A dictionary containing the collected trajectory with keys:
@@ -485,13 +485,13 @@ class SequentialCollector:
         return traj
     
     def _collect_step(self,
-                      policy: 'BaseAgent | BasePolicy | None' = None
+                      policy: PolicyModule | None = None
                       ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Collects a single step from the environment using the provided policy.
         
         Args:
-            policy (BaseAgent | BasePolicy | None): An agent or policy that takes a state and returns an action.
+            policy (PolicyModule | None): An agent or policy that takes a state and returns an action.
         
         Returns:
             Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -559,12 +559,12 @@ class ParallelCollector:
         self.env = env
         self.env_params = env.get_parameters()
         self.flatten = flatten
-        self.logger = logger if logger is not None else Logger.create('blank')
+        self.logger = logger if logger is not None else Logger()
         self.metric = MetricsTracker(num_envs=self.env.get_num_envs(), logger=self.logger) 
         self.previous_experience = None
 
     def collect_experience(self,
-                           policy: 'BaseAgent | BasePolicy | None' = None,
+                           policy: PolicyModule | None = None,
                            num_steps: int = 1,
                            bootstrap: bool = True,
                            inference_mode: bool = True
@@ -575,7 +575,7 @@ class ParallelCollector:
         The experiences are collected across all environments, so the actual number of steps is ceil(num_steps / N) where N is the number of environments. The output shape is (T, N, ...) if not flattened, or (N*T, ...) if flattened. 
         
         Args:
-            policy (BaseAgent | BasePolicy | None): An agent or policy that takes a state and returns an action.
+            policy (PolicyModule | None): An agent or policy that takes a state and returns an action.
             num_steps (int): The number of steps to collect experience for. Defaults to 1.
             bootstrap (bool): Whether to compute the last value estimate V(s_{T+1}) for bootstrapping if the last step is not done and the policy provides value estimates. Defaults to True.
             inference_mode (bool): Whether to collect experience in inference mode (no gradients). Defaults to True.
@@ -665,7 +665,7 @@ class ParallelCollector:
         return exp
     
     def collect_trajectory(self, 
-                        policy: 'BaseAgent | BasePolicy | None' = None,
+                        policy: PolicyModule | None = None,
                         num_trajectories: int | None = None,
                         min_num_steps: int | None = None,
                         inference_mode: bool = True
@@ -681,7 +681,7 @@ class ParallelCollector:
         The output is a dictionary with keys (state, action, next_state, reward, done) where each key contains a tensor with the first dimension (B, ...) where B is the sum of each trajectories timesteps T.
 
         Args:
-            policy (BaseAgent | BasePolicy | None): The policy or agent to use.
+            policy (PolicyModule | None): The policy or agent to use.
             num_trajectories (int | None): The total number of complete trajectories to collect.
             min_num_steps (int | None): The minimum number of steps to collect before completing the trajectories. If specified, will collect until the minimum number of steps is reached, then complete the last trajectory.
             inference_mode (bool): Whether to collect experience in inference mode (no gradients). Defaults to True.
@@ -917,13 +917,13 @@ class ParallelCollector:
 
     
     def _collect_step(self,
-                      policy: 'BaseAgent | BasePolicy | None' = None
+                      policy: PolicyModule | None = None
                       ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]: 
         """
         Collects a single step from the environment using the provided policy.
         
         Args:
-            policy (BaseAgent | BasePolicy | None): An agent or policy that takes a state and returns an action.
+            policy (PolicyModule | None): An agent or policy that takes a state and returns an action.
         
         Returns:
             Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:

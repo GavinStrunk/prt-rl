@@ -4,11 +4,15 @@ Proximal Policy Optimization (PPO)
 Reference:
 [1] https://arxiv.org/abs/1707.06347
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict, field
+import json
+from pathlib import Path
 import numpy as np
 import torch
+import torch.nn as nn
+from torch import Tensor
 import torch.nn.functional as F
-from typing import Optional, List, Tuple
+from typing import Optional, List, Literal, Tuple, Union
 from prt_rl.agent import BaseAgent
 from prt_rl.env.interface import EnvParams, EnvironmentInterface
 from prt_rl.common.collectors import ParallelCollector
@@ -19,11 +23,13 @@ from prt_rl.common.progress_bar import ProgressBar
 from prt_rl.common.evaluators import Evaluator
 import prt_rl.common.utils as utils
 
-from prt_rl.common.networks import LazyMLP
-from prt_rl.common.policies.base import BasePolicy
-from prt_rl.common.policies.distribution import DistributionActor
-from prt_rl.common.distributions import Distribution
+import prt_rl.common.policies as pmod
+import prt_rl.common.policies.encoders as enc
+import prt_rl.common.policies.backbones as back
+import prt_rl.common.policies.heads as heads
 
+
+# 1) Define the Algorithm config dataclass
 @dataclass
 class PPOConfig:
     """
@@ -52,7 +58,28 @@ class PPOConfig:
     num_optim_steps: int = 10
     normalize_advantages: bool = False
 
-class PPOPolicy(BasePolicy):
+# 2) Define the PolicySpec dataclass
+# @todo convert this to a HeadSpec and defined one for each head type
+@dataclass
+class PPOHeadSpec:
+    distribution: Literal["auto", "categorical", "gaussian"] = "auto"
+    log_std_init: float = -0.5
+    min_log_std: float = -20.0
+    max_log_std: float = 2.0
+
+@dataclass
+class PPOPolicySpec:
+    """
+    Describes how to build the PPO compliant policy.
+    """
+    encoder: enc.EncoderSpec = field(default_factory=enc.IdentityEncoderSpec)
+    encoder_options: enc.EncoderOptions = field(default_factory=enc.EncoderOptions)
+    backbone: back.BackboneSpec = field(default_factory=back.MLPBackboneSpec)
+    heads: PPOHeadSpec = field(default_factory=PPOHeadSpec)
+    share_backbone: bool = False
+
+# 3) Define the Policy class as an extension of PolicyModule
+class PPOPolicy(pmod.PolicyModule):
     """
     PPOPolicy is a policy that combines an actor and a critic network. It can optionally use an encoder network to process the input state before passing it to the actor and critic heads.
 
@@ -76,89 +103,172 @@ class PPOPolicy(BasePolicy):
         share_encoder (bool): If True, share the encoder between actor and critic. Default is False.
     """
     def __init__(self,
-                env_params: EnvParams,
                 *,
-                encoder: torch.nn.Module | None = None,
-                network_arch: List[int] = [64, 64],
-                activation: torch.nn.Module = torch.nn.ReLU,
-                distribution: Distribution | None = None,
-                share_parameters: bool = False,
+                encoder: nn.Module,
+                backbone: nn.Module,
+                actor_head: nn.Module,
+                value_head: nn.Module,
                  ) -> None:
-        super().__init__(env_params=env_params)
-        self.env_params = env_params
+        super().__init__()
         self.encoder = encoder      
+        self.backbone = backbone
+        self.actor_head = actor_head
+        self.critic_head = value_head
 
-        # Build Base Network(s)
-        self.base = LazyMLP(network_arch=network_arch, hidden_activation=activation)
-        self.critic_base = None if not share_parameters else LazyMLP(network_arch=network_arch, hidden_activation=activation)
-
-        # Create Critic Head: Add a Linear layer to output a single value
-        self.critic_head = torch.nn.LazyLinear(out_features=1)
-
-        # Create Actor Head: Layers depend on the type of distribution
-        self.actor_head = DistributionActor(env_params=env_params, distribution=distribution)
-    
-    
-    def predict(self,
-                   state: torch.Tensor,
-                   deterministic: bool = False
-                   ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _latent(self, obs: torch.Tensor) -> torch.Tensor:
         """
-        Chooses an action based on the current state and computes the value of the state.
+        Computes the latent representation of the input observation.
 
         Args:
-            state (torch.Tensor): Current state tensor.
-            deterministic (bool): If True, choose the action deterministically. Default is False.
+            obs (torch.Tensor): Input observation tensor.
 
         Returns:
-            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the chosen action, value_estimate, and aciton log probability.
+            torch.Tensor: Latent representation tensor.
         """
         # Run state through encoder if available
-        latent_state = self.encoder(state) if self.encoder is not None else state
+        latent_state = self.encoder(obs) if self.encoder is not None else obs
 
         # Pass latent state through base network
-        latent_state = self.base(latent_state)
+        latent_state = self.backbone(latent_state)
 
-        # Get action and log probability from actor head
-        action, log_probs = self.actor_head.act(latent_state, deterministic=deterministic)
+        return latent_state
+    
+    @torch.no_grad()
+    def act(self,
+            obs: torch.Tensor,
+            deterministic: bool = False
+            ) -> Tuple[torch.Tensor, pmod.InfoDict]:
+        """
+        Returns action + info dict.
 
-        critic_latent_state = latent_state if self.critic_base is None else self.critic_base(latent_state)
+        Info dict keys (typical):
+          - "log_prob": (B,1)
+          - "value":    (B,1)
+        """        
+        latent = self._latent(obs)
 
-        value = self.critic_head(critic_latent_state) 
-        return action, value, log_probs
+        action, log_prob, _ = self.actor_head.sample(latent, deterministic=deterministic)
+        value = self.critic_head(latent)
+
+        return action, {"log_prob": log_prob, "value": value}
+
+    def forward(self,
+                obs: torch.Tensor,
+                deterministic: bool = False
+                ) -> torch.Tensor:
+        """
+        Convenience: treat the policy like a normal nn.Module that outputs actions.
+        Collectors should call act() instead to get info dict.
+        """        
+        action, _ = self.act(obs, deterministic=deterministic)
+        return action
     
     def evaluate_actions(self,
-                         state: torch.Tensor,
+                         obs: torch.Tensor,
                          action: torch.Tensor
-                        ) -> Tuple[torch.Tensor, torch.Tensor]:
+                        ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Evaluates the log probability and entropy of the given action under the policy.
-        Args:
-            state (torch.Tensor): Current state tensor.
-            action (torch.Tensor): Action tensor to evaluate.
+        Used during PPO optimization.
+
         Returns:
-            Tuple[torch.Tensor, torch.Tensor]: A tuple containing the log probability and entropy. All tensors have shape (B, 1).
+          value:    (B,1)
+          log_prob: (B,1)
+          entropy:  (B,1)
         """
-        latent_state = self.encoder(state) if self.encoder is not None else state
-        latent_state = self.base(latent_state)
-        distribution = self.actor_head.get_distribution(latent_state)
+        latent = self._latent(obs)
+        value = self.critic_head(latent)
 
         # Compute log probabilities and entropy for the entire action vector
-        entropy = distribution.entropy().sum(dim=-1, keepdim=True)
-        log_probs = distribution.log_prob(action.squeeze()).sum(dim=-1, keepdim=True)   
+        log_prob = self.actor_head.log_prob(latent, action)
+        entropy = self.actor_head.entropy(latent)
 
-        return log_probs, entropy
+        return value, log_prob, entropy
     
     def get_state_value(self,
-                         state: torch.Tensor,
+                         obs: torch.Tensor,
                          ) -> torch.Tensor:
-        latent_state = self.encoder(state) if self.encoder is not None else state
-        critic_latent_state = latent_state if self.critic_base is None else self.critic_base(latent_state)
-        value = self.critic_head(critic_latent_state)
+        """
+        Returns the state value for the given observation.
+        
+        Args:
+          obs:      (B, obs_dim)
+        Returns:
+          value:    (B,1)
+        """
+        latent = self._latent(obs)
+        value = self.critic_head(latent)
         return value
     
 
-class PPO(BaseAgent):
+# 4) Make a PolicyFactory to build the policy from the spec
+class PPOPolicyFactory(pmod.PolicyFactory[PPOPolicySpec, PPOPolicy]):
+
+    def make(self, env_params: EnvParams, spec: PPOPolicySpec) -> PPOPolicy:
+        # Build Encoder
+        encoder = enc.build_encoder(env_params, spec.encoder, spec.encoder_options)
+
+        # Build Backbone
+        backbone = back.build_backbone(encoder.latent_dim, spec.backbone)
+        latent_dim = backbone.latent_dim
+
+        # Choose distribution/head type
+        dist = spec.heads.distribution
+        if dist == "auto":
+            dist = "categorical" if not env_params.action_continuous else "gaussian"
+
+        # Create a Categorical Actor head for discrete actions
+        if not env_params.action_continuous:
+            num_actions = int(env_params.action_max - env_params.action_min + 1)
+
+            if dist != "categorical":
+                raise ValueError(f"Discrete env requires categorical policy; got distribution={dist}")
+            
+            actor = heads.CategoricalHead(latent_dim, num_actions)
+
+        else:
+            if dist not in ["gaussian"]:
+                raise ValueError(f"Continuous env requires a continuous actor head; got distribution={dist}")
+            
+            actor = heads.GaussianHead(latent_dim, env_params.action_len)
+        
+        critic = heads.ValueHead(latent_dim)
+        return PPOPolicy(
+            encoder=encoder,
+            backbone=backbone,
+            actor_head=actor,
+            value_head=critic,
+        )
+
+    def save(self, env_params: EnvParams, spec: PPOPolicySpec, policy: PPOPolicy, path: Union[str, Path]) -> None:
+        p = Path(path)
+        p.mkdir(parents=True, exist_ok=True)
+
+        payload = {
+            "env_params": asdict(env_params),
+            "spec": asdict(spec),
+            "format_version": 1,
+        }
+        (p / "spec.json").write_text(json.dumps(payload, indent=2))
+        torch.save(policy.state_dict(), p / "weights.pt")
+
+    def load(
+        self,
+        path: Union[str, Path],
+        map_location: Union[str, torch.device] = "cpu",
+        strict: bool = True,
+    ) -> Tuple[EnvParams, PPOPolicySpec, PPOPolicy]:
+        p = Path(path)
+        payload = json.loads((p / "spec.json").read_text())
+        env_params = EnvParams(**payload["env_params"])
+        spec = PPOPolicySpec(**payload["spec"])
+        policy = self.make(env_params, spec)
+        sd = torch.load(p / "weights.pt", map_location=map_location)
+        policy.load_state_dict(sd, strict=strict)
+        return env_params, spec, policy
+
+
+# 5) Make the Agent
+class PPOAgent(BaseAgent):
     """
     Proximal Policy Optimization (PPO)
 
@@ -177,36 +287,21 @@ class PPO(BaseAgent):
         device (str): Device to run the computations on ('cpu' or 'cuda').
     """
     def __init__(self,
-                 policy: PPOPolicy,
+                 env_params: EnvParams,
+                 policy_spec: PPOPolicySpec,
+                 *,
                  config: PPOConfig = PPOConfig(),
                  device: str = 'cpu',
                  ) -> None:
-        super().__init__()
+        self.env_params = env_params
+        self.policy_spec = policy_spec
         self.config = config
-        self.device = torch.device(device)
+        policy = PPOPolicyFactory().make(env_params, policy_spec).to(device)
 
-        self.policy = policy
-        self.policy.to(self.device)
+        super().__init__(policy=policy, device=device)
 
         # Configure optimizers
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.config.learning_rate)
-
-    def predict(self, 
-                state: torch.Tensor, 
-                deterministic: bool = False
-                ) -> torch.Tensor:
-        """
-        Predict the action based on the current state.
-
-        Args:
-            state (torch.Tensor): Current state of the environment.
-            deterministic (bool): If True, use the deterministic policy. Otherwise, sample from the policy.
-
-        Returns:
-            torch.Tensor: Predicted action.
-        """
-        with torch.no_grad():
-            return self.policy(state, deterministic=deterministic)  
     
     def train(self,
               env: EnvironmentInterface,
@@ -224,10 +319,10 @@ class PPO(BaseAgent):
             total_steps (int): Total number of steps to train for.
             schedulers (Optional[List[ParameterScheduler]]): Learning rate schedulers.
             logger (Optional[Logger]): Logger for training metrics.
-            evaluator (Optional[Any]): Evaluator for performance evaluation.
+            evaluator (Optional[Evaluator]): Evaluator for performance evaluation.
             show_progress (bool): If True, show a progress bar during training.
         """
-        logger = logger or Logger.create('blank')
+        logger = logger or Logger()
 
         if show_progress:
             progress_bar = ProgressBar(total_steps=total_steps)
@@ -340,7 +435,72 @@ class PPO(BaseAgent):
 
         if evaluator is not None:
             evaluator.close()
+    
+    def _save_impl(self, path: Path) -> None:
+        """
+        Writes a self-contained checkpoint directory.
 
+        Layout:
+          path/
+            agent.json
+            policy/
+              spec.json
+              weights.pt
+            optimizer.pt
+        """
+        # Create the path if it doesn't exist
+        path.mkdir(parents=True, exist_ok=True)
+
+        # Agent metadata/config (lets you sanity-check / migrate later)
+        agent_meta = {
+            "algo": "PPO",
+            "agent_format_version": 1,
+            "config": asdict(self.config),
+        }
+        agent_meta_path = path / "agent.json"
+        agent_meta_path.write_text(json.dumps(agent_meta, indent=2))
+
+        # Policy (delegated to factory)
+        factory = PPOPolicyFactory()
+        factory.save(self.env_params, self.policy_spec, self.policy, path / "policy")
+
+        # Optimizer
+        torch.save(self.optimizer.state_dict(), path / "optimizer.pt")
+
+
+    @classmethod
+    def load(cls, path: str | Path, map_location: str | torch.device = "cpu") -> "PPOAgent":
+        """
+        Loads the checkpoint and returns a fully-constructed PPOAgent.
+
+        Note: This assumes the checkpoint was produced by PPOAgent._save_impl.
+        """
+        p = Path(path)
+        agent_meta_path = p / "agent.json"
+        agent_meta = json.loads(agent_meta_path.read_text())
+
+        if agent_meta.get("algo") != "PPO":
+            raise ValueError(f"Checkpoint algo mismatch: expected PPO, got {agent_meta.get('algo')}")
+
+        config = PPOConfig(**agent_meta["config"])
+
+        factory = PPOPolicyFactory()
+        env_params, policy_spec, policy = factory.load(p / "policy", map_location=map_location)
+
+        agent = cls(
+            env_params=env_params,
+            policy_spec=policy_spec,
+            config=config,
+            device=str(map_location),
+        )
+
+        # Update the policy with the saved policy parameters
+        agent.policy = policy
+
+        opt_state = torch.load(p / "optimizer.pt", map_location=map_location)
+        agent.optimizer.load_state_dict(opt_state)
+
+        return agent    
 
 
 

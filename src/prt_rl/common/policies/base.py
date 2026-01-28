@@ -1,61 +1,53 @@
+"""
+Base class for implementing policy modules.
+"""
 from abc import ABC, abstractmethod
 import torch
-from typing import Tuple
-from prt_rl.env.interface import EnvParams
+from torch import Tensor
+from typing import Tuple, Optional, Dict
 
+InfoDict = Dict[str, Tensor]
 
-class BasePolicy(torch.nn.Module, ABC):
+class PolicyModule(torch.nn.Module, ABC):
     """
-    Base class for implementing policies.
+    Minimal runtime policy API used by collectors.
 
-    Args:
-        env_params (EnvParams): Environment parameters.
+    - Must be an nn.Module (so .to(), .parameters(), etc.)
+    - act() returns (action, info_dict). info_dict can include "log_prob", "value", etc.
+    - reset() is optional for RNN state.
     """
-    def __init__(self,
-                 env_params: EnvParams,
-                 ) -> None:
-        super().__init__()
-        self.env_params = env_params
-
-    def __call__(self,
-                   state: torch.Tensor,
-                   deterministic: bool = False
-                   ) -> torch.Tensor:
-        return self.forward(state, deterministic=deterministic)
-
-    def forward(self,
-                   state: torch.Tensor,
-                   deterministic: bool = False
-                   ) -> torch.Tensor:
-        """
-        Chooses an action based on the current state. 
-
-        Args:
-            state (torch.Tensor): Current state tensor.
-            deterministic (bool): If True, choose the action deterministically. Default is False.
-
-        Returns:
-            torch.Tensor: Tensor with the chosen action.
-        """
-        action, _, _ = self.predict(state, deterministic=deterministic)
-        return action
-    
     @abstractmethod
-    def predict(self,
-                state: torch.Tensor,
-                deterministic: bool = False
-                ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def act(self, obs: Tensor, deterministic: bool = False) -> Tuple[Tensor, InfoDict]:
         """
-        Chooses an action based on the current state and returns the action, value estimate, and log probability.
+        Given an observation, return an action and an info dictionary. Commone keys in the info dictionary include "log_prob" and "value".
         
         Args:
-            state (torch.Tensor): Current state tensor.
-            deterministic (bool): If True, choose the action deterministically. Default is False.
-            
+            obs (Tensor): The observation tensor.
+            deterministic (bool): Whether to use deterministic actions.
         Returns:
-            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the chosen action, value estimate, and action log probability.
-                - action (torch.Tensor): Tensor with the chosen action. Shape (B, action_dim)
-                - value_estimate (torch.Tensor): Tensor with the estimated value of the state. Shape (B, 1)
-                - log_prob (torch.Tensor): Tensor with the log probability of the chosen action. Shape (B, 1)
+            Tuple[Tensor, InfoDict]: A tuple containing the action tensor and an info dictionary.
         """
         raise NotImplementedError
+
+    def reset(self, batch_size: Optional[int] = None) -> None:
+        """
+        Reset any internal state (e.g., RNN hidden states). If batch_size is provided, reset for that batch size.
+        
+        Args:
+            batch_size (Optional[int]): The batch size for resetting internal states.
+        """
+        return
+
+    @property
+    def device(self) -> torch.device:
+        """
+        Returns the device on which the module's parameters or buffers are located.
+        
+        Returns:
+            torch.device: The device of the module.
+        """
+        for p in self.parameters():
+            return p.device
+        for b in self.buffers():
+            return b.device
+        return torch.device("cpu")
