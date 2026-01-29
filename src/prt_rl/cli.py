@@ -1,168 +1,279 @@
 from __future__ import annotations
-
 import argparse
 import re
-from dataclasses import dataclass
 from pathlib import Path
-from textwrap import dedent
+from typing import List
 
 
-# # ---------- templates ----------
-# CONFIG_TMPL = """\
-# from __future__ import annotations
+def _to_snake(name: str) -> str:
+    """
+    Convert a class or algorithm name to snake_case.
 
-# from dataclasses import dataclass
+    Rules:
+      - Preserve acronyms with digits: A3C -> a3c, TD3 -> td3
+      - Preserve all-caps acronyms: PPO -> ppo, SAC -> sac
+      - Convert CamelCase: SoftActorCritic -> soft_actor_critic
+    """
+    # If the name is all caps / digits (acronym), just lowercase it
+    if name.isupper():
+        return name.lower()
 
-
-# @dataclass
-# class {ClassName}Config:
-#     \"\"\"Configuration for {ClassName}.\"\"\"
-
-#     learning_rate: float = 3e-4
-#     gamma: float = 0.99
-# """
-
-# AGENT_TMPL = """\
-# from __future__ import annotations
-
-# from typing import Optional
-
-# import torch
-
-# from .config import {ClassName}Config
-# from prt_rl.agent import BaseAgent
+    # Handle CamelCase -> snake_case
+    s1 = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", name)
+    s2 = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s1)
+    return s2.replace("-", "_").lower()
 
 
-# class {ClassName}(BaseAgent):
-#     \"\"\"{ClassName} agent.\"\"\"
+def _render_single_file_template(algo_pascal: str) -> str:
+    """
+    Returns a single-file algorithm scaffold containing:
+      - Config dataclass
+      - HeadSpec + PolicySpec dataclasses
+      - PolicyModule implementation
+      - PolicyFactory implementation
+      - Agent implementation with save/load skeleton
 
-#     def __init__(self, config: {ClassName}Config):
-#         super().__init__()
-#         self.config = config
-
-#     def collect(self) -> None:
-#         raise NotImplementedError
-
-#     def update(self) -> None:
-#         raise NotImplementedError
-
-#     def evaluate(self) -> None:
-#         raise NotImplementedError
-# """
-
-# INIT_TMPL = """\
-# from .config import {ClassName}Config
-# from .agent import {ClassName}
-
-# __all__ = ["{ClassName}", "{ClassName}Config"]
-# """
-
-# TEST_TMPL = """\
-# def test_import():
-#     from prt_rl.algorithms.{pkg_name} import {ClassName}, {ClassName}Config  # noqa: F401
-# """
-
-
-# # ---------- helpers ----------
-# _SNAKE_RE = re.compile(r"[^a-z0-9]+")
-
-# def to_snake(name: str) -> str:
-#     s = name.strip()
-#     s = s.replace(" ", "_")
-#     s = s.replace("-", "_")
-#     s = s.lower()
-#     s = _SNAKE_RE.sub("_", s)
-#     s = s.strip("_")
-#     if not s:
-#         raise ValueError("Name produced an empty package name.")
-#     return s
-
-# def to_pascal(name: str) -> str:
-#     parts = re.split(r"[\s_\-]+", name.strip())
-#     parts = [p for p in parts if p]
-#     if not parts:
-#         raise ValueError("Name produced an empty class name.")
-#     return "".join(p[:1].upper() + p[1:] for p in parts)
-
-# def write_file(path: Path, content: str, overwrite: bool) -> None:
-#     if path.exists() and not overwrite:
-#         raise FileExistsError(f"Refusing to overwrite existing file: {path}")
-#     path.parent.mkdir(parents=True, exist_ok=True)
-#     path.write_text(content, encoding="utf-8")
+    Minimal dependencies: dataclasses, json, pathlib, torch, numpy (optional)
+    and your prt_rl primitives (BaseAgent, EnvParams, PolicyModule, heads, etc.)
+    """
+    return f'''
+from dataclasses import dataclass, asdict, field
+import json
+from pathlib import Path
+from typing import Optional, List, Literal, Tuple, Union
+import torch
+import torch.nn as nn
+from torch import Tensor
+from prt_rl.agent import BaseAgent
+from prt_rl.env.interface import EnvParams, EnvironmentInterface
+from prt_rl.common.loggers import Logger
+from prt_rl.common.schedulers import ParameterScheduler
+from prt_rl.common.progress_bar import ProgressBar
+from prt_rl.common.evaluators import Evaluator
+import prt_rl.common.policies as pmod
 
 
-# @dataclass(frozen=True)
-# class ScaffoldPlan:
-#     repo_root: Path
-#     algo_dir: Path
-#     tests_dir: Path
-#     pkg_name: str
-#     class_name: str
+# ----------------------------
+# 1) Config
+# ----------------------------
+
+@dataclass
+class {algo_pascal}Config:
+    """
+    Configuration for the {algo_pascal} agent.
+
+    Add algorithm hyperparameters here.
+    """
+    # Example:
+    # learning_rate: float = 3e-4
+    pass
 
 
-# def build_plan(repo_root: Path, name: str) -> ScaffoldPlan:
-#     pkg_name = to_snake(name)
-#     class_name = to_pascal(name)
-
-#     # Adjust these paths to match your repo layout.
-#     # Here we assume src/ layout and algorithms live at prt_rl/algorithms/<algo>/
-#     algo_dir = repo_root / "src" / "prt_rl" / "algorithms" / pkg_name
-#     tests_dir = repo_root / "tests" / "algorithms" / pkg_name
-
-#     return ScaffoldPlan(
-#         repo_root=repo_root,
-#         algo_dir=algo_dir,
-#         tests_dir=tests_dir,
-#         pkg_name=pkg_name,
-#         class_name=class_name,
-#     )
+# ----------------------------
+# 2) Policy specs
+# ----------------------------
+@dataclass
+class {algo_pascal}PolicySpec:
+    """
+    Describes how to build a {algo_pascal}-compliant policy.
+    """
+    pass
 
 
-# def scaffold(plan: ScaffoldPlan, overwrite: bool) -> None:
-#     mapping = {"ClassName": plan.class_name, "pkg_name": plan.pkg_name}
+# ----------------------------
+# 3) Policy
+# ----------------------------
+class {algo_pascal}Policy(pmod.PolicyModule):
+    def __init__(
+        self,
+        *,
+        backbone: nn.Module,
+    ) -> None:
+        super().__init__()
+        self.backbone = backbone
 
-#     write_file(plan.algo_dir / "__init__.py", INIT_TMPL.format(**mapping), overwrite)
-#     write_file(plan.algo_dir / "config.py", CONFIG_TMPL.format(**mapping), overwrite)
-#     write_file(plan.algo_dir / "agent.py", AGENT_TMPL.format(**mapping), overwrite)
-#     write_file(plan.tests_dir / "test_import.py", TEST_TMPL.format(**mapping), overwrite)
+    @torch.no_grad()
+    def act(self, obs: Tensor, deterministic: bool = False) -> Tuple[Tensor, pmod.InfoDict]:
+        return None, {{}}
 
-
-def find_repo_root(start: Path) -> Path:
-    # Very simple heuristic: walk up until we find pyproject.toml
-    cur = start.resolve()
-    for _ in range(20):
-        if (cur / "pyproject.toml").exists():
-            return cur
-        if cur.parent == cur:
-            break
-        cur = cur.parent
-    raise FileNotFoundError("Could not find repo root (pyproject.toml not found).")
-
-
-def main() -> None:
-    print("hello")
-    # p = argparse.ArgumentParser(prog="prt-scaffold")
-    # sub = p.add_subparsers(dest="cmd", required=True)
-
-    # algo = sub.add_parser("algorithm", help="Create a new algorithm scaffold")
-    # algo.add_argument("name", help="Algorithm name (e.g., PPO, td3, 'my algo')")
-    # algo.add_argument("--repo-root", default=None, help="Override repo root")
-    # algo.add_argument("--overwrite", action="store_true", help="Overwrite existing files")
-
-    # args = p.parse_args()
-
-    # repo_root = Path(args.repo_root).resolve() if args.repo_root else find_repo_root(Path.cwd())
-
-    # if args.cmd == "algorithm":
-        # plan = build_plan(repo_root, args.name)
-        # scaffold(plan, overwrite=args.overwrite)
-
-        # print(f"Created algorithm scaffold:")
-        # print(f"  package: prt_rl.algorithms.{plan.pkg_name}")
-        # print(f"  path:    {plan.algo_dir}")
-        # print(f"  tests:   {plan.tests_dir}")
-        # return 0
-
-    # return 1
+    def forward(self, obs: Tensor, deterministic: bool = False) -> Tensor:
+        action, _ = self.act(obs, deterministic=deterministic)
+        return action
 
 
+# ----------------------------
+# 4) Factory
+# ----------------------------
+
+class {algo_pascal}PolicyFactory(pmod.PolicyFactory[{algo_pascal}PolicySpec, {algo_pascal}Policy]):
+    """
+    Builds and serializes {algo_pascal}Policy from (EnvParams, {algo_pascal}PolicySpec).
+    """
+
+    def make(self, env_params: EnvParams, spec: {algo_pascal}PolicySpec) -> {algo_pascal}Policy:
+        return None
+
+
+    def save(self, env_params: EnvParams, spec: {algo_pascal}PolicySpec, policy: {algo_pascal}Policy, path: Union[str, Path]) -> None:
+        p = Path(path)
+        p.mkdir(parents=True, exist_ok=True)
+        payload = {{
+            "env_params": asdict(env_params),
+            "spec": asdict(spec),
+            "format_version": 1,
+        }}
+        (p / "spec.json").write_text(json.dumps(payload, indent=2))
+        torch.save(policy.state_dict(), p / "weights.pt")
+
+    def load(
+        self,
+        path: Union[str, Path],
+        map_location: Union[str, torch.device] = "cpu",
+        strict: bool = True,
+    ) -> Tuple[EnvParams, {algo_pascal}PolicySpec, {algo_pascal}Policy]:
+        p = Path(path)
+        payload = json.loads((p / "spec.json").read_text())
+        env_params = EnvParams(**payload["env_params"])
+        spec = {algo_pascal}PolicySpec(**payload["spec"])
+        policy = self.make(env_params, spec)
+        sd = torch.load(p / "weights.pt", map_location=map_location)
+        policy.load_state_dict(sd, strict=strict)
+        return env_params, spec, policy
+
+
+# ----------------------------
+# 5) Agent
+# ----------------------------
+class {algo_pascal}Agent(BaseAgent):
+    def __init__(
+        self,
+        env_params: EnvParams,
+        policy_spec: {algo_pascal}PolicySpec,
+        *,
+        config: {algo_pascal}Config = {algo_pascal}Config(),
+        device: str = "cpu",
+    ) -> None:
+        self.env_params = env_params
+        self.policy_spec = policy_spec
+        self.config = config
+
+        policy = {algo_pascal}PolicyFactory().make(env_params, policy_spec).to(device)
+        super().__init__(policy=policy, device=device)
+
+        # Optional optimizer example:
+        # self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.config.learning_rate)
+
+    def train(self,
+              env: EnvironmentInterface,
+              total_steps: int,
+              schedulers: Optional[List[ParameterScheduler]] = None,
+              logger: Optional[Logger] = None,
+              evaluator: Optional[Evaluator] = None,
+              show_progress: bool = True
+              ) -> None:
+        """
+        Train the PPO agent.
+
+        Args:
+            env (EnvironmentInterface): The environment to train on.
+            total_steps (int): Total number of steps to train for.
+            schedulers (Optional[List[ParameterScheduler]]): Learning rate schedulers.
+            logger (Optional[Logger]): Logger for training metrics.
+            evaluator (Optional[Evaluator]): Evaluator for performance evaluation.
+            show_progress (bool): If True, show a progress bar during training.
+        """
+        logger = logger or Logger()
+
+        if show_progress:
+            progress_bar = ProgressBar(total_steps=total_steps)
+
+        num_steps = 0
+
+    def _save_impl(self, path: Path) -> None:
+        path.mkdir(parents=True, exist_ok=True)
+
+        agent_meta = {{
+            "algo": "{algo_pascal}",
+            "agent_format_version": 1,
+            "config": asdict(self.config),
+        }}
+        (path / "agent.json").write_text(json.dumps(agent_meta, indent=2))
+
+        {algo_pascal}PolicyFactory().save(self.env_params, self.policy_spec, self.policy, path / "policy")
+
+        # Optional optimizer save:
+        # torch.save(self.optimizer.state_dict(), path / "optimizer.pt")
+
+    @classmethod
+    def load(cls, path: str | Path, map_location: str | torch.device = "cpu") -> "{algo_pascal}Agent":
+        p = Path(path)
+        agent_meta = json.loads((p / "agent.json").read_text())
+        if agent_meta.get("algo") != "{algo_pascal}":
+            raise ValueError(f"Checkpoint algo mismatch: expected {algo_pascal}, got {{agent_meta.get('algo')}}")
+
+        config = {algo_pascal}Config(**agent_meta.get("config", {{}}))
+        env_params, policy_spec, policy = {algo_pascal}PolicyFactory().load(p / "policy", map_location=map_location)
+
+        agent = cls(env_params=env_params, policy_spec=policy_spec, config=config, device=str(map_location))
+        agent.policy = policy
+
+        # Optional optimizer restore:
+        # opt_state = torch.load(p / "optimizer.pt", map_location=map_location)
+        # agent.optimizer.load_state_dict(opt_state)
+
+        return agent
+'''
+
+
+def generate_single_file_algorithm(
+    agent_path: str,
+    *,
+    repo_root: Path | None = None,
+    force: bool = False,
+) -> Path:
+    root = repo_root or Path.cwd()
+    base_pkg = root / "src" / "prt_rl"
+
+    parts = [p for p in agent_path.strip().split("/") if p]
+    if not parts:
+        raise ValueError("agent_path must not be empty")
+
+    pkg_parts = [_to_snake(p) for p in parts[:-1]]
+    algo_name_raw = parts[-1]
+
+    algo_snake = _to_snake(algo_name_raw)
+    algo_pascal = algo_name_raw  # preserve user casing: PPO, DAgger, TD3
+
+    # Ensure directories exist, but DO NOT create __init__.py
+    out_dir = base_pkg
+    for p in pkg_parts:
+        out_dir = out_dir / p
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+    target = out_dir / f"{algo_snake}.py"
+    if target.exists() and not force:
+        raise FileExistsError(
+            f"Refusing to overwrite existing file: {target} (use --force)"
+        )
+
+    target.write_text(_render_single_file_template(algo_pascal))
+    return target
+
+
+
+def main(argv: List[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="prt-rl")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_algo = sub.add_parser("algorithm", help="Generate a single-file algorithm scaffold under src/prt_rl/")
+    p_algo.add_argument("agent_path", type=str, help='e.g. "PPO" or "imitation/DAgger"')
+    p_algo.add_argument("--force", action="store_true", help="Overwrite if target exists")
+
+    args = parser.parse_args(argv)
+
+    if args.cmd == "algorithm":
+        out = generate_single_file_algorithm(args.agent_path, force=args.force)
+        print(f"Created scaffold: {out}")
+        return
+
+    raise RuntimeError(f"Unknown command: {args.cmd}")
