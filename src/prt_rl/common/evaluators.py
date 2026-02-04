@@ -5,7 +5,7 @@ from typing import Optional
 import numpy as np
 from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.common.loggers import Logger
-from prt_rl.common.collectors import ParallelCollector
+from prt_rl.common.collectors import Collector
 
 class Evaluator(ABC):
     """
@@ -105,7 +105,7 @@ class RewardEvaluator(Evaluator):
         self.best_reward = float("-inf")
         self.best_agent = None
 
-        self.collector = ParallelCollector(env)
+        self.collector = Collector(env)
 
     def evaluate(self, 
                  agent,
@@ -195,7 +195,7 @@ class NumberOfStepsEvaluator(Evaluator):
         self.best_agent = None
         self.best_timestep = math.inf
 
-        self.collector = ParallelCollector(env)
+        self.collector = Collector(env)
 
     def evaluate(self,
                  agent,

@@ -36,10 +36,10 @@ class CategoricalHead(nn.Module):
         dist = self._dist(latent)
 
         if deterministic:
-            # dist.logits exists on Categorical; argmax on last dim yields (B,)
-            action = dist.logits.argmax(dim=-1)
+            # dist.logits exists on Categorical; argmax on last dim yields (B,1)
+            action = dist.logits.argmax(dim=-1).unsqueeze(-1) 
         else:
-            action = dist.sample()  # (B,)
+            action = dist.sample().unsqueeze(-1)  # (B,1)
 
         log_prob = dist.log_prob(action).unsqueeze(-1)   # (B,1)
         entropy = dist.entropy().unsqueeze(-1)           # (B,1)

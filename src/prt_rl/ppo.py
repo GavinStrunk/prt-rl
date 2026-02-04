@@ -15,7 +15,7 @@ import torch.nn.functional as F
 from typing import Optional, List, Literal, Tuple, Union
 from prt_rl.agent import BaseAgent
 from prt_rl.env.interface import EnvParams, EnvironmentInterface
-from prt_rl.common.collectors import ParallelCollector
+from prt_rl.common.collectors import Collector
 from prt_rl.common.buffers import RolloutBuffer
 from prt_rl.common.loggers import Logger
 from prt_rl.common.schedulers import ParameterScheduler
@@ -330,7 +330,7 @@ class PPOAgent(BaseAgent):
         num_steps = 0
 
         # Make collector and do not flatten the experience so the shape is (N, T, ...)
-        collector = ParallelCollector(env=env, logger=logger, flatten=False)
+        collector = Collector(env=env, logger=logger, flatten=False)
         rollout_buffer = RolloutBuffer(capacity=self.config.steps_per_batch, device=self.device)
 
         while num_steps < total_steps:
@@ -345,7 +345,7 @@ class PPOAgent(BaseAgent):
             # Compute Advantages and Returns under the current policy
             advantages, returns = utils.generalized_advantage_estimates(
                 rewards=experience['reward'],
-                values=experience['value_est'],
+                values=experience['value'],
                 dones=experience['done'],
                 last_values=experience['last_value_est'],
                 gamma=self.config.gamma,
@@ -380,7 +380,7 @@ class PPOAgent(BaseAgent):
                     returns = batch['returns'].detach()
 
                     # Get the log probability and entropy of the actions under the current policy
-                    new_log_prob, entropy = self.policy.evaluate_actions(batch['state'], batch['action'])
+                    new_value_est, new_log_prob, entropy = self.policy.evaluate_actions(batch['state'], batch['action'])
                     
                     # Ratio between new and old policy
                     ratio = torch.exp(new_log_prob - old_log_prob)
@@ -394,7 +394,6 @@ class PPOAgent(BaseAgent):
                     entropy_loss = -entropy.mean()
 
                     # Compute the value loss function
-                    new_value_est = self.policy.get_state_value(batch['state'])
                     value_loss = F.mse_loss(new_value_est, returns)
 
                     # Compute total clipped PPO loss
