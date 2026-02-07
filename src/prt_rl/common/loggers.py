@@ -1,13 +1,16 @@
+"""
+Metric and artifact loggers
+
+
+"""
 import json
+import matplotlib.pyplot as plt
 import mlflow
-import mlflow.pyfunc
 import numpy as np
 import os
 import shutil
-import tempfile
 import torch
 from typing import Optional
-from prt_rl.common.policies import BasePolicy
 
 
 class Logger:
@@ -15,27 +18,14 @@ class Logger:
     Based class for implementing loggers for RL algorithms.
 
     """
-    _registry = {}
 
-    def __init__(self,
-                 logging_freq: int = 1,
-                 ) -> None:
+    def __init__(
+        self,
+        logging_freq: int = 1,
+    ) -> None:
         self.logging_freq = logging_freq
         self.last_logging_iteration = 0
 
-    @classmethod
-    def register(cls, name):
-        def decorator(subclass):
-            cls._registry[name] = subclass
-            return subclass
-        return decorator
-
-    @classmethod
-    def create(cls, type_: str, **kwargs):
-        if type_ not in cls._registry:
-            raise ValueError(f"Unknown media reader type: {type_}")
-        return cls._registry[type_](**kwargs)
-    
     def close(self):
         """
         Performs any necessary logger cleanup.
@@ -61,65 +51,11 @@ class Logger:
             return True
 
         return False
-    
-    def log_parameters(self,
-                       params: dict,
-                       ) -> None:
-        """
-        Logs a dictionary of parameters. Parameters are values used to initialize but do not change throughout training.
 
-        Args:
-            params (dict): Dictionary of parameters.
-        """
-        raise NotImplementedError("log_parameters must be implemented in subclasses.")
-    def log_scalar(self,
-                   name: str,
-                   value: float,
-                   iteration: Optional[int] = None,
-                   ) -> None:
-        """
-        Logs a scalar value. Scalar values are any metric or value that changes throughout training.
-
-        Args:
-            name (str): Name of the scalar value.
-            value (float): Value of the scalar value.
-            iteration (int, optional): Iteration number.
-        """
-        raise NotImplementedError("log_scalar must be implemented in subclasses.")
-    def save_policy(self,
-                    policy: BasePolicy,
-                    ) -> None:
-        """
-        Saves the policy to the logger.
-
-        Args:
-            policy (BasePolicy): Policy to save.
-        """
-        raise NotImplementedError("save_policy must be implemented in subclasses.")
-    def save_agent(self,
-                    agent: object,
-                    ) -> None:
-        """
-        Saves the agent to the logger.
-
-        Args:
-            agent (object): Agent to save.
-        """
-        raise NotImplementedError("save_agent must be implemented in subclasses.")
-    
-    
-    
-@Logger.register('blank')
-class BlankLogger(Logger):
-    def close(self):
-        """
-        Performs any necessary logger cleanup.
-        """
-        pass
-
-    def log_parameters(self,
-                       params: dict,
-                       ) -> None:
+    def log_parameters(
+        self,
+        params: dict,
+    ) -> None:
         """
         Logs a dictionary of parameters. Parameters are values used to initialize but do not change throughout training.
 
@@ -128,11 +64,12 @@ class BlankLogger(Logger):
         """
         pass
 
-    def log_scalar(self,
-                   name: str,
-                   value: float,
-                   iteration: Optional[int] = None,
-                   ) -> None:
+    def log_scalar(
+        self,
+        name: str,
+        value: float,
+        iteration: Optional[int] = None,
+    ) -> None:
         """
         Logs a scalar value. Scalar values are any metric or value that changes throughout training.
 
@@ -142,46 +79,60 @@ class BlankLogger(Logger):
             iteration (int, optional): Iteration number.
         """
         pass
-
-    def save_policy(self,
-                    policy: BasePolicy,
+    
+    def log_metrics(self,
+                    metrics: dict[str, float],
+                    iteration: int | None = None
                     ) -> None:
         """
-        Saves the policy to the MLFlow run.
+        Logs multiple scalar metrics.
 
         Args:
-            policy (BasePolicy): Policy to save.
+            metrics (dict): Dictionary of metric names and their corresponding values.
+            iteration (int, optional): Iteration number.
+        """
+        for name, value in metrics.items():
+            self.log_scalar(name, value, iteration)
+
+    def log_artifact(
+        self,
+        path: str,
+        *,
+        name: str | None = None,
+        type: str | None = None,
+        step: int | None = None,
+        metadata: dict | None = None,
+        aliases: list[str] | None = None,
+    ) -> None:
+        """
+        Logs an artifact file.
+
+        Args:
+            path (str): Path to the artifact file.
+            name (str): Name of the artifact.
         """
         pass
 
-    def save_agent(self,
-                    agent: object,
-                    ) -> None:
-        """
-        Saves the agent to the MLFlow run.
 
-        Args:
-            agent (object): Agent to save.
-        """
-        pass
-
-@Logger.register('file')
 class FileLogger(Logger):
-    def __init__(self,
-                 output_dir: str,
-                 logging_freq: int = 1,
-                 ) -> None:
+    def __init__(
+        self,
+        output_dir: str,
+        logging_freq: int = 1,
+    ) -> None:
         super().__init__(logging_freq=logging_freq)
         self.output_dir = output_dir
-        os.makedirs(self.output_dir, exist_ok=True)  # Ensure the output directory exists
+        os.makedirs(
+            self.output_dir, exist_ok=True
+        )  # Ensure the output directory exists
         self.parameters = {}
         self.scalars = {}
-
 
     def close(self):
         """
         Writes the saved parameters and scalar metrics to a file.
         """
+
         def to_serializable(obj):
             if isinstance(obj, (np.generic, torch.Tensor)):
                 return obj.item()
@@ -199,20 +150,21 @@ class FileLogger(Logger):
             }
             json.dump(serializable_scalars, f, indent=4)
 
-    def log_parameters(self,
-                       params: dict,
-                       ) -> None:
+    def log_parameters(
+        self,
+        params: dict,
+    ) -> None:
         """
         Logs a dictionary of parameters.
         """
         self.parameters.update(params)
 
-
-    def log_scalar(self,
-                   name: str,
-                   value: float,
-                   iteration: Optional[int] = None,
-                   ) -> None:
+    def log_scalar(
+        self,
+        name: str,
+        value: float,
+        iteration: Optional[int] = None,
+    ) -> None:
         """
         Logs scalar values, storing them sequentially or with a provided iteration number.
         """
@@ -224,11 +176,7 @@ class FileLogger(Logger):
 
         self.scalars[name].append((iteration, value))
 
-    def log_file(self,
-                 path: str,
-                 name: str,
-                 move: bool = False
-                 ) -> None:
+    def log_file(self, path: str, name: str, move: bool = False) -> None:
         """
         Saves the given file to the output_dir/name folder.
         Creates the folder if it does not exist.
@@ -241,26 +189,13 @@ class FileLogger(Logger):
         else:
             shutil.copy(path, target_path)
 
-    def save_policy(self,
-                    policy,
-                    name: str = "policy"
-                    ) -> None:
-        policy_path = os.path.join(self.output_dir, name)
-        os.makedirs(policy_path, exist_ok=True)
-        torch.save(policy, os.path.join(policy_path, "model.pth"))
+    # def save_policy(self, policy, name: str = "policy") -> None:
+    #     policy_path = os.path.join(self.output_dir, name)
+    #     os.makedirs(policy_path, exist_ok=True)
+    #     torch.save(policy, os.path.join(policy_path, "model.pth"))
 
-    def save_agent(self, 
-                   agent: object,
-                   name: str = "agent.pth"
-                   ) -> None:
-        """
-        Saves the agent to the MLFlow run.
-        Args:
-            agent (object): The agent object to save
-        """
-        torch.save(agent, os.path.join(self.output_dir, name))
 
-@Logger.register('mlflow')
+
 class MLFlowLogger(Logger):
     """
     MLFlow Logger
@@ -272,13 +207,15 @@ class MLFlowLogger(Logger):
     References:
         [1] https://mlflow.org/docs/latest/python_api/mlflow.html
     """
-    def __init__(self,
-                 tracking_uri: str,
-                 experiment_name: str,
-                 run_name: Optional[str] = None,
-                 log_system_metrics: bool = False,
-                 logging_freq: int = 1,
-                 ) -> None:
+
+    def __init__(
+        self,
+        tracking_uri: str,
+        experiment_name: str,
+        run_name: Optional[str] = None,
+        log_system_metrics: bool = False,
+        logging_freq: int = 1,
+    ) -> None:
         super().__init__(logging_freq=logging_freq)
         self.tracking_uri = tracking_uri
         self.experiment_name = experiment_name
@@ -299,9 +236,10 @@ class MLFlowLogger(Logger):
         """
         mlflow.end_run()
 
-    def log_parameters(self,
-                       params: dict,
-                       ) -> None:
+    def log_parameters(
+        self,
+        params: dict,
+    ) -> None:
         """
         Logs a dictionary of parameters. Parameters are values used to initialize but do not change throughout training.
         Args:
@@ -309,11 +247,9 @@ class MLFlowLogger(Logger):
         """
         mlflow.log_params(params)
 
-    def log_scalar(self,
-                   name: str,
-                   value: float,
-                   iteration: Optional[int] = None
-                   ) -> None:
+    def log_scalar(
+        self, name: str, value: float, iteration: Optional[int] = None
+    ) -> None:
         """
         Logs a scalar value to MLFlow.
         Args:
@@ -328,54 +264,36 @@ class MLFlowLogger(Logger):
         else:
             self.iteration = iteration
 
-    def save_agent(self,
-                   agent: object,
-                   agent_name: str = "agent.pt"
-                   ) -> None:
+    def log_figure(
+        self,
+        fig,
+        name: str,
+        iteration: Optional[int] = None,
+    ) -> None:
         """
-        Saves the agent to the MLFlow run.
+        Logs a matplotlib figure to MLFlow as an artifact.
         Args:
-            agent (object): The agent object to save
+            fig (matplotlib.figure.Figure): The figure to log.
+            name (str): Name of the figure artifact.
+            iteration (int, optional): Iteration number for logging.
         """
-        with tempfile.TemporaryDirectory() as tmpdir:
-            save_path = os.path.join(tmpdir, agent_name)
-            torch.save(agent, save_path)
-            mlflow.log_artifact(save_path, artifact_path="agent")
-        
+        iteration_str = f"{iteration}" if iteration is not None else "final"
+        mlflow.log_figure(fig, f"{name}_{iteration_str}.png")
+        plt.close(fig)  # Close the figure to free up memory
 
-    def save_policy(self,
-                    policy: BasePolicy
-                    ) -> None:
+    # def save_agent(self, agent: object, agent_name: str = "agent.pt") -> None:
+    #     """
+    #     Saves the agent to the MLFlow run.
+    #     Args:
+    #         agent (object): The agent object to save
+    #     """
+    #     with tempfile.TemporaryDirectory() as tmpdir:
+    #         save_path = os.path.join(tmpdir, agent_name)
+    #         torch.save(agent, save_path)
+    #         mlflow.log_artifact(save_path, artifact_path="agent")
 
-        """
-        Saves the policy as a Python model so it can be registered in the MLFlow Registry.
 
-        Args:
-            policy (BasePolicy): The policy to be saved.
-        """
-        # Wrap policy in a PythonModel so it is a valid model
-        class PolicyWrapper(mlflow.pyfunc.PythonModel):
-            def __init__(self, policy: BasePolicy):
-                self.policy = policy
 
-            def predict(self, context, input_data):
-                raise NotImplementedError('Policy loading is not implemented for RL policies.')
-
-        # Save the policy type and dictionary representation to the model metadata
-        policy_metadata = {
-            'type': type(policy).__name__,
-            'policy': policy.save_to_dict()
-        }
-
-        mlflow.pyfunc.log_model(
-            artifact_path="policy",
-            python_model=PolicyWrapper(policy),
-            artifacts=None,
-            conda_env=None,
-            metadata=policy_metadata,
-        )
-
-@Logger.register('clearml')
 class ClearMLLogger(Logger):
     """
     A lightweight adapter that logs training runs to **ClearML**.
@@ -459,13 +377,16 @@ class ClearMLLogger(Logger):
     ImportError
         If the `clearml` package is not installed or cannot be imported.
     """
-    def __init__(self,
-                 project_name: str,
-                 task_name: str,
-                 logging_freq: int = 1,
-                 ) -> None:
+
+    def __init__(
+        self,
+        project_name: str,
+        task_name: str,
+        logging_freq: int = 1,
+    ) -> None:
         try:
             import clearml
+
             self.clearml = clearml
         except ImportError as e:
             raise ImportError("You need to install clearml to use this logger.") from e
@@ -474,7 +395,9 @@ class ClearMLLogger(Logger):
         self.project_name = project_name
         self.task_name = task_name
 
-        self.task = self.clearml.Task.init(project_name=self.project_name, task_name=self.task_name)
+        self.task = self.clearml.Task.init(
+            project_name=self.project_name, task_name=self.task_name
+        )
         self._logger = self.task.get_logger()
 
     def close(self):
@@ -483,9 +406,10 @@ class ClearMLLogger(Logger):
         """
         self.task.close()
 
-    def log_parameters(self,
-                       params: dict,
-                       ) -> None:
+    def log_parameters(
+        self,
+        params: dict,
+    ) -> None:
         """
         Logs a dictionary of parameters. Parameters are values used to initialize but do not change throughout training.
 
@@ -494,11 +418,12 @@ class ClearMLLogger(Logger):
         """
         self.task.set_parameters_as_dict(params)
 
-    def log_scalar(self,
-                   name: str,
-                   value: float,
-                   iteration: Optional[int] = None,
-                   ) -> None:
+    def log_scalar(
+        self,
+        name: str,
+        value: float,
+        iteration: Optional[int] = None,
+    ) -> None:
         """
         Logs a scalar value. Scalar values are any metric or value that changes throughout training.
 
@@ -514,7 +439,9 @@ class ClearMLLogger(Logger):
             title, series = "metrics", name
 
         step = self.iteration if iteration is None else iteration
-        self._logger.report_scalar(title=title, series=series, value=value, iteration=step)
+        self._logger.report_scalar(
+            title=title, series=series, value=value, iteration=step
+        )
 
         # Keep our local iteration in sync like your MLFlowLogger
         if iteration is None:
@@ -522,30 +449,22 @@ class ClearMLLogger(Logger):
         else:
             self.iteration = iteration
 
-    def save_policy(self,
-                    policy: BasePolicy,
-                    ) -> None:
-        """
-        Saves the policy to the logger.
+    # def save_agent(
+    #     self,
+    #     agent: object,
+    # ) -> None:
+    #     """
+    #     Saves the agent to the logger.
 
-        Args:
-            policy (BasePolicy): Policy to save.
-        """
-        raise NotImplementedError("save_policy must be implemented in subclasses.")
-    
-    def save_agent(self,
-                    agent: object,
-                    ) -> None:
-        """
-        Saves the agent to the logger.
+    #     Args:
+    #         agent (object): Agent to save.
+    #     """
+    #     with tempfile.TemporaryDirectory() as tmpdir:
+    #         filename = "agent.pt"
+    #         save_path = os.path.join(tmpdir, filename)
+    #         torch.save(agent, save_path)
 
-        Args:
-            agent (object): Agent to save.
-        """
-        with tempfile.TemporaryDirectory() as tmpdir:
-            filename = "agent.pt" 
-            save_path = os.path.join(tmpdir, filename)
-            torch.save(agent, save_path)
-
-            # Upload file as an artifact (keeps original filename)
-            self.task.upload_artifact(name="agent", artifact_object=save_path, metadata={"filename": filename})
+    #         # Upload file as an artifact (keeps original filename)
+    #         self.task.upload_artifact(
+    #             name="agent", artifact_object=save_path, metadata={"filename": filename}
+    #         )

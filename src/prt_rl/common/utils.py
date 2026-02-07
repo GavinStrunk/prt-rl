@@ -4,6 +4,7 @@ Utility functions for reinforcement learning agents that are used across differe
 import random
 import numpy as np
 import torch
+from torch import nn
 from typing import Tuple, Optional, Union, List
 
 def set_seed(seed: int):
@@ -411,3 +412,22 @@ def ornstein_uhlenbeck_noise(
     noise = x0 + theta * (mean - x0) * dt + std * torch.sqrt(dt) * torch.randn_like(x0)
     
     return noise
+
+def to_activation(name: str) -> nn.Module:
+    """
+    Converts a string name to a PyTorch activation module.
+
+    Args:
+        name (str): Name of the activation function. Supported: "relu", "tanh".
+
+    Returns:
+        nn.Module: Corresponding PyTorch activation module.
+
+    Raises:
+        ValueError: If the activation name is unknown.
+    """
+    if name == "relu":
+        return nn.ReLU()
+    if name == "tanh":
+        return nn.Tanh()
+    raise ValueError(f"Unknown activation: {name}")

@@ -27,6 +27,9 @@ dependencies = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[project.scripts]
+prt-rl = "prt_rl.cli:main"
+
 [dependency-groups]
 dev = [
     "clearml>=2.0.2",

@@ -2,7 +2,7 @@ from typing import Optional, List
 from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.common.recorders import Recorder
 from prt_rl.common.visualizers import Visualizer
-from prt_rl.agent import BaseAgent
+from prt_rl.agent import AgentInterface
 
 
 class Runner:
@@ -22,7 +22,7 @@ class Runner:
     """
     def __init__(self,
                  env: EnvironmentInterface,
-                 agent: BaseAgent,
+                 agent: AgentInterface,
                  recorders: Optional[List[Recorder]] = None,
                  visualizer: Optional[Visualizer] = None,
                  ) -> None:

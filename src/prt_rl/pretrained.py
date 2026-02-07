@@ -1,13 +1,9 @@
-import os
+from pathlib import Path
 import torch
-from typing import Optional, List
-from prt_rl.common.schedulers import ParameterScheduler
-from prt_rl.common.loggers import Logger
-from prt_rl.env.interface import EnvironmentInterface
-from prt_rl.common.evaluators import Evaluator
-from prt_rl.agent import BaseAgent
+from typing import Union
+from prt_rl.agent import AgentInterface
 
-class SB3Agent(BaseAgent):
+class SB3Agent(AgentInterface):
     """
     Stable Baselines3 (SB3) agent for reinforcement learning. 
     
@@ -83,24 +79,25 @@ class SB3Agent(BaseAgent):
         # Load the model
         self.model = self.model_class.load(self.model_path, device=self.device, **kwargs)
 
-    def predict(self, state: torch.Tensor, deterministic: bool = True) -> torch.Tensor:
+    @torch.no_grad()
+    def act(self, obs: torch.Tensor, deterministic: bool = True) -> torch.Tensor:
         """
-        Perform an action based on the current state.
+        Perform an action based on the current observation.
 
         Args:
-            state: The current state of the environment.
+            obs: The current observation of the environment.
 
         Returns:
             The action to be taken.
         """
         # Move state to model device
-        state = state.to(self.device)
+        obs = obs.to(self.device)
 
         # Wrap state in a batch if needed (for SB3, it expects NumPy)
-        if isinstance(state, torch.Tensor):
-            state = state.cpu().numpy()
+        if isinstance(obs, torch.Tensor):
+            obs = obs.cpu().numpy()
 
-        action, _ = self.model.predict(state, deterministic=deterministic)
+        action, _ = self.model.predict(obs, deterministic=deterministic)
 
         if len(action.shape) == 1:
             # Discrete actions are returned with shape (batch_size,)
@@ -109,15 +106,8 @@ class SB3Agent(BaseAgent):
             action = torch.tensor(action, device=self.device)
         return action
 
-    def train(self,
-              env: EnvironmentInterface,
-              total_steps: int,
-              schedulers: Optional[List[ParameterScheduler]] = None,
-              logger: Optional[Logger] = None,
-              logging_freq: int = 1000,
-              evaluator: Evaluator = Evaluator(),
-              eval_freq: int = 1000,
-              show_progress: bool = True
-              ) -> None:
-        raise NotImplementedError("The train method must be implemented by subclasses.")
-      
+    def _save_impl(self, path: Union[str, Path]) -> None:
+        pass
+
+    def load(cls, path: Union[str, Path], map_location: Union[str, torch.device] = "cpu") -> "AgentInterface":
+        pass

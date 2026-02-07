@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
+from pathlib import Path
 import numpy as np
 import torch
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional, Union
 
 
 class BaseBuffer(ABC):
@@ -70,6 +71,7 @@ class ReplayBuffer(BaseBuffer):
         super().__init__(capacity, device)
         self.buffer = {}
         self.initialized = False
+        self.metadata: Optional[Dict] = None
 
     def _init_storage(self, experience: Dict[str, torch.Tensor]) -> None:
         """
@@ -174,39 +176,62 @@ class ReplayBuffer(BaseBuffer):
         self.buffer = {}
         self.initialized = False
 
-    def save(self, path: str) -> None:
+    def save(self, path: Union[str, Path]) -> None:
         """
         Saves the replay buffer to a file.
 
         Args:
-            path (str): Path to the file where the buffer will be saved.
+            path (str | Path): Path to the file where the buffer will be saved.
         """
-        torch.save({
+        path = Path(path)
+        payload = {
             'buffer': self.buffer,
             'size': self.size,
             'pos': self.pos,
-            'capacity': self.capacity
-        }, path)
+            'capacity': self.capacity,
+        }
+
+        if self.metadata is not None:
+            payload['metadata'] = self.metadata
+        torch.save(payload, path)
+
+    def get_metadata(self) -> Optional[Dict]:
+        """
+        Returns the metadata stored with the replay buffer, if any.
+        """
+        return self.metadata
+    
+    def set_metadata(self, metadata: Dict) -> None:
+        """
+        Sets the metadata for the replay buffer.
+
+        Args:
+            metadata (Dict): A dictionary containing metadata information.
+        """
+        self.metadata = metadata
 
     @classmethod
-    def load(cls, path: str, device: str = "cpu") -> "ReplayBuffer":
+    def load(cls, path: Union[str, Path], device: str = "cpu") -> "ReplayBuffer":
         """
         Loads a replay buffer from a file.
 
         Args:
-            path (str): Path to the saved buffer file.
+            path (str | Path): Path to the saved buffer file.
             device (str): Device to load the buffer to. Defaults to "cpu".
 
         Returns:
             ReplayBuffer: A ReplayBuffer instance with restored data.
         """
-        data = torch.load(path, map_location=torch.device(device))
+        dev = torch.device(device)
+        data = torch.load(Path(path), map_location=dev, weights_only=False)
 
-        obj = cls(capacity=data['capacity'], device=torch.device(device))
-        obj.buffer = {k: v.to(torch.device(device)) for k, v in data['buffer'].items()}
+        obj = cls(capacity=data['capacity'], device=dev)
+        obj.buffer = {k: v.to(dev) for k, v in data['buffer'].items()}
         obj.size = data['size']
         obj.pos = data['pos']
         obj.initialized = True
+        if 'metadata' in data:
+            obj.metadata = data['metadata']
         return obj        
 
 class SumTree:

@@ -1,15 +1,11 @@
 from enum import Enum, auto
+from pathlib import Path
 import threading
 import torch
-from typing import Dict, Tuple, Union, Optional, List
-from prt_rl.env.interface import EnvParams
-from prt_rl.agent import BaseAgent
-from prt_rl.env.interface import EnvironmentInterface, EnvParams
-from prt_rl.common.schedulers import ParameterScheduler
-from prt_rl.common.loggers import Logger
-from prt_rl.common.evaluators import Evaluator
+from typing import Dict, Tuple, Union
+from prt_rl.agent import AgentInterface
 
-class GameControllerAgent(BaseAgent):
+class GameControllerAgent(AgentInterface):
     """
     The game controller policy allows interactive control of an agent with discrete or continuous actions.
 
@@ -106,12 +102,13 @@ class GameControllerAgent(BaseAgent):
             self.lock = threading.Lock()
             self._start_listener()
 
-    def predict(self, state: torch.Tensor, deterministic: bool = True) -> torch.Tensor:
+    @torch.no_grad()
+    def act(self, obs: torch.Tensor, deterministic: bool = True) -> torch.Tensor:
         """
         Gets a game controller input and maps it to the action space.
 
         Args:
-            state (TensorDict): A tensor representing the current state of the environment.
+            obs (TensorDict): A tensor representing the current state of the environment.
 
         Returns:
             A TensorDict with the "action" key added.
@@ -119,7 +116,7 @@ class GameControllerAgent(BaseAgent):
         if not deterministic:
             raise ValueError("GameControllerAgent does not support non-deterministic actions. Set deterministic=True.")
         
-        assert state.batch_size[0] == 1, "GameController only supports batch size 1 for now."
+        assert obs.batch_size[0] == 1, "GameController only supports batch size 1 for now."
 
         # Get the data type for the action values
         if self.continuous:
@@ -144,18 +141,15 @@ class GameControllerAgent(BaseAgent):
             with self.lock:
                 action_val = self.latest_values.clone()
 
-        state['action'] = action_val.unsqueeze(0)
-        return state
+        obs['action'] = action_val.unsqueeze(0)
+        return obs
+    
+    def _save_impl(self, path: Union[str, Path]) -> None:
+        pass
 
-    def train(self,
-              env: EnvironmentInterface,
-              total_steps: int,
-              schedulers: List[ParameterScheduler] = [],
-              logger: Optional[Logger] = None,
-              evaluator: Optional[Evaluator] = None,
-              show_progress: bool = True
-              ) -> None:
-        raise NotImplementedError("GameControllerAgent does not support training. It is designed for interactive control only.")
+
+    def load(cls, path: Union[str, Path], map_location: Union[str, torch.device] = "cpu") -> "AgentInterface":
+        pass
 
     def _start_listener(self):
         """
@@ -287,7 +281,7 @@ class GameControllerAgent(BaseAgent):
 
         return key_val
     
-class KeyboardAgent(BaseAgent):
+class KeyboardAgent(AgentInterface):
     """
     The keyboard policy allows interactive control of the agent using keyboard input.
 
@@ -338,15 +332,16 @@ class KeyboardAgent(BaseAgent):
         if not self.blocking:
             self._start_listener()
 
-    def predict(self,
-                   state: torch.Tensor,
+    @torch.no_grad()
+    def act(self,
+                   obs: torch.Tensor,
                    deterministic: bool = True
                    ) -> torch.Tensor:
         """
         Gets a keyboard press and maps it to the action space.
 
         Args:
-            state (torch.Tensor): A tensor representing the current state of the environment.
+            obs (torch.Tensor): A tensor representing the current state of the environment.
             deterministic (bool): If True, the policy will not sample random actions. Defaults to True.
 
         Returns:
@@ -355,7 +350,7 @@ class KeyboardAgent(BaseAgent):
         if not deterministic:
             raise ValueError("KeyboardAgent does not support non-deterministic actions. Set deterministic=True.")
         
-        assert state.batch_size[0] == 1, "KeyboardPolicy Only supports batch size 1 for now."
+        assert obs.batch_size[0] == 1, "KeyboardPolicy Only supports batch size 1 for now."
 
         if self.blocking:
             key_string = ''
@@ -373,19 +368,15 @@ class KeyboardAgent(BaseAgent):
                 action_val = self.key_action_map[key_string]
                 self.latest_key = None  # Reset the latest key so another key has to be pressed.
 
-        state['action'] = torch.tensor([[action_val]])
-        return state
+        obs['action'] = torch.tensor([[action_val]])
+        return obs
     
-    def train(self,
-              env: EnvironmentInterface,
-              total_steps: int,
-              schedulers: List[ParameterScheduler] = [],
-              logger: Optional[Logger] = None,
-              evaluator: Optional[Evaluator] = None,
-              show_progress: bool = True
-              ) -> None:
-        raise NotImplementedError("KeyboardAgent does not support training. It is designed for interactive control only.")
+    def _save_impl(self, path: Union[str, Path]) -> None:
+        pass
 
+    def load(cls, path: Union[str, Path], map_location: Union[str, torch.device] = "cpu") -> "AgentInterface":
+        pass
+    
     def _start_listener(self):
         """
         Starts a background thread to listen for key presses.

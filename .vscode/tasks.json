@@ -1,0 +1,26 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "PRT-RL: Generate Algorithm Template (single file)",
+      "type": "shell",
+      "command": "uv run prt-rl algorithm \"${input:agentPath}\"",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "PRT-RL: Generate Algorithm Template (single file, force overwrite)",
+      "type": "shell",
+      "command": "uv run prt-rl algorithm \"${input:agentPath}\" --force",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "agentPath",
+      "type": "promptString",
+      "description": "Algorithm path (e.g., PPO, model_free/PPO, imitation/DAgger)",
+    }
+  ]
+}
