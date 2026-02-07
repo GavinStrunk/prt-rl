@@ -4,6 +4,7 @@ Metric and artifact loggers
 
 """
 import json
+import matplotlib.pyplot as plt
 import mlflow
 import numpy as np
 import os
@@ -262,6 +263,23 @@ class MLFlowLogger(Logger):
             self.iteration += 1
         else:
             self.iteration = iteration
+
+    def log_figure(
+        self,
+        fig,
+        name: str,
+        iteration: Optional[int] = None,
+    ) -> None:
+        """
+        Logs a matplotlib figure to MLFlow as an artifact.
+        Args:
+            fig (matplotlib.figure.Figure): The figure to log.
+            name (str): Name of the figure artifact.
+            iteration (int, optional): Iteration number for logging.
+        """
+        iteration_str = f"{iteration}" if iteration is not None else "final"
+        mlflow.log_figure(fig, f"{name}_{iteration_str}.png")
+        plt.close(fig)  # Close the figure to free up memory
 
     # def save_agent(self, agent: object, agent_name: str = "agent.pt") -> None:
     #     """

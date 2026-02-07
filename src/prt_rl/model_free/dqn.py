@@ -11,7 +11,7 @@ from prt_rl.common.buffers import ReplayBuffer, BaseBuffer, PrioritizedReplayBuf
 from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.collectors import ParallelCollector
 from prt_rl.common.loggers import Logger
-from prt_rl.agent import BaseAgent
+from prt_rl.agent import AgentInterface
 from prt_rl.common.policies import QValuePolicy
 from prt_rl.common.progress_bar import ProgressBar
 from prt_rl.common.evaluators import Evaluator
@@ -46,7 +46,7 @@ class DQNConfig:
     train_freq: int = 1
     gradient_steps: int = 1
 
-class DQN(BaseAgent):
+class DQN(AgentInterface):
     """
     Deep Q-Network (DQN) agent for reinforcement learning.
 

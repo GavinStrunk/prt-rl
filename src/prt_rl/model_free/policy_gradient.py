@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 from typing import List
-from prt_rl.agent import BaseAgent
+from prt_rl.agent import AgentInterface
 from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.loggers import Logger
@@ -52,7 +52,7 @@ class PolicyGradientConfig:
     baseline_optim_steps: int = 5
     normalize_advantages: bool = True
 
-class PolicyGradient(BaseAgent):
+class PolicyGradient(AgentInterface):
     """
     Policy Gradient agent with step-wise optimization.
 

@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from typing import Optional, List, Tuple
-from prt_rl.agent import BaseAgent
+from prt_rl.agent import AgentInterface
 from prt_rl.env.interface import EnvParams, EnvironmentInterface
 from prt_rl.common.collectors import ParallelCollector
 from prt_rl.common.buffers import RolloutBuffer
@@ -139,7 +139,7 @@ class A2CPolicy(BasePolicy):
 
         return value, log_probs, entropy
 
-class A2C(BaseAgent):
+class A2C(AgentInterface):
     """
     Advantage Actor-Critic (A2C) agent implementation.
     

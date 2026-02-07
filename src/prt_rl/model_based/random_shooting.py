@@ -5,7 +5,7 @@ from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.loggers import Logger
 from prt_rl.env.interface import EnvironmentInterface, EnvParams
 from prt_rl.common.evaluators import Evaluator
-from prt_rl.agent import BaseAgent
+from prt_rl.agent import AgentInterface
 
 from prt_rl.model_based.planners.shooting import RandomShootingPlanner
 from prt_rl.model_based.planners.rollout import rollout_action_sequence
@@ -23,7 +23,7 @@ class RandomShootingConfig:
     planning_horizon: int = 10
     num_action_sequences: int = 100 
 
-class RandomShooting(BaseAgent):
+class RandomShooting(AgentInterface):
     """
     Random Shooting Agent for Model-Based Reinforcement Learning.
     

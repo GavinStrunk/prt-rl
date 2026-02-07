@@ -4,7 +4,7 @@ Twin Delayed Deep Deterministic Policy Gradient (TD3)
 import torch
 import torch.nn.functional as F
 from typing import Optional, List, Tuple
-from prt_rl.agent import BaseAgent
+from prt_rl.agent import AgentInterface
 from prt_rl.env.interface import EnvParams, EnvironmentInterface
 from prt_rl.common.loggers import Logger
 from prt_rl.common.schedulers import ParameterScheduler
@@ -178,7 +178,7 @@ class TD3Policy(BasePolicy):
         return q_values
     
 
-class TD3(BaseAgent):
+class TD3(AgentInterface):
     """
     Twin Delayed Deep Deterministic Policy Gradient (TD3)
 

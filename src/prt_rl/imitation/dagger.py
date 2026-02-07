@@ -38,7 +38,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 from typing import Optional, List
-from prt_rl.agent import BaseAgent
+from prt_rl.agent import AgentInterface
 from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.loggers import Logger
@@ -165,7 +165,7 @@ class DAggerConfig:
     mini_batch_size: int = 32
     max_grad_norm: float = 10.0
 
-class DAgger(BaseAgent):
+class DAgger(AgentInterface):
     r"""
     Dataset Aggregation from Demonstrations (DAgger) agent.
 
@@ -201,7 +201,7 @@ class DAgger(BaseAgent):
         device (str): Device to run the agent on (e.g., 'cpu' or 'cuda'). Default is 'cpu'.
     """
     def __init__(self,
-                 expert_policy: BaseAgent,
+                 expert_policy: AgentInterface,
                  experience_buffer: ReplayBuffer,                 
                  policy: DistributionPolicy,
                  config: DAggerConfig = DAggerConfig(),

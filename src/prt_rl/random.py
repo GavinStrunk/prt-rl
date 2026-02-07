@@ -1,15 +1,13 @@
 """
 Random Agent that samples actions uniformly from the action space.
 """
+from pathlib import Path
 import torch
-from typing import Optional, List, Union
-from prt_rl.agent import BaseAgent
-from prt_rl.common.schedulers import ParameterScheduler
-from prt_rl.common.loggers import Logger
-from prt_rl.env.interface import EnvironmentInterface, EnvParams, MultiAgentEnvParams
-from prt_rl.common.evaluators import Evaluator
+from typing import Union
+from prt_rl.agent import AgentInterface
+from prt_rl.env.interface import EnvParams, MultiAgentEnvParams
 
-class RandomAgent(BaseAgent):
+class RandomAgent(AgentInterface):
     """
     Implements a policy that uniformly samples random actions.
 
@@ -22,8 +20,9 @@ class RandomAgent(BaseAgent):
         super(RandomAgent, self).__init__()
         self.env_params = env_params
 
-    def predict(self,
-                   state: torch.Tensor,
+    @torch.no_grad()
+    def act(self,
+                   obs: torch.Tensor,
                    deterministic: bool = False
                    ) -> torch.Tensor:
         """
@@ -36,10 +35,10 @@ class RandomAgent(BaseAgent):
             raise ValueError("RandomAgent does not support deterministic actions. Set deterministic=False to sample random actions.")
         
         if isinstance(self.env_params, EnvParams):
-            ashape = (state.shape[0], self.env_params.action_len)
+            ashape = (obs.shape[0], self.env_params.action_len)
             params = self.env_params
         elif isinstance(self.env_params, MultiAgentEnvParams):
-            ashape = (state.shape[0], self.env_params.num_agents, self.env_params.agent.action_len)
+            ashape = (obs.shape[0], self.env_params.num_agents, self.env_params.agent.action_len)
             params = self.env_params.agent
         else:
             raise ValueError("env_params must be a EnvParams or MultiAgentEnvParams")
@@ -58,12 +57,9 @@ class RandomAgent(BaseAgent):
 
         return action
     
-    def train(self,
-              env: EnvironmentInterface,
-              total_steps: int,
-              schedulers: Optional[List[ParameterScheduler]] = None,
-              logger: Optional[Logger] = None,
-              evaluator: Optional[Evaluator] = None,
-              show_progress: bool = True
-              ) -> None:
-        raise NotImplementedError("RandomAgent does not support training. It is designed for interactive control only.")
+    def _save_impl(self, path: Union[str, Path]) -> None:
+        pass
+
+    def load(cls, path: Union[str, Path], map_location: Union[str, torch.device] = "cpu") -> "AgentInterface":
+        pass
+    

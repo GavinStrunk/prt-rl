@@ -13,7 +13,7 @@ import torch.nn as nn
 from torch import Tensor
 import torch.nn.functional as F
 from typing import Optional, List, Literal, Tuple, Union
-from prt_rl.agent import BaseAgent
+from prt_rl.agent import AgentInterface
 from prt_rl.env.interface import EnvParams, EnvironmentInterface
 from prt_rl.common.collectors import Collector
 from prt_rl.common.buffers import RolloutBuffer
@@ -24,9 +24,9 @@ from prt_rl.common.evaluators import Evaluator
 import prt_rl.common.utils as utils
 
 import prt_rl.common.policies as pmod
-import prt_rl.common.policies.encoders as enc
-import prt_rl.common.policies.backbones as back
-import prt_rl.common.policies.heads as heads
+import prt_rl.common.components.encoders.encoders as enc
+import prt_rl.common.components.backbones.backbones as back
+import prt_rl.common.components.heads.heads as heads
 
 
 # 1) Define the Algorithm config dataclass
@@ -268,7 +268,7 @@ class PPOPolicyFactory(pmod.PolicyFactory[PPOPolicySpec, PPOPolicy]):
 
 
 # 5) Make the Agent
-class PPOAgent(BaseAgent):
+class PPOAgent(AgentInterface):
     """
     Proximal Policy Optimization (PPO)
 

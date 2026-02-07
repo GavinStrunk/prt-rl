@@ -4,7 +4,7 @@ Soft Actor-Critic (SAC)
 from dataclasses import dataclass
 import torch
 from typing import Optional, List, Tuple
-from prt_rl.agent import BaseAgent
+from prt_rl.agent import AgentInterface
 from prt_rl.env.interface import EnvParams, EnvironmentInterface
 from prt_rl.common.loggers import Logger
 from prt_rl.common.schedulers import ParameterScheduler
@@ -176,7 +176,7 @@ class SACPolicy(BasePolicy):
         return q_values
 
 
-class SAC(BaseAgent):
+class SAC(AgentInterface):
     """
     Soft Actor-Critic (SAC) agent.
 

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 from typing import Tuple, Optional, List
-from prt_rl.agent import BaseAgent
+from prt_rl.agent import AgentInterface
 from prt_rl.common.policies import BasePolicy, DistributionPolicy, ValueCritic
 from prt_rl.env.interface import EnvParams, EnvironmentInterface
 from prt_rl.common.loggers import Logger
@@ -150,7 +150,7 @@ class AdaptationModule(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.layers(x)
 
-class RMA(BaseAgent):
+class RMA(AgentInterface):
     def __init__(self,
                  agent: PPO,
                  config: RMAConfig,
