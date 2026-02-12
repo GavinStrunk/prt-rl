@@ -210,14 +210,15 @@ class MLFlowLogger(Logger):
 
     def __init__(
         self,
-        tracking_uri: str,
         experiment_name: str,
+        *,
+        tracking_uri: str | None = None,
         run_name: Optional[str] = None,
         log_system_metrics: bool = False,
         logging_freq: int = 1,
     ) -> None:
         super().__init__(logging_freq=logging_freq)
-        self.tracking_uri = tracking_uri
+        self.tracking_uri = tracking_uri if tracking_uri is not None else os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
         self.experiment_name = experiment_name
         self.run_name = run_name
         self.iteration = 0
@@ -280,6 +281,14 @@ class MLFlowLogger(Logger):
         iteration_str = f"{iteration}" if iteration is not None else "final"
         mlflow.log_figure(fig, f"{name}_{iteration_str}.png")
         plt.close(fig)  # Close the figure to free up memory
+
+    def log_tags(self, tags: dict) -> None:
+        """
+        Logs a dictionary of tags to MLFlow.
+        Args:
+            tags (dict): Dictionary of tags to log.
+        """
+        mlflow.set_tags(tags)
 
     # def save_agent(self, agent: object, agent_name: str = "agent.pt") -> None:
     #     """

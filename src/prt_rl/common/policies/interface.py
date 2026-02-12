@@ -8,7 +8,7 @@ from typing import Tuple, Optional, Dict
 
 InfoDict = Dict[str, Tensor]
 
-class PolicyModule(torch.nn.Module, ABC):
+class Policy(torch.nn.Module, ABC):
     """
     Minimal runtime policy API used by collectors.
 
