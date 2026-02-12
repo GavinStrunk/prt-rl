@@ -290,6 +290,15 @@ class MLFlowLogger(Logger):
         """
         mlflow.set_tags(tags)
 
+    def log_directory(self, dir: str, path: str| None = None) -> None:
+        """
+        Logs a file as an artifact to MLFlow.
+        Args:
+            path (str): Path to the file to log.
+            name (str): Name of the artifact in MLFlow.
+        """
+        mlflow.log_artifacts(local_dir=dir, artifact_path=path)
+
     # def save_agent(self, agent: object, agent_name: str = "agent.pt") -> None:
     #     """
     #     Saves the agent to the MLFlow run.
