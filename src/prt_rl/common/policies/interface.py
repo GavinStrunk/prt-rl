@@ -2,9 +2,10 @@
 Base class for implementing policy modules.
 """
 from abc import ABC, abstractmethod
+from pathlib import Path
 import torch
 from torch import Tensor
-from typing import Tuple, Optional, Dict
+from typing import Tuple, Optional, Dict, Union
 
 InfoDict = Dict[str, Tensor]
 
@@ -51,3 +52,28 @@ class Policy(torch.nn.Module, ABC):
         for b in self.buffers():
             return b.device
         return torch.device("cpu")
+
+    def save(self, path: Union[str, Path]) -> None:
+        """
+        Save a fully-constructed policy module.
+
+        Note:
+            This uses PyTorch module pickling, so loading requires the policy
+            class to be importable in the runtime.
+        """
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        torch.save(self, Path(path))
+
+    @classmethod
+    def load(
+        cls,
+        path: Union[str, Path],
+        map_location: str | torch.device = "cpu",
+    ) -> "Policy":
+        """
+        Load a policy saved with `Policy.save`.
+        """
+        policy = torch.load(Path(path), map_location=map_location, weights_only=False)
+        if not isinstance(policy, cls):
+            raise TypeError(f"Loaded policy type {type(policy)} is not an instance of {cls}.")
+        return policy.to(map_location)

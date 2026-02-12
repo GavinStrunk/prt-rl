@@ -4,17 +4,16 @@ Proximal Policy Optimization (PPO)
 Reference:
 [1] https://arxiv.org/abs/1707.06347
 """
-from dataclasses import dataclass, asdict, field
-import json
+from dataclasses import dataclass, asdict
 from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
 from torch import Tensor
 import torch.nn.functional as F
-from typing import Optional, List, Literal, Tuple, Union
+from typing import Optional, List, Tuple
 from prt_rl.agent import Agent
-from prt_rl.env.interface import EnvParams, EnvironmentInterface
+from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.common.collectors import Collector
 from prt_rl.common.buffers import RolloutBuffer
 from prt_rl.common.loggers import Logger
@@ -183,6 +182,11 @@ class PPOAgent(Agent):
 
         # Configure optimizers
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.config.learning_rate)
+
+    @torch.no_grad()
+    def act(self, obs: Tensor, deterministic: bool = False) -> Tensor:
+        action, _ = self.policy.act(obs, deterministic=deterministic)
+        return action
     
     def train(self,
               env: EnvironmentInterface,
@@ -316,55 +320,51 @@ class PPOAgent(Agent):
         if evaluator is not None:
             evaluator.close()
     
-    def save(self, path: Path) -> None:
+    def _save_impl(self, path: Path) -> None:
         """
         Writes a self-contained checkpoint directory.
 
         Layout:
           path/
-            agent.json
-            policy/
-              spec.json
-              weights.pt
-            optimizer.pt
+            agent.pt
+            policy.pt
         """
-        # Create the path if it doesn't exist
         path.mkdir(parents=True, exist_ok=True)
 
-        # Optimizer
-        torch.save(self.optimizer.state_dict(), path / "optimizer.pt")
+        payload = {
+            "algo": "PPO",
+            "agent_format_version": 1,
+            "config": asdict(self.config),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+        }
+        torch.save(payload, path / "agent.pt")
+        self.policy.save(path / "policy.pt")
 
 
     @classmethod
     def load(cls, path: str | Path, map_location: str | torch.device = "cpu") -> "PPOAgent":
         """
         Loads the checkpoint and returns a fully-constructed PPOAgent.
-
-        Note: This assumes the checkpoint was produced by PPOAgent._save_impl.
         """
         p = Path(path)
-        agent_meta_path = p / "agent.json"
-        agent_meta = json.loads(agent_meta_path.read_text())
+        agent_meta = torch.load(p / "agent.pt", map_location=map_location, weights_only=False)
 
         if agent_meta.get("algo") != "PPO":
             raise ValueError(f"Checkpoint algo mismatch: expected PPO, got {agent_meta.get('algo')}")
 
         config = PPOConfig(**agent_meta["config"])
+        policy = PPOPolicy.load(p / "policy.pt", map_location=map_location)
 
         agent = cls(
+            policy=policy,
             config=config,
-            policy=None,
             device=str(map_location),
         )
 
-        # Update the policy with the saved policy parameters
-        agent.policy = policy
-
-        opt_state = torch.load(p / "optimizer.pt", map_location=map_location)
+        opt_state = agent_meta["optimizer_state_dict"]
         agent.optimizer.load_state_dict(opt_state)
 
         return agent    
-
 
 
 
