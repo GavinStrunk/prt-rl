@@ -2,7 +2,35 @@ from typing import Optional, List
 from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.common.recorders import Recorder
 from prt_rl.common.visualizers import Visualizer
-from prt_rl.agent import AgentInterface
+from prt_rl.agent import Agent
+from prt_rl.common.policies.interface import Policy
+
+
+def watch(env: EnvironmentInterface, policy: Policy, num_episodes: int = 1) -> None:
+    """
+    Watch a trained RL agent in a gym environment.
+
+    Args:
+        env: The environment to run the agent in.
+        policy: The RL policy to use for acting in the environment.
+    """
+    episode_rewards = []
+    for i in range(num_episodes):
+        obs, info = env.reset()
+        done = False
+        total_reward = 0.0
+
+        while not done:
+            action, _ = policy.act(obs, deterministic=True)
+            obs, reward, done, info = env.step(action)
+            total_reward += reward
+
+        print(f"Episode {i} Total reward: {total_reward.cpu().item()}")
+        episode_rewards.append(total_reward.cpu().item())
+
+    avg_reward = sum(episode_rewards) / num_episodes
+    print(f"Average reward over {num_episodes} episodes: {avg_reward}")
+
 
 
 class Runner:
@@ -22,7 +50,7 @@ class Runner:
     """
     def __init__(self,
                  env: EnvironmentInterface,
-                 agent: AgentInterface,
+                 agent: Agent,
                  recorders: Optional[List[Recorder]] = None,
                  visualizer: Optional[Visualizer] = None,
                  ) -> None:
@@ -49,7 +77,7 @@ class Runner:
 
         # Loop until the episode is done
         while not done:
-            action = self.agent(state)
+            action = self.agent.act(state, deterministic=True)
             next_state, reward, done, info = self.env.step(action)
 
             # Record the environment frame

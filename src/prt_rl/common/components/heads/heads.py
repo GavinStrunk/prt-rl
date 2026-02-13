@@ -3,8 +3,9 @@ import torch.nn as nn
 from torch import Tensor
 from typing import Tuple, Dict, Optional
 import prt_rl.common.decision_functions as dfcn
+from prt_rl.common.components.heads.interface import DistributionHead
 
-class CategoricalHead(nn.Module):
+class CategoricalHead(DistributionHead):
     """
     Categorical actor head for discrete action spaces.
 
@@ -130,7 +131,7 @@ class DecisionHead(nn.Module):
 
         return actions
 
-class GaussianHead(nn.Module):
+class GaussianHead(DistributionHead):
     """
     Diagonal Gaussian actor head for continuous action spaces.
 
@@ -399,7 +400,7 @@ class TanhGaussianHead(nn.Module):
         """
         return -self.log_prob(latent, action)
 
-class BetaHead(nn.Module):
+class BetaHead(DistributionHead):
     """
     Beta actor head using torch.distributions.Beta.
 

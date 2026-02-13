@@ -331,7 +331,7 @@ class DAgger(AgentInterface):
             # Log the training progress
             if logger.should_log(num_steps):
                 for scheduler in schedulers:
-                    logger.log_scalar(name=scheduler.parameter_name, value=getattr(scheduler.obj, scheduler.parameter_name), iteration=num_steps)
+                    logger.log_scalar(name=scheduler.parameter_name, value=scheduler.get_value(), iteration=num_steps)
                 logger.log_scalar(name='loss', value=np.mean(losses), iteration=num_steps)
 
             # Evaluate the agent periodically

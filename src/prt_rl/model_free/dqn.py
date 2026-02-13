@@ -250,7 +250,7 @@ class DQN(AgentInterface):
             if logger.should_log(num_steps):
                 if schedulers is not None:
                     for scheduler in schedulers:
-                        logger.log_scalar(name=scheduler.parameter_name, value=getattr(scheduler.obj, scheduler.parameter_name), iteration=num_steps)
+                        logger.log_scalar(name=scheduler.parameter_name, value=scheduler.get_value(), iteration=num_steps)
                 logger.log_scalar(name="td_error", value=np.mean(td_errors), iteration=num_steps)
                 logger.log_scalar(name="loss", value=np.mean(losses), iteration=num_steps)
 

@@ -7,7 +7,7 @@ if not RUN_TESTS:
 
 import os
 import torch
-from prt_rl.pretrained import SB3Agent
+from prt_rl.common.policies.pretrained import SB3Agent
 
 def test_sb3_agent_not_downloaded():
     agent = SB3Agent(

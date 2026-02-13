@@ -5,7 +5,7 @@ import torch
 from typing import Dict, Optional, List, Tuple, Any
 from prt_rl.env.interface import EnvironmentInterface, EnvParams, MultiAgentEnvParams
 from prt_rl.common.loggers import Logger
-from prt_rl.common.policies import PolicyModule
+from prt_rl.common.policies import Policy
 
 
 class MetricsTracker:
@@ -94,10 +94,11 @@ class MetricsTracker:
                 # Log the episode metrics if a logger is provided
                 if self.logger is not None:
                     step = self.collected_steps
-                    self.logger.log_scalar("episode_reward", ep_r, iteration=step)
-                    self.logger.log_scalar("episode_length", ep_L, iteration=step)
-                    self.logger.log_scalar("cumulative_reward", float(self.cumulative_reward), iteration=step)
-                    self.logger.log_scalar("episode_number", float(self.episode_count), iteration=step)
+                    if self.logger.should_log(step):
+                        self.logger.log_scalar("episode_reward", ep_r, iteration=step)
+                        self.logger.log_scalar("episode_length", ep_L, iteration=step)
+                        self.logger.log_scalar("cumulative_reward", float(self.cumulative_reward), iteration=step)
+                        self.logger.log_scalar("episode_number", float(self.episode_count), iteration=step)
 
                 # Clear accumulators for that env
                 self._cur_reward[i] = 0.0
@@ -165,7 +166,7 @@ class Collector:
         self.previous_experience = None
 
     def collect_experience(self,
-                           policy: PolicyModule,
+                           policy: Policy,
                            num_steps: int = 1,
                            bootstrap: bool = True,
                            ) -> Dict[str, torch.Tensor]:
@@ -175,7 +176,7 @@ class Collector:
         The experiences are collected across all environments, so the actual number of steps is ceil(num_steps / N) where N is the number of environments. The output shape is (T, N, ...) if not flattened, or (N*T, ...) if flattened. 
         
         Args:
-            policy (PolicyModule): A policy that implements the PolicyModule interface.
+            policy (Policy): A policy that implements the Policy interface.
             num_steps (int): The number of steps to collect experience for. Defaults to 1.
             bootstrap (bool): Whether to compute the last value estimate V(s_{T+1}) for bootstrapping if the last step is not done and the policy provides value estimates. Defaults to True.
             
@@ -208,7 +209,7 @@ class Collector:
         return experience
     
     def collect_trajectory(self, 
-                           policy: PolicyModule,
+                           policy: Policy,
                            num_trajectories: int | None = None,
                            min_num_steps: int | None = None,
                            ) -> Dict[str, torch.Tensor]:
@@ -223,7 +224,7 @@ class Collector:
         The output is a dictionary with keys (state, action, next_state, reward, done) where each key contains a tensor with the first dimension (B, ...) where B is the sum of each trajectories timesteps T.
 
         Args:
-            policy (PolicyModule | None): The policy or agent to use.
+            policy (Policy | None): The policy or agent to use.
             num_trajectories (int | None): The total number of complete trajectories to collect.
             min_num_steps (int | None): The minimum number of steps to collect before completing the trajectories. If specified, will collect until the minimum number of steps is reached, then complete the last trajectory.
             
@@ -281,7 +282,7 @@ class Collector:
     # Private Helper Methods
     # =========================================================================
 
-    def _collect_steps(self, policy: PolicyModule, num_timesteps: int) -> Dict[str, List[torch.Tensor]]:
+    def _collect_steps(self, policy: Policy, num_timesteps: int) -> Dict[str, List[torch.Tensor]]:
         """
         Collects a fixed number of steps from all environments.
 
@@ -316,7 +317,7 @@ class Collector:
 
     def _collect_steps_until_episodes_complete(
         self,
-        policy: PolicyModule,
+        policy: Policy,
         num_envs: int,
         num_trajectories: int | None,
         min_num_steps: int | None
@@ -702,13 +703,13 @@ class Collector:
 
     def _collect_step(
         self,
-        policy: PolicyModule
+        policy: Policy
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]: 
         """
         Collects a single step from the environment using the provided policy.
         
         Args:
-            policy: A policy that implements the PolicyModule interface.
+            policy: A policy that implements the Policy interface.
         
         Returns:
             Tuple containing:

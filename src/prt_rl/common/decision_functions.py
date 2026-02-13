@@ -56,17 +56,42 @@ class DecisionFunction(ABC):
         """
         raise NotImplementedError
 
+    @staticmethod
+    def _normalize_action_values(action_values: torch.Tensor) -> tuple[torch.Tensor, bool]:
+        """
+        Normalize action values to batched shape (N, A).
+
+        Returns:
+            tuple[Tensor, bool]: (normalized_tensor, was_unbatched)
+        """
+        if action_values.ndim == 1:
+            return action_values.unsqueeze(0), True
+        if action_values.ndim == 2:
+            return action_values, False
+        raise ValueError(
+            "Expected action_values with shape (# env, # actions) or (# actions,), "
+            f"but got shape: {tuple(action_values.shape)}"
+        )
+
+    @staticmethod
+    def _restore_action_shape(actions: torch.Tensor, was_unbatched: bool) -> torch.Tensor:
+        """
+        Restore output shape for single-state inputs.
+        """
+        if was_unbatched:
+            return actions.squeeze(0)
+        return actions
+
     def set_parameter(self,
                       name: str,
                       value: Any
                       ) -> None:
         """
-        Sets a named parameter in the decision function. This is used to set or update parameters values for example epsilon in epsilon-greedy.
+        Sets a named parameter in the decision function.
 
         Args:
             name (str): name of the parameter
             value (Any): value to set
-
         """
         if hasattr(self, name):
             setattr(self, name, value)
@@ -120,27 +145,17 @@ class Greedy(DecisionFunction):
     def select_action(self,
                       action_values: torch.Tensor
                       ) -> torch.Tensor:
-        if action_values.ndim != 2:
-            raise ValueError(
-                "Expected a tensor with shape (# env, # actions) for actions, but got a tensor with shape: {}".format(
-                    action_values.shape))
+        action_values, was_unbatched = self._normalize_action_values(action_values)
 
-        # Find indices of the maximum value(s)
-        max_value, _ = torch.max(action_values, dim=1)
+        # Random tie-break across argmax actions.
+        max_value = torch.max(action_values, dim=1, keepdim=True).values
+        max_mask = action_values == max_value
 
-        # Find all indices where the value equals the max value
-        max_indices_list = [
-            (action_values[n] == max_value[n]).nonzero(as_tuple=True)[0].tolist()
-            for n in range(action_values.size(0))
-        ]
+        random_scores = torch.rand_like(action_values)
+        random_scores = random_scores.masked_fill(~max_mask, -1.0)
+        chosen_indices = torch.argmax(random_scores, dim=1, keepdim=True).to(dtype=torch.long)
 
-        # Randomly choose one index from the list of max indices for each dimension along N
-        chosen_indices = torch.tensor([
-            indices[torch.randint(len(indices), (1,)).item()] if len(indices) > 1 else indices[0]
-            for indices in max_indices_list
-        ]).unsqueeze(-1)
-
-        return chosen_indices
+        return self._restore_action_shape(chosen_indices, was_unbatched)
 
 
 class EpsilonGreedy(Greedy):
@@ -173,20 +188,23 @@ class EpsilonGreedy(Greedy):
         Returns:
             torch.Tensor: Selected action index.
         """
+        action_values, was_unbatched = self._normalize_action_values(action_values)
+
         # Greedy action selection
-        greedy_actions = Greedy.select_action(self, action_values)
+        greedy_actions = super().select_action(action_values).to(dtype=torch.long)
 
         # Epsilon-greedy logic
-        # Generate random values and check if they are larger than epsilon
-        random_actions = torch.rand(action_values.size(0), device=action_values.device) <= self.epsilon
-        actions = torch.zeros((action_values.shape[0], 1), device=action_values.device, dtype=torch.int)
-        for i, _ in enumerate(random_actions):
-            if random_actions[i]:
-                actions[i] = torch.randint(action_values.shape[-1], (1,), device=action_values.device)
-            else:
-                actions[i] = greedy_actions[i]
+        random_mask = torch.rand((action_values.size(0), 1), device=action_values.device) <= self.epsilon
+        random_actions = torch.randint(
+            low=0,
+            high=action_values.shape[-1],
+            size=(action_values.shape[0], 1),
+            device=action_values.device,
+            dtype=torch.long,
+        )
+        actions = torch.where(random_mask, random_actions, greedy_actions)
 
-        return actions
+        return self._restore_action_shape(actions, was_unbatched)
 
     @classmethod
     def from_dict(cls, data: dict) -> 'EpsilonGreedy':
@@ -237,20 +255,21 @@ class Softmax(DecisionFunction):
         Returns:
             torch.Tensor: Selected action index.
         """
-        if action_values.ndim != 2:
-            raise ValueError(
-                "Expected a 1D tensor for actions, but got a tensor with shape: {}".format(action_values.shape))
+        action_values, was_unbatched = self._normalize_action_values(action_values)
+        if self.tau <= 0:
+            raise ValueError("Temperature 'tau' must be > 0.")
 
-        # Compute exponential values scaled by tau
-        exp_values = torch.exp(action_values / self.tau)
+        # Compute exponential values scaled by tau (stabilized).
+        centered = action_values - torch.max(action_values, dim=1, keepdim=True).values
+        exp_values = torch.exp(centered / self.tau)
 
         # Normalize to get probabilities
-        action_pmf = exp_values / torch.sum(exp_values)
+        action_pmf = exp_values / torch.sum(exp_values, dim=1, keepdim=True)
 
         # Sample from the probabilities to get the action
         action = stochastic_selection(action_pmf)
 
-        return action
+        return self._restore_action_shape(action, was_unbatched)
 
     @classmethod
     def from_dict(cls, data: dict) -> 'Softmax':
@@ -290,7 +309,10 @@ class UpperConfidenceBound(DecisionFunction):
         self.c = c
         self.t = t
 
-    def select_action(self, action_values: torch.Tensor) -> torch.Tensor:
+    def select_action(self,
+                      action_values: torch.Tensor,
+                      action_selections: torch.Tensor | None = None
+                      ) -> torch.Tensor:
         """
         Upper Confidence Bound selects among the non-greedy actions based on their potential for being optimal.
 
@@ -306,27 +328,47 @@ class UpperConfidenceBound(DecisionFunction):
         Returns:
             torch.Tensor: Selected action index.
         """
-        if action_values.ndim != 1 or action_selections.ndim != 1:
-            raise ValueError("Expected 1D tensors for actions and action_selections.")
+        action_values, was_unbatched = self._normalize_action_values(action_values)
+
+        if self.c <= 0:
+            raise ValueError("The constant 'c' must be greater than 0.")
+        if self.t <= 0:
+            raise ValueError("The timestep 't' must be greater than 0.")
+
+        if action_selections is None:
+            # Fall back to greedy selection when counts are not provided.
+            greedy_actions = Greedy().select_action(action_values)
+            return self._restore_action_shape(greedy_actions, was_unbatched)
+
+        action_selections, _ = self._normalize_action_values(action_selections)
         if action_values.shape != action_selections.shape:
             raise ValueError("Actions and action_selections must have the same shape.")
-        if c <= 0:
-            raise ValueError("The constant 'c' must be greater than 0.")
+        if (action_selections <= 0).any():
+            raise ValueError("Action selection counts must be > 0.")
 
         # Compute UCB values
         log_term = torch.log(torch.tensor(self.t, dtype=torch.float32, device=action_values.device))
         exploration_bonus = self.c * torch.sqrt(log_term / action_selections)
         ucb_values = action_values + exploration_bonus
 
-        # Find indices of the maximum value(s)
-        max_value = torch.max(ucb_values)
-        max_indices = torch.nonzero(ucb_values == max_value, as_tuple=False).squeeze(-1)
+        # Random tie-break across argmax actions.
+        max_value = torch.max(ucb_values, dim=1, keepdim=True).values
+        max_mask = ucb_values == max_value
+        random_scores = torch.rand_like(ucb_values)
+        random_scores = random_scores.masked_fill(~max_mask, -1.0)
+        selected_action = torch.argmax(random_scores, dim=1, keepdim=True).to(dtype=torch.long)
 
-        # Randomly select one if there are multiple maximum indices
-        if len(max_indices) > 1:
-            random_index = torch.randint(len(max_indices), (1,), device=action_values.device)
-            selected_action = max_indices[random_index]
-        else:
-            selected_action = max_indices[0]
+        return self._restore_action_shape(selected_action, was_unbatched)
 
-        return selected_action
+    @classmethod
+    def from_dict(cls, data: dict) -> "UpperConfidenceBound":
+        if data["type"] != cls.__name__:
+            raise ValueError(f"Cannot load {data['type']} as {cls.__name__}")
+        return cls(c=data["c"], t=data["t"])
+
+    def to_dict(self) -> dict:
+        return {
+            "type": self.__class__.__name__,
+            "c": self.c,
+            "t": self.t,
+        }

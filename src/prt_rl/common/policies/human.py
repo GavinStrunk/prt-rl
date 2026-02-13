@@ -1,11 +1,9 @@
 from enum import Enum, auto
-from pathlib import Path
 import threading
 import torch
 from typing import Dict, Tuple, Union
-from prt_rl.agent import AgentInterface
 
-class GameControllerAgent(AgentInterface):
+class GameControllerPolicy:
     """
     The game controller policy allows interactive control of an agent with discrete or continuous actions.
 
@@ -82,7 +80,6 @@ class GameControllerAgent(AgentInterface):
                 "The 'inputs' library is required for GameController but is not installed. "
                 "Please install it using 'pip install inputs'."
             ) from e
-        super(GameControllerAgent, self).__init__(policy=None)
         self.key_action_map = key_action_map
         self.blocking = blocking
         self.continuous = self.env_params.action_continuous
@@ -144,13 +141,6 @@ class GameControllerAgent(AgentInterface):
         obs['action'] = action_val.unsqueeze(0)
         return obs
     
-    def _save_impl(self, path: Union[str, Path]) -> None:
-        pass
-
-
-    def load(cls, path: Union[str, Path], map_location: Union[str, torch.device] = "cpu") -> "AgentInterface":
-        pass
-
     def _start_listener(self):
         """
         Starts an event listening thread that captures game controller inputs and updates the latest action values.
@@ -281,7 +271,7 @@ class GameControllerAgent(AgentInterface):
 
         return key_val
     
-class KeyboardAgent(AgentInterface):
+class KeyboardPolicy:
     """
     The keyboard policy allows interactive control of the agent using keyboard input.
 
@@ -322,7 +312,6 @@ class KeyboardAgent(AgentInterface):
                 "The 'pynput' library is required for KeyboardPolicy but is not installed. "
                 "Please install it using 'pip install pynput'."
             ) from e
-        super(KeyboardAgent, self).__init__(policy=None)
         self.keyboard = keyboard
         self.key_action_map = key_action_map
         self.blocking = blocking
@@ -370,12 +359,6 @@ class KeyboardAgent(AgentInterface):
 
         obs['action'] = torch.tensor([[action_val]])
         return obs
-    
-    def _save_impl(self, path: Union[str, Path]) -> None:
-        pass
-
-    def load(cls, path: Union[str, Path], map_location: Union[str, torch.device] = "cpu") -> "AgentInterface":
-        pass
     
     def _start_listener(self):
         """

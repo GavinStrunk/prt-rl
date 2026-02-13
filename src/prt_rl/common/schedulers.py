@@ -17,6 +17,42 @@ class ParameterScheduler(ABC):
         self.obj = obj
         self.parameter_name = parameter_name
 
+    def _resolve_target(self) -> tuple[object, str]:
+        """
+        Resolve the target object and final attribute/key from a dotted parameter path.
+
+        Examples:
+            parameter_name='epsilon' -> (obj, 'epsilon')
+            parameter_name='config.epsilon' -> (obj.config, 'epsilon')
+        """
+        path_parts = self.parameter_name.split(".")
+        target = self.obj
+        for part in path_parts[:-1]:
+            if isinstance(target, dict):
+                target = target[part]
+            else:
+                target = getattr(target, part)
+        return target, path_parts[-1]
+
+    def _set_value(self, value: float) -> None:
+        """
+        Set a scheduled value on either a direct field or a dotted path.
+        """
+        target, name = self._resolve_target()
+        if isinstance(target, dict):
+            target[name] = value
+        else:
+            setattr(target, name, value)
+
+    def get_value(self) -> float:
+        """
+        Get current value from either a direct field or a dotted path.
+        """
+        target, name = self._resolve_target()
+        if isinstance(target, dict):
+            return target[name]
+        return getattr(target, name)
+
     @abstractmethod
     def update(self,
                current_step: int
@@ -114,7 +150,7 @@ class LinearScheduler(ParameterScheduler):
                 self.current_value = max(self.current_value, self.end_value[i]) if self.rates[i] < 0 else min(self.current_value, self.end_value[i])
                 break
         
-        setattr(self.obj, self.parameter_name, self.current_value)
+        self._set_value(self.current_value)
 
     def check_intervals(self, intervals: list[tuple[int, int]]) -> None:
         """
@@ -177,4 +213,4 @@ class ExponentialScheduler(ParameterScheduler):
             current_step (int): Current step number
         """
         param_value = self.end_value + (self.start_value - self.end_value) * np.exp(-self.decay_rate * current_step)
-        setattr(self.obj, self.parameter_name, param_value)
+        self._set_value(param_value)

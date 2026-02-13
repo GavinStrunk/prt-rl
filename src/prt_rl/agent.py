@@ -8,7 +8,7 @@ import torch
 from typing import Optional, Union
 
 
-class AgentInterface(ABC):
+class Agent(ABC):
     """
     Base class for all agents in the PRT-RL framework.
     """
@@ -44,13 +44,13 @@ class AgentInterface(ABC):
         self._save_impl(path)
         return path
 
+    @abstractmethod
     def _save_impl(self, path: Path) -> None:
-        raise NotImplementedError
-    
+        raise NotImplementedError("The _save_impl method must be implemented by subclasses.")
+
     @classmethod
     @abstractmethod
-    def load(cls, path: str | Path, map_location: str | torch.device = "cpu") -> "AgentInterface":
+    def load(cls, path: str | Path, map_location: str | torch.device = "cpu") -> "Agent":
         raise NotImplementedError("The load method must be implemented by subclasses.")
     
     
-

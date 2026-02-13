@@ -1,3 +1,5 @@
-from .identity import IdentityEncoder
-from .mlp import MLPEncoder
 from .nature import NatureCNNEncoder
+
+__all__ = [
+    "NatureCNNEncoder"
+]

@@ -5,6 +5,19 @@ class EpsilonGreedy:
     def __init__(self):
         self.epsilon = 1.0
 
+class Config:
+    def __init__(self):
+        self.epsilon = 0.2
+        self.learning_rate = 3e-4
+
+class AgentWithConfig:
+    def __init__(self):
+        self.config = Config()
+
+class AgentWithDictConfig:
+    def __init__(self):
+        self.config = {"epsilon": 0.2}
+
 
 def test_linear_schedule():
     # Schedules parameter down
@@ -103,3 +116,31 @@ def test_sequential_updates():
     for _ in range(10):
         s.update(current_step=1)
     assert eg.epsilon == pytest.approx(0.19)
+
+def test_nested_object_path_schedule():
+    agent = AgentWithConfig()
+    s = sch.LinearScheduler(
+        obj=agent,
+        parameter_name='config.epsilon',
+        start_value=0.2,
+        end_value=0.1,
+        interval=10
+    )
+
+    s.update(current_step=5)
+    assert agent.config.epsilon == pytest.approx(0.15)
+    assert s.get_value() == pytest.approx(0.15)
+
+def test_nested_dict_path_schedule():
+    agent = AgentWithDictConfig()
+    s = sch.ExponentialScheduler(
+        obj=agent,
+        parameter_name='config.epsilon',
+        start_value=1.0,
+        end_value=0.1,
+        decay_rate=0.1
+    )
+
+    s.update(current_step=10)
+    assert agent.config['epsilon'] == pytest.approx(0.43109149705)
+    assert s.get_value() == pytest.approx(0.43109149705)

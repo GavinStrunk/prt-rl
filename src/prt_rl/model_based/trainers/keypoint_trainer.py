@@ -3,37 +3,14 @@ import torch
 from torch import Tensor
 from typing import Dict, List
 from prt_rl.common.buffers import ReplayBuffer
-from prt_rl.model_based.specs.representation import KeypointRepresentationSpec
-from prt_rl.model_based.models.representation.factory import RepresentationModelFactory
 from prt_rl.model_based.models.representation.keypoint import KeypointModel
 
-class KeypointModelFactory(RepresentationModelFactory[KeypointRepresentationSpec, KeypointModel]):
-    def make(self, env_params, spec):
-        return KeypointModel(env_params=env_params, spec=spec)
-
-    def save(self, env_params, spec, model, path):
-        torch.save({
-            'env_params': env_params,
-            'spec': spec,
-            'model_state_dict': model.state_dict(),
-        }, path)
-
-    def load(self, path, map_location="cpu"):
-        data = torch.load(path, map_location=map_location)
-        env_params = data['env_params']
-        spec = data['spec']
-        model = self.make(env_params, spec)
-        model.load_state_dict(data['model_state_dict'])
-        return model
 
 class KeypointModelTrainer:
   def __init__(self, 
-               keypoint_model_spec: KeypointRepresentationSpec
+               keypoint_model: KeypointModel
                ) -> None:
-    self.model_spec = keypoint_model_spec
-    
-    # Make a KeypointModel based on the spec
-    self.model = KeypointModelFactory().make(self.env_params, keypoint_model_spec)
+    self.model = keypoint_model
     
   def train(self,
             replay_buffer: ReplayBuffer
@@ -41,7 +18,7 @@ class KeypointModelTrainer:
     self._validate_replay_buffer(replay_buffer)
 
   def save(self, path: str | Path) -> None:
-    KeypointModelFactory().save(self.env_params, self.model_spec, self.model, path)
+    pass
 
   def _validate_replay_buffer(self, replay_buffer: ReplayBuffer) -> None:
     # Check the EnvParams are in the replay buffer metadata
