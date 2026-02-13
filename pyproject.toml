@@ -1,6 +1,6 @@
 [project]
 name = "prt-rl"
-version = "0.6.1"
+version = "0.6.2"
 description = "Python Research Toolkit - Reinforcement Learning"
 readme = "README.md"
 authors = [
