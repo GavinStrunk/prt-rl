@@ -16,6 +16,9 @@ class FakeLogger:
     def _by_name(self, name):
         """Return list of (value, iteration) for a metric name."""
         return [(v, it) for (n, v, it) in self.scalars if n == name]
+    
+    def should_log(self, iteration):
+        return True
 
 
 @pytest.fixture
