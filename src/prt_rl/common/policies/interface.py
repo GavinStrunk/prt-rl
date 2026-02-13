@@ -17,11 +17,6 @@ class Policy(Protocol):
         """Return an action tensor and auxiliary policy outputs."""
         ...
 
-    def reset(self, batch_size: Optional[int] = None) -> None:
-        """Reset optional policy state (e.g., recurrent hidden state)."""
-        ...
-
-
 class NeuralPolicy(torch.nn.Module, ABC):
     """
     Base class for torch-backed policies.
@@ -33,9 +28,6 @@ class NeuralPolicy(torch.nn.Module, ABC):
     def act(self, obs: Tensor, deterministic: bool = False) -> Tuple[Tensor, Dict[str, Tensor]]:
         """Return an action tensor and auxiliary policy outputs."""
         raise NotImplementedError
-
-    def reset(self, batch_size: Optional[int] = None) -> None:
-        return
 
     @property
     def device(self) -> torch.device:
@@ -71,9 +63,6 @@ class TabularPolicy(ABC):
     def act(self, obs: Tensor, deterministic: bool = False) -> Tuple[Tensor, Dict[str, Tensor]]:
         """Return an action tensor and auxiliary policy outputs."""
         raise NotImplementedError
-
-    def reset(self, batch_size: Optional[int] = None) -> None:
-        return
 
     @property
     def device(self) -> torch.device:

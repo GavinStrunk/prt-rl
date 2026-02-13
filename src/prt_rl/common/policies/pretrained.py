@@ -1,9 +1,6 @@
-from pathlib import Path
 import torch
-from typing import Union
-from prt_rl.agent import AgentInterface
 
-class SB3Agent(AgentInterface):
+class SB3Policy:
     """
     Stable Baselines3 (SB3) agent for reinforcement learning. 
     
@@ -28,7 +25,6 @@ class SB3Agent(AgentInterface):
                  device: str = "cpu",
                  **kwargs
                  ) -> None:
-        super().__init__()  # SB3Agent does not use a separate policy, it uses the model directly
         self.device = torch.device(device)
 
         try:
@@ -105,9 +101,3 @@ class SB3Agent(AgentInterface):
         else:
             action = torch.tensor(action, device=self.device)
         return action
-
-    def _save_impl(self, path: Union[str, Path]) -> None:
-        pass
-
-    def load(cls, path: Union[str, Path], map_location: Union[str, torch.device] = "cpu") -> "AgentInterface":
-        pass

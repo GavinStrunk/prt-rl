@@ -94,10 +94,11 @@ class MetricsTracker:
                 # Log the episode metrics if a logger is provided
                 if self.logger is not None:
                     step = self.collected_steps
-                    self.logger.log_scalar("episode_reward", ep_r, iteration=step)
-                    self.logger.log_scalar("episode_length", ep_L, iteration=step)
-                    self.logger.log_scalar("cumulative_reward", float(self.cumulative_reward), iteration=step)
-                    self.logger.log_scalar("episode_number", float(self.episode_count), iteration=step)
+                    if self.logger.should_log(step):
+                        self.logger.log_scalar("episode_reward", ep_r, iteration=step)
+                        self.logger.log_scalar("episode_length", ep_L, iteration=step)
+                        self.logger.log_scalar("cumulative_reward", float(self.cumulative_reward), iteration=step)
+                        self.logger.log_scalar("episode_number", float(self.episode_count), iteration=step)
 
                 # Clear accumulators for that env
                 self._cur_reward[i] = 0.0
