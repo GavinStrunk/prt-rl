@@ -1,10 +1,9 @@
-"""
-General policies that are applicable across various reinforcement learning algorithms.
-"""
-from .interface import Policy, InfoDict
+"""General policies that are applicable across reinforcement learning algorithms."""
+
+from .interface import NeuralPolicy, Policy, TabularPolicy
 
 __all__ = [
     "Policy",
-    "InfoDict",
-    "PolicyFactory",
+    "NeuralPolicy",
+    "TabularPolicy",
 ]

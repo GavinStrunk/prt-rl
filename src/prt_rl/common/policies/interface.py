@@ -1,52 +1,44 @@
-"""
-Base class for implementing policy modules.
-"""
+"""Policy interfaces used across algorithms."""
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import Dict, Optional, Protocol, Tuple, Union, runtime_checkable, TypeVar, Type, Any
+
 import torch
 from torch import Tensor
-from typing import Tuple, Optional, Dict, Union
+from prt_rl.common.decision_functions import DecisionFunction
 
-InfoDict = Dict[str, Tensor]
+T = TypeVar("T", bound="TabularPolicy")
 
-class Policy(torch.nn.Module, ABC):
+@runtime_checkable
+class Policy(Protocol):
+    """Runtime acting interface consumed by collectors."""
+
+    def act(self, obs: Tensor, deterministic: bool = False) -> Tuple[Tensor, Dict[str, Tensor]]:
+        """Return an action tensor and auxiliary policy outputs."""
+        ...
+
+    def reset(self, batch_size: Optional[int] = None) -> None:
+        """Reset optional policy state (e.g., recurrent hidden state)."""
+        ...
+
+
+class NeuralPolicy(torch.nn.Module, ABC):
     """
-    Minimal runtime policy API used by collectors.
+    Base class for torch-backed policies.
 
-    - Must be an nn.Module (so .to(), .parameters(), etc.)
-    - act() returns (action, info_dict). info_dict can include "log_prob", "value", etc.
-    - reset() is optional for RNN state.
+    Implements the Policy protocol and adds utility methods for saving/loading and device management.
     """
+
     @abstractmethod
-    def act(self, obs: Tensor, deterministic: bool = False) -> Tuple[Tensor, InfoDict]:
-        """
-        Given an observation, return an action and an info dictionary. Commone keys in the info dictionary include "log_prob" and "value".
-        
-        Args:
-            obs (Tensor): The observation tensor.
-            deterministic (bool): Whether to use deterministic actions.
-        Returns:
-            Tuple[Tensor, InfoDict]: A tuple containing the action tensor and an info dictionary.
-        """
+    def act(self, obs: Tensor, deterministic: bool = False) -> Tuple[Tensor, Dict[str, Tensor]]:
+        """Return an action tensor and auxiliary policy outputs."""
         raise NotImplementedError
 
     def reset(self, batch_size: Optional[int] = None) -> None:
-        """
-        Reset any internal state (e.g., RNN hidden states). If batch_size is provided, reset for that batch size.
-        
-        Args:
-            batch_size (Optional[int]): The batch size for resetting internal states.
-        """
         return
 
     @property
     def device(self) -> torch.device:
-        """
-        Returns the device on which the module's parameters or buffers are located.
-        
-        Returns:
-            torch.device: The device of the module.
-        """
         for p in self.parameters():
             return p.device
         for b in self.buffers():
@@ -54,13 +46,6 @@ class Policy(torch.nn.Module, ABC):
         return torch.device("cpu")
 
     def save(self, path: Union[str, Path]) -> None:
-        """
-        Save a fully-constructed policy module.
-
-        Note:
-            This uses PyTorch module pickling, so loading requires the policy
-            class to be importable in the runtime.
-        """
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         torch.save(self, Path(path))
 
@@ -69,11 +54,69 @@ class Policy(torch.nn.Module, ABC):
         cls,
         path: Union[str, Path],
         map_location: str | torch.device = "cpu",
-    ) -> "Policy":
-        """
-        Load a policy saved with `Policy.save`.
-        """
+    ) -> "NeuralPolicy":
         policy = torch.load(Path(path), map_location=map_location, weights_only=False)
         if not isinstance(policy, cls):
             raise TypeError(f"Loaded policy type {type(policy)} is not an instance of {cls}.")
         return policy.to(map_location)
+
+
+class TabularPolicy(ABC):
+    """Base class for tabular policies (non-Module)."""
+    def __init__(self, table: Tensor, decision_function: DecisionFunction) -> None:
+        self.table = table
+        self.decision_function = decision_function
+
+    @abstractmethod
+    def act(self, obs: Tensor, deterministic: bool = False) -> Tuple[Tensor, Dict[str, Tensor]]:
+        """Return an action tensor and auxiliary policy outputs."""
+        raise NotImplementedError
+
+    def reset(self, batch_size: Optional[int] = None) -> None:
+        return
+
+    @property
+    def device(self) -> torch.device:
+        return self.table.device
+
+    @property
+    def dtype(self) -> torch.dtype:
+        return self.table.dtype
+
+    def to(self: T, device: torch.device | str, dtype: Optional[torch.dtype] = None) -> T:
+        self.table = self.table.to(device=device, dtype=dtype if dtype is not None else self.table.dtype)
+        return self
+
+    def clone(self: T) -> T:
+        # create a new instance of the same class with a cloned table
+        return type(self).from_snapshot(self.snapshot().copy())  # uses your snapshot contract
+
+    # ---- Serialization (non-Module naming) ----
+    def snapshot(self) -> Dict[str, Any]:
+        """
+        Return a serializable snapshot.
+
+        Subclasses can extend this by `snap = super().snapshot(); snap[...] = ...`.
+        """
+        return {
+            "type": type(self).__name__,
+            "format_version": 1,
+            "table": self.table,
+            "decision_function": self.decision_function.to_dict(),
+        }
+
+    @classmethod
+    def from_snapshot(cls: Type[T], snapshot: Dict[str, Any]) -> T:
+        # Base restores only `table`. Subclasses can override if they add fields.
+        table = snapshot["table"]
+        decision_function = DecisionFunction.from_dict(snapshot["decision_function"])
+        return cls(table=table, decision_function=decision_function)  # type: ignore[arg-type]
+
+    def save(self, path: str) -> None:
+        torch.save(self.snapshot(), path)
+
+    @classmethod
+    def load(cls: Type[T], path: str, map_location: Optional[torch.device | str] = None) -> T:
+        snap = torch.load(path, map_location=map_location)
+        # If you want, enforce type match here.
+        return cls.from_snapshot(snap)

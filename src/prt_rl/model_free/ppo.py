@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 import torch.nn.functional as F
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 from prt_rl.agent import Agent
 from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.common.collectors import Collector
@@ -22,7 +22,7 @@ from prt_rl.common.progress_bar import ProgressBar
 from prt_rl.common.evaluators import Evaluator
 import prt_rl.common.utils as utils
 
-import prt_rl.common.policies as pmod
+from prt_rl.common.policies import NeuralPolicy
 from prt_rl.common.components.heads.interface import DistributionHead
 from prt_rl.common.components.heads import ValueHead
 
@@ -59,7 +59,7 @@ class PPOConfig:
     normalize_advantages: bool = False
 
 # Define the Policy Interface
-class PPOPolicy(pmod.Policy):
+class PPOPolicy(NeuralPolicy):
     """
     PPOPolicy is a policy that combines an actor and a critic network. It can optionally use an encoder network to process the input state before passing it to the actor and critic heads.
 
@@ -97,7 +97,7 @@ class PPOPolicy(pmod.Policy):
     def act(self,
             obs: torch.Tensor,
             deterministic: bool = False
-            ) -> Tuple[torch.Tensor, pmod.InfoDict]:
+            ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """
         Returns action + info dict.
 
