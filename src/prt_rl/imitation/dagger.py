@@ -1,44 +1,17 @@
 """
 DAgger: Dataset Aggregation from Demonstrations
-===============================================
 
 DAgger is an imitation learning method that leverages an expert to provide the true label for the best action to take in a given state. The action labeling procedure can be done using a human expert or another expert algorithm. Using the expert, DAgger proceeds to learn in a supervised fashion.
-
-.. pcode::
-   :linenos:
-
-    % This quicksort algorithm is extracted from Chapter 7, Introduction to Algorithms (3rd edition)
-    \begin{algorithm}
-    \caption{Quicksort}
-    \begin{algorithmic}
-    \PROCEDURE{Quicksort}{$A, p, r$}
-        \IF{$p < r$}
-            \STATE $q = $ \CALL{Partition}{$A, p, r$}
-            \STATE \CALL{Quicksort}{$A, p, q - 1$}
-            \STATE \CALL{Quicksort}{$A, q + 1, r$}
-        \ENDIF
-    \ENDPROCEDURE
-    \PROCEDURE{Partition}{$A, p, r$}
-        \STATE $x = A[r]$
-        \STATE $i = p - 1$
-        \FOR{$j = p$ \TO $r - 1$}
-            \IF{$A[j] < x$}
-                \STATE $i = i + 1$
-                \STATE exchange
-                $A[i]$ with     $A[j]$
-            \ENDIF
-            \STATE exchange $A[i]$ with $A[r]$
-        \ENDFOR
-    \ENDPROCEDURE
-    \end{algorithmic}
-    \end{algorithm}
-
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+from pathlib import Path
 import numpy as np
 import torch
-from typing import Optional, List
-from prt_rl.agent import AgentInterface
+from torch import nn, Tensor
+from typing import Any, Optional, List, Tuple, Dict, Union
+from prt_rl.agent import Agent
+from prt_rl.common.policies import NeuralPolicy, Policy
+from prt_rl.common.components.heads import DistributionHead, CategoricalHead, GaussianHead
 from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.loggers import Logger
@@ -46,9 +19,7 @@ from prt_rl.common.progress_bar import ProgressBar
 from prt_rl.common.evaluators import Evaluator
 
 from prt_rl.common.buffers import ReplayBuffer
-from prt_rl.common.collectors import SequentialCollector
-from prt_rl.common.policies import DistributionPolicy
-from prt_rl.common.distributions import Categorical, Normal
+from prt_rl.common.collectors import Collector
 
 
 @dataclass
@@ -165,7 +136,32 @@ class DAggerConfig:
     mini_batch_size: int = 32
     max_grad_norm: float = 10.0
 
-class DAgger(AgentInterface):
+class DAggerPolicy(NeuralPolicy):
+    """
+    DAgger Policy class that inherits from NeuralPolicy. This class can be extended to implement specific architectures for the DAgger agent's policy.
+    """
+    def __init__(self,
+                 network: nn.Module,
+                 distribution_head: DistributionHead,
+                 ):
+        super().__init__()
+        self.network = network
+        self.distribution_head = distribution_head
+
+    @torch.no_grad()
+    def act(self, obs: Tensor, deterministic: bool = False) -> Tuple[Tensor, Dict[str, Tensor]]:
+        latent = self.network(obs)
+
+        action, log_prob, _ = self.distribution_head.sample(latent, deterministic=deterministic)
+        return action, {"log_prob": log_prob}
+    
+    def forward(self, obs: Tensor, deterministic: bool = False) -> Tensor:
+        latent = self.network(obs)
+
+        action, _, _ = self.distribution_head.sample(latent, deterministic=deterministic)
+        return action
+
+class DAggerAgent(Agent):
     r"""
     Dataset Aggregation from Demonstrations (DAgger) agent.
 
@@ -196,69 +192,45 @@ class DAgger(AgentInterface):
 
     Args:
         policy (DistributionPolicy | None): The policy to be used by the agent. If None, a default policy will be created based on the environment parameters.
-        expert_policy (BaseAgent): The expert agent to provide actions for the states.
+        expert_policy (Policy): The expert policy to provide actions for the states.
         experience_buffer (ReplayBuffer): The replay buffer to store experiences.        
         device (str): Device to run the agent on (e.g., 'cpu' or 'cuda'). Default is 'cpu'.
     """
     def __init__(self,
-                 expert_policy: AgentInterface,
+                 expert_policy: Policy,
                  experience_buffer: ReplayBuffer,                 
-                 policy: DistributionPolicy,
+                 policy: DAggerPolicy,
                  config: DAggerConfig = DAggerConfig(),
+                 *,
                  device: str = 'cpu',
                  ) -> None:
-        super(DAgger, self).__init__()
-        self.expert_policy = expert_policy
-        self.experience_buffer = experience_buffer
-        self.config = config
-        self.device = torch.device(device)
+        super().__init__(device=device)
 
-        self.policy = policy
-        self.policy.to(self.device)
+        self.expert_policy = expert_policy.to(self.device) if hasattr(expert_policy, "to") else expert_policy
+        self.experience_buffer = experience_buffer
+        self.policy = policy.to(self.device)
+        self.config = config
 
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.config.learning_rate)
-        self.loss_function = self._get_loss_function(self.policy)
 
-    @staticmethod
-    def _get_loss_function(policy: DistributionPolicy) -> torch.nn.Module:
-        """
-        Returns the loss function used for training the policy based on the type of distribution.
-
-        Args:
-            policy (DistributionPolicy): The policy for which to get the loss function.
-        Returns:
-            torch.nn.Module: The loss function to be used for training.
-        Raises:
-            ValueError: If the distribution type is not supported.
-        """
-        if issubclass(policy.distribution, Categorical):
-            # For categorical distributions, use CrossEntropyLoss
-            return torch.nn.CrossEntropyLoss()
-        elif issubclass(policy.distribution, Normal):
-            # For continuous distributions, use MSELoss
-            return torch.nn.MSELoss()
+        # Set the loss function based on the distribution type of the policy's distribution head
+        if isinstance(self.policy.distribution_head, CategoricalHead):
+            self.loss_function = self._categorical_loss
+        elif isinstance(self.policy.distribution_head, GaussianHead):
+            self.loss_function = self._gaussian_loss
         else:
-            raise ValueError(f"Unsupported distribution type {policy.distribution.__class__} loss function.")
-    
-    def predict(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
-        """
-        Perform an action based on the current state using the policy.
-        
-        Args:
-            state: The current state of the environment.
-        
-        Returns:
-            The action to be taken by the policy.
-        """
-        with torch.no_grad():
-            return self.policy(state, deterministic=deterministic)
+            raise ValueError(f"Unsupported distribution type {self.policy.distribution_head.__class__} loss function.")
+
+    @torch.no_grad()
+    def act(self, obs: Tensor, deterministic: bool = False) -> Tensor:
+        return self.policy(obs, deterministic=deterministic)
     
     def train(self,
               env: EnvironmentInterface,
               total_steps: int,
-              schedulers: List[ParameterScheduler] = [],              
+              schedulers: Optional[List[ParameterScheduler]] = None,              
               logger: Optional[Logger] = None,
-              evaluator: Evaluator = Evaluator(),
+              evaluator: Optional[Evaluator] = None,
               show_progress: bool = True
               ) -> None:
         """
@@ -267,12 +239,12 @@ class DAgger(AgentInterface):
         Args:
             env (EnvironmentInterface): The environment in which the agent will operate.
             total_steps (int): Total number of training steps to perform.
-            schedulers (List[ParameterScheduler]): List of parameter schedulers to update during training.
+            schedulers (Optional[List[ParameterScheduler]]): List of parameter schedulers to update during training.
             logger (Optional[Logger]): Logger for logging training progress. If None, a default logger will be created.
-            evaluator (Evaluator): Evaluator to evaluate the agent periodically.
+            evaluator (Optional[Evaluator]): Evaluator to evaluate the agent periodically.
             show_progress (bool): If True, show a progress bar during training.
         """
-        logger = logger or Logger.create('blank')
+        logger = logger or Logger()
 
         if show_progress:
             progress_bar = ProgressBar(total_steps=total_steps)
@@ -281,24 +253,29 @@ class DAgger(AgentInterface):
         self.experience_buffer.resize(new_capacity=self.experience_buffer.size + self.config.buffer_size)
 
         # Add initial experience to the replay buffer
-        collector = SequentialCollector(env=env, logger=logger)
+        collector = Collector(env=env, logger=logger)
 
         num_steps = 0
 
         while num_steps < total_steps:
             # Update schedulers if any
-            for scheduler in schedulers:
-                scheduler.update(current_step=num_steps)
+            if schedulers is not None:
+                for scheduler in schedulers:
+                    scheduler.update(current_step=num_steps)
 
             # Collect experience using the current policy
             policy_experience = collector.collect_experience(policy=self.policy, num_steps=self.config.batch_size)
             num_steps += policy_experience['state'].shape[0]
 
             # Get expert action for each state in the collected experience
-            expert_actions = self.expert_policy(policy_experience['state'])
+            expert_actions, _ = self.expert_policy.act(policy_experience['state'], deterministic=True)
 
             # Update the policy experience with expert actions
             policy_experience['action'] = expert_actions
+
+            # Remove log_prob from policy_experience as it is not needed for training
+            if 'log_prob' in policy_experience:
+                del policy_experience['log_prob']
 
             # Add the policy experience to the replay buffer
             self.experience_buffer.add(policy_experience)
@@ -308,13 +285,7 @@ class DAgger(AgentInterface):
             for _ in range(self.config.optim_steps):
                 for batch in self.experience_buffer.get_batches(batch_size=self.config.mini_batch_size):
                     # Compute the loss between the policy's actions and the expert's actions
-                    if issubclass(self.policy.distribution, Categorical):
-                        policy_logits = self.policy.get_logits(batch['state'])
-                        loss = self.loss_function(policy_logits, batch['action'].squeeze(1))
-                    else:
-                        policy_actions = self.policy(batch['state'])
-                        loss = self.loss_function(policy_actions, batch['action'])
-
+                    loss = self.loss_function(batch['state'], batch['action'])
                     losses.append(loss.item())
 
                     self.optimizer.zero_grad()
@@ -340,3 +311,68 @@ class DAgger(AgentInterface):
 
         if evaluator is not None:
             evaluator.close()
+
+    def _categorical_loss(self, state: Tensor, action: Tensor) -> Tensor:
+        latent = self.policy.network(state)
+        logits = self.policy.distribution_head.get_logits(latent)
+        loss = torch.nn.functional.cross_entropy(logits, action.squeeze(1))
+        return loss
+    
+    def _gaussian_loss(self, state: Tensor, action: Tensor) -> Tensor:
+        pred_action = self.policy(state)
+        loss = torch.nn.functional.mse_loss(pred_action, action)
+        return loss
+
+    def _save_impl(self, path: Path) -> None:
+        """
+        Writes a self-contained checkpoint directory.
+
+        Layout:
+          path/
+            agent.pt
+            policy.pt
+        """
+        path.mkdir(parents=True, exist_ok=True)
+
+        payload = {
+            "algo": "DAgger",
+            "agent_format_version": 1,
+            "config": asdict(self.config),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+        }
+        torch.save(payload, path / "agent.pt")
+        self.policy.save(path / "policy.pt")
+
+
+    @classmethod
+    def load(
+        cls,
+        path: str | Path,
+        expert_policy: Policy,
+        experience_buffer: ReplayBuffer,
+        map_location: str | torch.device = "cpu"
+    ) -> "DAggerAgent":
+        """
+        Loads the checkpoint and returns a fully-constructed DAggerAgent.
+        """
+        p = Path(path)
+        agent_meta = torch.load(p / "agent.pt", map_location=map_location, weights_only=False)
+
+        if agent_meta.get("algo") != "DAgger":
+            raise ValueError(f"Checkpoint algo mismatch: expected DAgger, got {agent_meta.get('algo')}")
+
+        config = DAggerConfig(**agent_meta["config"])
+        policy = DAggerPolicy.load(p / "policy.pt", map_location=map_location)
+
+        agent = cls(
+            expert_policy=expert_policy,
+            experience_buffer=experience_buffer,
+            policy=policy,
+            config=config,
+            device=str(map_location),
+        )
+
+        opt_state = agent_meta["optimizer_state_dict"]
+        agent.optimizer.load_state_dict(opt_state)
+
+        return agent             

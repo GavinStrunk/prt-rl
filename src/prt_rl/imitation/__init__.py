@@ -1,5 +1,7 @@
-from .dagger import DAgger
+from .dagger import DAggerAgent, DAggerConfig, DAggerPolicy
 
 __all__ = [
-    "DAgger",
+    "DAggerAgent",
+    "DAggerConfig",
+    "DAggerPolicy",
 ]

@@ -9,7 +9,6 @@ class DistributionHead(ABC, nn.Module):
     Interface for distribution heads that output a distribution over actions.
     """
     @abstractmethod
-    @torch.no_grad()
     def sample(self, latent: Tensor, deterministic: bool = False) -> Tuple[Tensor, Tensor, Tensor]:
         """
         Sample an action from the distribution given the latent representation.

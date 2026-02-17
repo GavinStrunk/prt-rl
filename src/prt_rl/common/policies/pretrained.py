@@ -100,4 +100,4 @@ class SB3Policy:
             action = torch.tensor(action, device=self.device).unsqueeze(-1)
         else:
             action = torch.tensor(action, device=self.device)
-        return action
+        return action, {}
