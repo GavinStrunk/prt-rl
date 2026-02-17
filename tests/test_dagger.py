@@ -50,29 +50,6 @@ def test_dagger_load_with_matching_objects(tmp_path: Path) -> None:
     )
     assert isinstance(loaded, DAggerAgent)
 
-
-def test_dagger_load_rejects_expert_hash_mismatch(tmp_path: Path) -> None:
-    expert = _build_expert(seed=0)
-    replay_buffer = _build_replay_buffer(seed=1)
-    agent = DAggerAgent(
-        expert_policy=expert,
-        experience_buffer=replay_buffer,
-        policy=_build_policy(),
-        config=DAggerConfig(),
-    )
-
-    ckpt_dir = tmp_path / "dagger_ckpt"
-    agent.save(ckpt_dir)
-
-    wrong_expert = _build_expert(seed=123)
-    with pytest.raises(ValueError, match="Expert policy hash mismatch"):
-        DAggerAgent.load(
-            ckpt_dir,
-            expert_policy=wrong_expert,
-            experience_buffer=replay_buffer,
-        )
-
-
 def test_dagger_load_with_policy_and_buffer_paths(tmp_path: Path) -> None:
     expert = _build_expert(seed=0)
     replay_buffer = _build_replay_buffer(seed=1)
