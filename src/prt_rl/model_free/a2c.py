@@ -1,14 +1,16 @@
 """
 Implementation of the Advantage Actor-Critic (A2C) algorithm.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
-from typing import Optional, List, Tuple
-from prt_rl.agent import AgentInterface
-from prt_rl.env.interface import EnvParams, EnvironmentInterface
-from prt_rl.common.collectors import ParallelCollector
+from torch import nn, Tensor
+from typing import Optional, List, Tuple, Dict
+from prt_rl.agent import Agent
+from prt_rl.env.interface import EnvironmentInterface
+from prt_rl.common.collectors import Collector
 from prt_rl.common.buffers import RolloutBuffer
 from prt_rl.common.loggers import Logger
 from prt_rl.common.schedulers import ParameterScheduler
@@ -17,10 +19,8 @@ from prt_rl.common.evaluators import Evaluator
 import prt_rl.common.utils as utils
 
 import copy
-from prt_rl.common.networks import BaseEncoder
-from prt_rl.common.policies.base import BasePolicy
-from prt_rl.common.policies.distribution import DistributionPolicy
-from prt_rl.common.policies.value_critic import ValueCritic
+from prt_rl.common.policies import NeuralPolicy
+from prt_rl.common.components.heads import DistributionHead, ValueHead
 
 @dataclass
 class A2CConfig:
@@ -32,7 +32,6 @@ class A2CConfig:
         mini_batch_size (int): Size of each mini-batch for optimization.
         learning_rate (float): Learning rate for the optimizer.
         gamma (float): Discount factor for future rewards.
-        epsilon (float): Clipping parameter for PPO (not used in A2C).
         gae_lambda (float): Lambda parameter for Generalized Advantage Estimation.
         entropy_coef (float): Coefficient for the entropy bonus.
         value_coef (float): Coefficient for the value loss.
@@ -42,104 +41,75 @@ class A2CConfig:
     mini_batch_size: int = 32
     learning_rate: float = 3e-4
     gamma: float = 0.99
-    epsilon: float = 0.1
     gae_lambda: float = 0.95
     entropy_coef: float = 0.01
     value_coef: float = 0.5
+    max_grad_norm: float = 0.5
     normalize_advantages: bool = False
 
-class A2CPolicy(BasePolicy):
+class A2CPolicy(NeuralPolicy):
     def __init__(self,
-                 env_params: EnvParams,
-                 encoder: BaseEncoder | None = None,
-                 actor: DistributionPolicy | None = None,
-                 critic: ValueCritic | None = None,
-                 share_encoder: bool = False,
+                 network: nn.Module,
+                 actor_head: DistributionHead,
+                 critic_head: ValueHead,
                  ) -> None:
-        super().__init__(env_params=env_params)
-        self.env_params = env_params
-        self.encoder = encoder
-        self.critic_encoder = None
-        self.share_encoder = share_encoder
-        
-        # If no actor is provided, create a default DistributionPolicy without an encoder
-        if actor is None:
-            self.actor = DistributionPolicy(
-                env_params=env_params,
-            )
-        else:
-            self.actor = actor
-
-        # If no critic is provided, create a default ValueCritic without an encoder
-        if critic is None:
-            self.critic = ValueCritic(
-                env_params=env_params,
-            )
-        else:
-            self.critic = critic
-
-        # If the encoder is not shared, but one exists then make a copy for the critic
-        if not share_encoder and self.encoder is not None:
-            self.critic_encoder = copy.deepcopy(self.encoder)  
+        super().__init__()
+        self.network = network
+        self.actor_head = actor_head
+        self.critic_head = critic_head
     
-    def predict(self,
-                   state: torch.Tensor,
-                   deterministic: bool = False
-                   ) -> Tuple[torch.Tensor, torch.Tensor]:
+    @torch.no_grad()
+    def act(self,
+            obs: torch.Tensor,
+            deterministic: bool = False
+            ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """
-        Chooses an action based on the current state and computes the value of the state.
+        Returns action + info dict.
 
-        Args:
-            state (torch.Tensor): Current state tensor.
-            deterministic (bool): If True, choose the action deterministically. Default is False.
+        Info dict keys (typical):
+          - "log_prob": (B,1)
+          - "value":    (B,1)
+        """        
+        latent = self.network(obs)
 
-        Returns:
-            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the chosen action, value_estimate, and aciton log probability.
+        action, log_prob, _ = self.actor_head.sample(latent, deterministic=deterministic)
+        value = self.critic_head(latent)
+
+        return action, {"log_prob": log_prob, "value": value}
+    
+    def forward(self,
+                obs: torch.Tensor,
+                deterministic: bool = False
+                ) -> torch.Tensor:
         """
-        if self.encoder is not None:
-            latent_state = self.encoder(state)
-        else:
-            latent_state = state
-
-        action, _, log_probs = self.actor.predict(latent_state, deterministic=deterministic)
-
-        if self.critic_encoder is not None:
-            critic_latent_state = self.critic_encoder(state)
-        else:
-            critic_latent_state = latent_state
-
-        value = self.critic(critic_latent_state) 
-        return action, value, log_probs
+        Convenience: treat the policy like a normal nn.Module that outputs actions.
+        Collectors should call act() instead to get info dict.
+        """        
+        action, _ = self.act(obs, deterministic=deterministic)
+        return action    
     
     def evaluate_actions(self,
-                         state: torch.Tensor,
+                         obs: torch.Tensor,
                          action: torch.Tensor
                         ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Evaluates the value, log probability and entropy of the given action under the policy.
-        Args:
-            state (torch.Tensor): Current state tensor.
-            action (torch.Tensor): Action tensor to evaluate.
+        Used during A2C optimization.
+
         Returns:
-            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the value estimate, log probability, and entropy. All tensors have shape (B, 1).
+          value:    (B,1)
+          log_prob: (B,1)
+          entropy:  (B,1)
         """
-        if self.encoder is not None:
-            latent_state = self.encoder(state)
-        else:
-            latent_state = state
-        
-        log_probs, entropy = self.actor.evaluate_actions(latent_state, action)
+        latent = self.network(obs)
+        value = self.critic_head(latent)
 
-        if self.critic_encoder is not None:
-            critic_latent_state = self.critic_encoder(state)
-        else:
-            critic_latent_state = latent_state
-        
-        value = self.critic(critic_latent_state)
+        # Compute log probabilities and entropy for the entire action vector
+        log_prob = self.actor_head.log_prob(latent, action)
+        entropy = self.actor_head.entropy(latent)
 
-        return value, log_probs, entropy
+        return value, log_prob, entropy
 
-class A2C(AgentInterface):
+class A2CAgent(Agent):
     """
     Advantage Actor-Critic (A2C) agent implementation.
     
@@ -164,22 +134,10 @@ class A2C(AgentInterface):
         # Configure optimizers
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.config.learning_rate)   
 
-    def predict(self, 
-                state: torch.Tensor, 
-                deterministic: bool = False
-                ) -> torch.Tensor:
-        """
-        Predict the action based on the current state.
-
-        Args:
-            state (torch.Tensor): Current state of the environment.
-            deterministic (bool): If True, use the deterministic policy. Otherwise, sample from the policy.
-
-        Returns:
-            torch.Tensor: Predicted action.
-        """
-        with torch.no_grad():
-            return self.policy(state, deterministic=deterministic)  
+    @torch.no_grad()
+    def act(self, obs: Tensor, deterministic: bool = False) -> Tensor:
+        action, _ = self.policy.act(obs, deterministic=deterministic)
+        return action
     
     def train(self,
               env: EnvironmentInterface,
@@ -190,17 +148,17 @@ class A2C(AgentInterface):
               show_progress: bool = True
               ) -> None:
         """
-        Train the PPO agent.
+        Train the A2C agent.
 
         Args:
             env (EnvironmentInterface): The environment to train on.
             total_steps (int): Total number of steps to train for.
             schedulers (Optional[List[ParameterScheduler]]): Learning rate schedulers.
             logger (Optional[Logger]): Logger for training metrics.
-            evaluator (Optional[Any]): Evaluator for performance evaluation.
+            evaluator (Optional[Evaluator]): Evaluator for performance evaluation.
             show_progress (bool): If True, show a progress bar during training.
         """
-        logger = logger or Logger.create('blank')
+        logger = logger or Logger()
 
         if show_progress:
             progress_bar = ProgressBar(total_steps=total_steps)
@@ -208,7 +166,7 @@ class A2C(AgentInterface):
         num_steps = 0
 
         # Make collector and do not flatten the experience so the shape is (N, T, ...)
-        collector = ParallelCollector(env=env, logger=logger, flatten=False)
+        collector = Collector(env=env, logger=logger, flatten=False)
         rollout_buffer = RolloutBuffer(capacity=self.config.steps_per_batch, device=self.device)
 
         while num_steps < total_steps:
@@ -217,22 +175,23 @@ class A2C(AgentInterface):
                 for scheduler in schedulers:
                     scheduler.update(current_step=num_steps)
 
+            # Update learning rate for optimizer
+            for pg in self.optimizer.param_groups:
+                pg["lr"] = self.config.learning_rate
+
             # Collect experience dictionary with shape (N, T, ...)
             experience = collector.collect_experience(policy=self.policy, num_steps=self.config.steps_per_batch)
 
             # Compute Advantages and Returns under the current policy
             advantages, returns = utils.generalized_advantage_estimates(
                 rewards=experience['reward'],
-                values=experience['value_est'],
+                values=experience['value'],
                 dones=experience['done'],
                 last_values=experience['last_value_est'],
                 gamma=self.config.gamma,
                 gae_lambda=self.config.gae_lambda
             )
             
-            if self.config.normalize_advantages:
-                advantages = utils.normalize_advantages(advantages)
-
             experience['advantages'] = advantages.detach()
             experience['returns'] = returns.detach()
 
@@ -252,8 +211,11 @@ class A2C(AgentInterface):
                 advantages = batch['advantages'].detach()
                 returns = batch['returns'].detach()
 
+                if self.config.normalize_advantages:
+                    advantages = utils.normalize_advantages(advantages)
+
                 # Get the log probability and entropy of the actions under the current policy
-                new_log_prob, entropy = self.policy.evaluate_actions(batch['state'], batch['action'])
+                new_value_est, new_log_prob, entropy = self.policy.evaluate_actions(batch['state'], batch['action'])
                 
                 policy_loss = self._compute_policy_loss(new_log_prob, advantages)
 
@@ -261,7 +223,6 @@ class A2C(AgentInterface):
                 entropy_loss = -entropy.mean()
 
                 # Compute the value loss function
-                new_value_est = self.policy.get_state_value(batch['state'])
                 value_loss = F.mse_loss(new_value_est, returns)
 
                 loss = policy_loss + self.config.entropy_coef*entropy_loss + self.config.value_coef * value_loss
@@ -274,7 +235,7 @@ class A2C(AgentInterface):
                 # Optimize
                 self.optimizer.zero_grad()
                 loss.backward()
-                # torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.config.max_grad_norm)
                 self.optimizer.step()
 
             # Clear the buffer after optimization
@@ -308,3 +269,49 @@ class A2C(AgentInterface):
                              ) -> torch.Tensor:
         policy_loss = -(new_log_prob * batch_advantages).mean()
         return policy_loss     
+    
+    def _save_impl(self, path: Path) -> None:
+        """
+        Writes a self-contained checkpoint directory.
+
+        Layout:
+          path/
+            agent.pt
+            policy.pt
+        """
+        path.mkdir(parents=True, exist_ok=True)
+
+        payload = {
+            "algo": "A2C",
+            "agent_format_version": 1,
+            "config": asdict(self.config),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+        }
+        torch.save(payload, path / "agent.pt")
+        self.policy.save(path / "policy.pt")
+
+
+    @classmethod
+    def load(cls, path: str | Path, map_location: str | torch.device = "cpu") -> "A2CAgent":
+        """
+        Loads the checkpoint and returns a fully-constructed A2CAgent.
+        """
+        p = Path(path)
+        agent_meta = torch.load(p / "agent.pt", map_location=map_location, weights_only=False)
+
+        if agent_meta.get("algo") != "A2C":
+            raise ValueError(f"Checkpoint algo mismatch: expected A2C, got {agent_meta.get('algo')}")
+
+        config = A2CConfig(**agent_meta["config"])
+        policy = A2CPolicy.load(p / "policy.pt", map_location=map_location)
+
+        agent = cls(
+            policy=policy,
+            config=config,
+            device=str(map_location),
+        )
+
+        opt_state = agent_meta["optimizer_state_dict"]
+        agent.optimizer.load_state_dict(opt_state)
+
+        return agent     
