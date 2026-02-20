@@ -70,11 +70,6 @@ class PPOPolicy(NeuralPolicy):
         - Actor Head: Computes actions based on the latent state.
         - Critic Head: Computes the value for the given state.
 
-    .. image:: /_static/actorcriticpolicy.png
-        :alt: ActorCriticPolicy Architecture
-        :width: 100%
-        :align: center
-
     Args:
         env_params (EnvParams): Environment parameters.
         encoder (BaseEncoder | None): Encoder network to process the input state. If None, the input state is used directly.
@@ -87,11 +82,13 @@ class PPOPolicy(NeuralPolicy):
                 network: nn.Module,
                 actor_head: DistributionHead,
                 critic_head: ValueHead,
+                critic_network: Optional[nn.Module] = None,
                  ) -> None:
         super().__init__()
         self.network = network
         self.actor_head = actor_head
         self.critic_head = critic_head
+        self.critic_network = critic_network
     
     @torch.no_grad()
     def act(self,
@@ -108,6 +105,10 @@ class PPOPolicy(NeuralPolicy):
         latent = self.network(obs)
 
         action, log_prob, _ = self.actor_head.sample(latent, deterministic=deterministic)
+
+        if self.critic_network is not None:
+            latent = self.critic_network(obs)
+
         value = self.critic_head(latent)
 
         return action, {"log_prob": log_prob, "value": value}
@@ -135,7 +136,11 @@ class PPOPolicy(NeuralPolicy):
           log_prob: (B,1)
           entropy:  (B,1)
         """
-        latent = self.network(obs)
+        if self.critic_network is not None:
+            latent = self.critic_network(obs)
+        else:
+            latent = self.network(obs)
+
         value = self.critic_head(latent)
 
         # Compute log probabilities and entropy for the entire action vector
@@ -155,7 +160,11 @@ class PPOPolicy(NeuralPolicy):
         Returns:
           value:    (B,1)
         """
-        latent = self.network(obs)
+        if self.critic_network is not None:
+            latent = self.critic_network(obs)
+        else:            
+            latent = self.network(obs)
+
         value = self.critic_head(latent)
         return value
 
@@ -219,29 +228,14 @@ class PPOAgent(Agent):
         rollout_buffer = RolloutBuffer(capacity=self.config.steps_per_batch, device=self.device)
 
         while num_steps < total_steps:
-            # Update Schedulers if provided
-            if schedulers is not None:
-                for scheduler in schedulers:
-                    scheduler.update(current_step=num_steps)
+            self._update_schedulers(schedulers=schedulers, step=num_steps)
+            self._update_optimizer(self.optimizer, self.config.learning_rate)
 
             # Collect experience dictionary with shape (T, N, ...)
             experience = collector.collect_experience(policy=self.policy, num_steps=self.config.steps_per_batch)
 
             # Compute Advantages and Returns under the current policy
-            advantages, returns = utils.generalized_advantage_estimates(
-                rewards=experience['reward'],
-                values=experience['value'],
-                dones=experience['done'],
-                last_values=experience['last_value_est'],
-                gamma=self.config.gamma,
-                gae_lambda=self.config.gae_lambda
-            )
-            
-            experience['advantages'] = advantages
-            experience['returns'] = returns
-
-            # Flatten the experience batch (T, N, ...) -> (T*N, ...) and remove the last_value_est key because we don't need it anymore
-            experience = {k: v.reshape(-1, *v.shape[2:]) for k, v in experience.items() if k != 'last_value_est'}
+            experience = self._compute_gae(experience, gamma=self.config.gamma, gae_lambda=self.config.gae_lambda)
 
             # Update the total number of steps collected so far
             num_steps += experience['state'].shape[0]

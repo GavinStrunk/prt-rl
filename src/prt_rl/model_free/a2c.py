@@ -122,6 +122,7 @@ class A2CAgent(Agent):
     def __init__(self,
                  policy: A2CPolicy,
                  config: A2CConfig = A2CConfig(),
+                 *,
                  device: str = 'cpu',
                  ) -> None:
         super().__init__()
@@ -170,33 +171,15 @@ class A2CAgent(Agent):
         rollout_buffer = RolloutBuffer(capacity=self.config.steps_per_batch, device=self.device)
 
         while num_steps < total_steps:
-            # Update Schedulers if provided
-            if schedulers is not None:
-                for scheduler in schedulers:
-                    scheduler.update(current_step=num_steps)
-
-            # Update learning rate for optimizer
-            for pg in self.optimizer.param_groups:
-                pg["lr"] = self.config.learning_rate
+            self._update_schedulers(schedulers=schedulers, step=num_steps)
+            self._update_optimizer(self.optimizer, self.config.learning_rate)
 
             # Collect experience dictionary with shape (N, T, ...)
             experience = collector.collect_experience(policy=self.policy, num_steps=self.config.steps_per_batch)
 
             # Compute Advantages and Returns under the current policy
-            advantages, returns = utils.generalized_advantage_estimates(
-                rewards=experience['reward'],
-                values=experience['value'],
-                dones=experience['done'],
-                last_values=experience['last_value_est'],
-                gamma=self.config.gamma,
-                gae_lambda=self.config.gae_lambda
-            )
-            
-            experience['advantages'] = advantages.detach()
-            experience['returns'] = returns.detach()
+            experience = self._compute_gae(experience, gamma=self.config.gamma, gae_lambda=self.config.gae_lambda)
 
-            # Flatten the experience batch (N, T, ...) -> (N*T, ...) and remove the last_value_est key because we don't need it anymore
-            experience = {k: v.reshape(-1, *v.shape[2:]) for k, v in experience.items() if k != 'last_value_est'}
             num_steps += experience['state'].shape[0]
 
             # Add experience to the rollout buffer
@@ -217,7 +200,7 @@ class A2CAgent(Agent):
                 # Get the log probability and entropy of the actions under the current policy
                 new_value_est, new_log_prob, entropy = self.policy.evaluate_actions(batch['state'], batch['action'])
                 
-                policy_loss = self._compute_policy_loss(new_log_prob, advantages)
+                policy_loss = -(new_log_prob * advantages).mean()
 
                 # Compute entropy loss
                 entropy_loss = -entropy.mean()
@@ -263,13 +246,6 @@ class A2CAgent(Agent):
         if evaluator is not None:
             evaluator.close()  
 
-    def _compute_policy_loss(self,
-                             new_log_prob: torch.Tensor,
-                             batch_advantages: torch.Tensor
-                             ) -> torch.Tensor:
-        policy_loss = -(new_log_prob * batch_advantages).mean()
-        return policy_loss     
-    
     def _save_impl(self, path: Path) -> None:
         """
         Writes a self-contained checkpoint directory.

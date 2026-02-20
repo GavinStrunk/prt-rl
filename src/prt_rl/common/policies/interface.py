@@ -39,7 +39,17 @@ class NeuralPolicy(torch.nn.Module, ABC):
 
     def save(self, path: Union[str, Path]) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        torch.save(self, Path(path))
+        payload = {
+            "type": type(self).__name__,
+            "format_version": 1,
+            "state_dict": self.state_dict(),
+            "metadata": self.metadata(),
+        }
+        torch.save(payload, Path(path))
+
+    def metadata(self) -> Dict[str, Any]:
+        """Optionally save metadata alongside the policy. This is a no-op in the base class but can be overridden by subclasses."""
+        return {}
 
     @classmethod
     def load(
@@ -47,9 +57,14 @@ class NeuralPolicy(torch.nn.Module, ABC):
         path: Union[str, Path],
         map_location: str | torch.device = "cpu",
     ) -> "NeuralPolicy":
-        policy = torch.load(Path(path), map_location=map_location, weights_only=False)
-        if not isinstance(policy, cls):
-            raise TypeError(f"Loaded policy type {type(policy)} is not an instance of {cls}.")
+        payload = torch.load(Path(path), map_location=map_location)
+        if not isinstance(payload, dict) or "state_dict" not in payload:
+            raise TypeError(f"Loaded policy payload is invalid: {payload}")
+        
+        state_dict = payload["state_dict"]
+        metadata = payload.get("metadata", {})
+        policy = cls(**metadata)
+        policy.load_state_dict(state_dict)
         return policy.to(map_location)
 
 

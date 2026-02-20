@@ -9,10 +9,10 @@ from typing import Optional, List, Tuple
 from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.common.buffers import ReplayBuffer, BaseBuffer, PrioritizedReplayBuffer
 from prt_rl.common.schedulers import ParameterScheduler
-from prt_rl.common.collectors import ParallelCollector
+from prt_rl.common.collectors import Collector
 from prt_rl.common.loggers import Logger
-from prt_rl.agent import AgentInterface
-from prt_rl.common.policies import QValuePolicy
+from prt_rl.agent import Agent
+from prt_rl.common.policies import NeuralPolicy, RandomPolicy
 from prt_rl.common.progress_bar import ProgressBar
 from prt_rl.common.evaluators import Evaluator
 import prt_rl.common.utils as utils
@@ -46,7 +46,23 @@ class DQNConfig:
     train_freq: int = 1
     gradient_steps: int = 1
 
-class DQN(AgentInterface):
+class DQNPolicy(NeuralPolicy):
+    """
+    DQN Policy that outputs Q-values for each action given a state.
+
+    Args:
+        network (nn.Module): Neural network that processes the input state and outputs a latent representation.
+        device (str): Device to run the policy on ('cpu' or 'cuda').
+    """
+    def __init__(self,
+                 network: nn.Module,
+                 ) -> None:
+        super().__init__()
+        self.network = network
+
+
+
+class DQNAgent(Agent):
     """
     Deep Q-Network (DQN) agent for reinforcement learning.
 
@@ -69,9 +85,9 @@ class DQN(AgentInterface):
     [3] Mnih et al. (2015). Human-level control through deep reinforcement learning. Nature, 518(7540), 529-533.
     """
     def __init__(self,
-                 policy: QValuePolicy,
-                 replay_buffer: Optional[BaseBuffer] = None,
+                 policy: DQNPolicy,
                  config: DQNConfig = DQNConfig(),
+                 *,
                  device: str = "cpu",
                  ) -> None:
         super().__init__()
@@ -81,9 +97,6 @@ class DQN(AgentInterface):
 
         self.policy = policy 
         self.policy.to(self.device)
-
-        # Initialize replay buffer
-        self.replay_buffer = replay_buffer or ReplayBuffer(capacity=self.config.buffer_size, device=torch.device(device))
 
         # Initialize target network
         self.target = copy.deepcopy(self.policy).to(self.device)
@@ -155,40 +168,38 @@ class DQN(AgentInterface):
             evaluator (Evaluator): Evaluator to evaluate the agent periodically.
             show_progress (bool): If True, show a progress bar during training.            
         """
-        logger = logger or Logger.create('blank')
+        logger = logger or Logger()
 
         if show_progress:
             progress_bar = ProgressBar(total_steps=total_steps)
 
         # Setup up collector to return experience with shape (B, ...)
-        collector = ParallelCollector(env, logger=logger, flatten=True)
+        collector = Collector(env, logger=logger, flatten=True)
+        replay_buffer = ReplayBuffer(capacity=self.config.buffer_size, device=torch.device(self.device))
         
         experience = {}
         num_steps = 0
         training_steps = 0
 
+        # Collect initial experience until the replay buffer is filled
+        random_policy = RandomPolicy(env.get_parameters())
+        while replay_buffer.get_size() < self.config.min_buffer_size:
+            experience = collector.collect_experience(policy=random_policy, num_steps=1)
+            num_steps += experience["state"].shape[0]
+            replay_buffer.add(experience)
+
+            if show_progress:
+                progress_bar.update(current_step=num_steps, desc="Collecting initial experience...")
+
         # Run DQN training loop
         while num_steps < total_steps:
-            # Update schedulers if provided
-            if schedulers is not None:
-                for scheduler in schedulers:
-                    scheduler.update(current_step=num_steps)
-            
-            # Collect initial experience until the replay buffer is filled
-            if self.replay_buffer.get_size() < self.config.min_buffer_size:
-                experience = collector.collect_experience(num_steps=1)
-                num_steps += experience["state"].shape[0]
-                self.replay_buffer.add(experience)
-
-                if show_progress:
-                    progress_bar.update(current_step=num_steps, desc="Collecting initial experience...")
-                continue
+            self._update_schedulers(schedulers=schedulers, step=num_steps)
             
             # Collect experience and add to replay buffer
             self.policy.eval()
             experience = collector.collect_experience(policy=self.policy, num_steps=1)
             num_steps += experience["state"].shape[0]
-            self.replay_buffer.add(experience)
+            replay_buffer.add(experience)
 
             # Only train at a rate of the training frequency
             td_errors = []
@@ -198,7 +209,7 @@ class DQN(AgentInterface):
 
                 for _ in range(self.config.gradient_steps):
                     # If minimum number of samples in replay buffer, sample a batch
-                    batch_data = self.replay_buffer.sample(batch_size=self.config.mini_batch_size)
+                    batch_data = replay_buffer.sample(batch_size=self.config.mini_batch_size)
 
                     # Compute TD Target Values
                     with torch.no_grad():
@@ -227,8 +238,8 @@ class DQN(AgentInterface):
                     self.optimizer.step()
 
                     # Update sample priorities if this is a prioritized replay buffer
-                    if isinstance(self.replay_buffer, PrioritizedReplayBuffer):
-                        self.replay_buffer.update_priorities(batch_data["indices"], td_error)
+                    if isinstance(replay_buffer, PrioritizedReplayBuffer):
+                        replay_buffer.update_priorities(batch_data["indices"], td_error)
 
                 training_steps += 1
 
@@ -262,9 +273,9 @@ class DQN(AgentInterface):
 
         # Clean up for saving the agent
         # Clear the replay buffer because it can be large
-        self.replay_buffer.clear()
+        replay_buffer.clear()
 
-class DoubleDQN(DQN):
+class DoubleDQNAgent(DQNAgent):
     """
     Double DQN agent for reinforcement learning.
 
@@ -284,14 +295,13 @@ class DoubleDQN(DQN):
     [1] https://github.com/Curt-Park/rainbow-is-all-you-need
     """
     def __init__(self,
-                 policy: QValuePolicy,
-                 replay_buffer: Optional[BaseBuffer] = None,
+                 policy: DQNPolicy,
                  config: DQNConfig = DQNConfig(),
+                 *,
                  device: str = "cpu",
                  ) -> None:
         super().__init__(
             policy=policy,
-            replay_buffer=replay_buffer,
             config=config,
             device=device
         )

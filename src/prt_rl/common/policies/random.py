@@ -2,7 +2,8 @@
 Random Policy that samples actions uniformly from the action space.
 """
 import torch
-from typing import Union
+from torch import Tensor
+from typing import Union, Dict, Tuple
 from prt_rl.env.interface import EnvParams, MultiAgentEnvParams
 
 class RandomPolicy:
@@ -23,7 +24,7 @@ class RandomPolicy:
     def act(self,
                    obs: torch.Tensor,
                    deterministic: bool = False
-                   ) -> torch.Tensor:
+                   ) -> Tuple[Tensor, Dict[str, Tensor]]:
         """
         Randomly samples an action from action space.
 
@@ -54,5 +55,5 @@ class RandomPolicy:
             min_actions = torch.tensor(params.action_min).unsqueeze(0)
             action = action * (max_actions - min_actions) + min_actions
 
-        return action
+        return action, {}
         

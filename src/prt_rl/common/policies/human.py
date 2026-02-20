@@ -1,6 +1,7 @@
 from enum import Enum, auto
 import threading
 import torch
+from torch import Tensor
 from typing import Dict, Tuple, Union
 
 class GameControllerPolicy:
@@ -100,7 +101,7 @@ class GameControllerPolicy:
             self._start_listener()
 
     @torch.no_grad()
-    def act(self, obs: torch.Tensor, deterministic: bool = True) -> torch.Tensor:
+    def act(self, obs: torch.Tensor, deterministic: bool = True) -> Tuple[Tensor, Dict[str, Tensor]]:
         """
         Gets a game controller input and maps it to the action space.
 
@@ -113,7 +114,7 @@ class GameControllerPolicy:
         if not deterministic:
             raise ValueError("GameControllerAgent does not support non-deterministic actions. Set deterministic=True.")
         
-        assert obs.batch_size[0] == 1, "GameController only supports batch size 1 for now."
+        assert obs.shape[0] == 1, "GameController only supports batch size 1 for now."
 
         # Get the data type for the action values
         if self.continuous:
@@ -138,8 +139,7 @@ class GameControllerPolicy:
             with self.lock:
                 action_val = self.latest_values.clone()
 
-        obs['action'] = action_val.unsqueeze(0)
-        return obs
+        return action_val.unsqueeze(0), {}
     
     def _start_listener(self):
         """
@@ -325,7 +325,7 @@ class KeyboardPolicy:
     def act(self,
                    obs: torch.Tensor,
                    deterministic: bool = True
-                   ) -> torch.Tensor:
+                   ) -> Tuple[Tensor, Dict[str, Tensor]]:
         """
         Gets a keyboard press and maps it to the action space.
 
@@ -339,7 +339,7 @@ class KeyboardPolicy:
         if not deterministic:
             raise ValueError("KeyboardAgent does not support non-deterministic actions. Set deterministic=True.")
         
-        assert obs.batch_size[0] == 1, "KeyboardPolicy Only supports batch size 1 for now."
+        assert obs.shape[0] == 1, "KeyboardPolicy Only supports batch size 1 for now."
 
         if self.blocking:
             key_string = ''
@@ -357,8 +357,7 @@ class KeyboardPolicy:
                 action_val = self.key_action_map[key_string]
                 self.latest_key = None  # Reset the latest key so another key has to be pressed.
 
-        obs['action'] = torch.tensor([[action_val]])
-        return obs
+        return torch.tensor([[action_val]]), {}
     
     def _start_listener(self):
         """

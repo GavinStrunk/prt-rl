@@ -590,11 +590,12 @@ class QValueHead(nn.Module):
 
     Args:
         latent_dim (int): Dimension of the latent state representation.
+        action_dim (int): Dimension of the action vector.
     """
 
-    def __init__(self, latent_dim: int):
+    def __init__(self, latent_dim: int, action_dim: int):
         super().__init__()
-        self.q = nn.Linear(latent_dim, 1)
+        self.q = nn.Linear(latent_dim + action_dim, 1)
 
     def forward(self, latent: Tensor, action: Tensor) -> Tensor:
         """

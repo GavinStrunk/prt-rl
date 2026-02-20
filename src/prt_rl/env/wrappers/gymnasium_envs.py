@@ -4,7 +4,7 @@ Wrapper for Gymnasium environments.
 import gymnasium as gym
 import numpy as np
 import torch
-from typing import Optional, Tuple, List, Union, Dict, Any
+from typing import Optional, Tuple, List, Union, Dict, Any, Callable
 from prt_rl.env.interface import EnvironmentInterface, EnvParams
 
 class GymnasiumWrapper(EnvironmentInterface):
@@ -13,6 +13,7 @@ class GymnasiumWrapper(EnvironmentInterface):
 
     Args:
         gym_name: Name of the Gymnasium environment.
+        env_factory: Callable that constructs a Gymnasium environment for each env index.
         num_envs: Number of parallel environments to create.
         render_mode: Sets the rendering mode. Defaults to None.
 
@@ -28,6 +29,12 @@ class GymnasiumWrapper(EnvironmentInterface):
                 continuous=True
             )
 
+            # or use a factory (useful for domain randomization wrappers)
+            env = GymnasiumWrapper(
+                env_factory=lambda env_index, seed: gym.make("Pendulum-v1"),
+                num_envs=4
+            )
+
             policy = RandomPolicy(env_params=env.get_parameters())
 
             state, info = env.reset()
@@ -39,7 +46,8 @@ class GymnasiumWrapper(EnvironmentInterface):
 
     """
     def __init__(self,
-                 gym_name: str,
+                 gym_name: Optional[str] = None,
+                 env_factory: Optional[Callable[[int, Optional[int]], gym.Env]] = None,
                  num_envs: int = 1,
                  render_mode: Optional[str] = None,
                  seed: Optional[int] = None,
@@ -48,32 +56,36 @@ class GymnasiumWrapper(EnvironmentInterface):
                  ) -> None:
         super().__init__(render_mode, num_envs=num_envs)
         self.gym_name = gym_name
+        self.env_factory = env_factory
         self.device = torch.device(device)
 
-        if self.num_envs == 1:
-            self.env = gym.make(self.gym_name, render_mode=render_mode, **kwargs)
+        if (self.gym_name is None) == (self.env_factory is None):
+            raise ValueError("Provide exactly one of `gym_name` or `env_factory`.")
+
+        def _make_env(env_index: int):
+            env_seed = None if seed is None else seed + env_index
+
+            if self.env_factory is not None:
+                env = self.env_factory(env_index, env_seed)
+            else:
+                env = gym.make(self.gym_name, render_mode=render_mode, **kwargs)
 
             # Seed the environment if a seed is provided
-            if seed is not None:
-                self.env.reset(seed=seed)
-                self.env.action_space.seed(seed)
-                self.env.observation_space.seed(seed)
+            if env_seed is not None:
+                env.reset(seed=env_seed)
+                env.action_space.seed(env_seed)
+                env.observation_space.seed(env_seed)
+
+            return env
+
+        if self.num_envs == 1:
+            self.env = _make_env(0)
             vectorized = False
         else:
             def make_env_fn(env_index: int):
-                def _init():
-                    env = gym.make(gym_name, render_mode=render_mode, **kwargs)
-                    
-                    # Seed the environment if a seed is provided
-                    if seed is not None:
-                        env_seed = seed + env_index
-                        env.reset(seed=env_seed)
-                        env.action_space.seed(env_seed)
-                        env.observation_space.seed(env_seed)
-                    return env
-                return _init
+                return lambda: _make_env(env_index)
 
-            self.env = gym.vector.SyncVectorEnv([make_env_fn(i) for i in range(num_envs)])
+            self.env = gym.vector.SyncVectorEnv([make_env_fn(i) for i in range(self.num_envs)])
             vectorized = True
 
         self.env_params = self._make_env_params(vectorized=vectorized)

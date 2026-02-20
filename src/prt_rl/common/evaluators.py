@@ -1,4 +1,3 @@
-from abc import ABC
 import copy
 import math
 from typing import Optional
@@ -8,7 +7,7 @@ from prt_rl.common.loggers import Logger
 from prt_rl.common.collectors import Collector
 from prt_rl.common.policies import Policy
 
-class Evaluator(ABC):
+class Evaluator:
     """
     Base class for all evaluators in the PRT-RL framework.
     This class provides a common interface for evaluating agents in different environments with different objectives.

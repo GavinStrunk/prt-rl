@@ -3,9 +3,11 @@ Soft Actor-Critic (SAC)
 """
 from dataclasses import dataclass
 import torch
+from torch import Tensor, nn
 from typing import Optional, List, Tuple
-from prt_rl.agent import AgentInterface
+from prt_rl.agent import Agent
 from prt_rl.env.interface import EnvParams, EnvironmentInterface
+from prt_rl.common.policies import NeuralPolicy
 from prt_rl.common.loggers import Logger
 from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.progress_bar import ProgressBar
@@ -13,10 +15,9 @@ from prt_rl.common.evaluators import Evaluator
 
 import copy
 import numpy as np
-from prt_rl.common.collectors import ParallelCollector
+from prt_rl.common.collectors import Collector
 from prt_rl.common.buffers import ReplayBuffer
-from prt_rl.common.policies import DistributionPolicy, StateActionCritic, BasePolicy
-import prt_rl.common.distributions as dist
+from prt_rl.common.components.heads import DistributionHead, QValueHead
 import prt_rl.common.utils as utils
 
 @dataclass
@@ -51,7 +52,7 @@ class SACConfig:
     use_log_entropy: bool = True
     reward_scale: float = 1.0
     
-class SACPolicy(BasePolicy):
+class SACPolicy(NeuralPolicy):
     """
     Soft Actor-Critic (SAC) policy class.
 
@@ -66,22 +67,22 @@ class SACPolicy(BasePolicy):
         device (str): Device to run the model on (e.g., 'cpu' or 'cuda').
     """
     def __init__(self,
-                env_params: EnvParams,
+                network: nn.Module,
+                actor_head: DistributionHead,
+                critic_head: QValueHead,
+                *,
                 num_critics: int = 2,
-                actor: DistributionPolicy | None = None,
-                critic: StateActionCritic | None = None,
                 device: str = 'cpu'
                 ) -> None:
-        super().__init__(env_params=env_params)
         self.num_critics = num_critics
         self.device = torch.device(device)
 
-        self.actor = actor if actor is not None else DistributionPolicy(env_params=env_params, policy_kwargs={'network_arch': [256, 256]}, distribution=dist.TanhGaussian)
-        self.actor.to(self.device)
+        self.actor_head = actor_head
+        self.actor_head.to(self.device)
 
-        self.critic = critic if critic is not None else StateActionCritic(env_params=env_params, num_critics=num_critics)
-        self.critic.to(self.device)
-        self.critic_target = copy.deepcopy(self.critic)
+        self.critic_head = critic_head
+        self.critic_head.to(self.device)
+        self.critic_target = copy.deepcopy(self.critic_head)
         self.critic_target.to(self.device)
 
         # Compute the scaling and bias for rescaling the actions
@@ -105,7 +106,7 @@ class SACPolicy(BasePolicy):
             The action to be taken.
         """
         # Get the action from the Squashed Gaussian policy which is in the range [-1, 1]
-        action = self.actor(state, deterministic=deterministic)
+        action = self.actor_head(state, deterministic=deterministic)
         action = action * self.action_scale + self.action_bias
         return action
 
@@ -126,12 +127,12 @@ class SACPolicy(BasePolicy):
                 - value_estimate (torch.Tensor): Tensor with the estimated value of the state. Shape (B, C, 1) where C is the number of critics
                 - log_prob (torch.Tensor): None
         """
-        action, _, log_probs = self.actor.predict(state, deterministic=deterministic) 
+        action, _, log_probs = self.actor_head.predict(state, deterministic=deterministic) 
 
         # Rescale the action to the environment's action space
         action = action * self.action_scale + self.action_bias  
 
-        value_estimates = self.critic(state, action)
+        value_estimates = self.critic_head(state, action)
         value_estimates = torch.stack(value_estimates, dim=1)  # Shape (B, C, 1) where C is the number of critics
         return action, value_estimates, log_probs
     
@@ -176,7 +177,7 @@ class SACPolicy(BasePolicy):
         return q_values
 
 
-class SAC(AgentInterface):
+class SACAgent(Agent):
     """
     Soft Actor-Critic (SAC) agent.
 
@@ -191,6 +192,7 @@ class SAC(AgentInterface):
     def __init__(self, 
                  policy: SACPolicy,
                  config: SACConfig = SACConfig(), 
+                 *,
                  device: str = 'cpu'
                  ) -> None:
         super().__init__()
@@ -224,22 +226,10 @@ class SAC(AgentInterface):
             torch.optim.Adam(critic.parameters(), lr=self.config.learning_rate) for critic in self.policy.critic.critics
         ]
 
-    def predict(self, 
-                state: torch.Tensor, 
-                deterministic: bool = False
-                ) -> torch.Tensor:
-        """
-        Predict the action based on the current state.
-        
-        Args:
-            state (torch.Tensor): Current state tensor.
-            deterministic (bool): If True, choose the action deterministically. Default is False.
-        
-        Returns:
-            torch.Tensor: Tensor with the chosen action. Shape (B, action_dim)
-        """
-        with torch.no_grad():
-            return self.policy(state, deterministic=deterministic)
+    @torch.no_grad()
+    def act(self, obs: Tensor, deterministic: bool = False) -> Tensor:
+        action, _ = self.policy.act(obs, deterministic=deterministic)
+        return action
 
     def train(self,
               env: EnvironmentInterface,
@@ -260,21 +250,18 @@ class SAC(AgentInterface):
             evaluator (Evaluator | None): Evaluator for periodic evaluation during training.
             show_progress (bool): If True, display a progress bar during training.
         """
-        logger = logger or Logger.create('blank')
+        logger = logger or Logger()
 
         if show_progress:
             progress_bar = ProgressBar(total_steps=total_steps)
 
         num_steps = 0
 
-        collector = ParallelCollector(env=env, logger=logger, flatten=True)   
+        collector = Collector(env=env, logger=logger, flatten=True)   
         replay_buffer = ReplayBuffer(capacity=self.config.buffer_size, device=self.device)
 
         while num_steps < total_steps:
-            # Update schedulers
-            if schedulers is not None:
-                for scheduler in schedulers:
-                    scheduler.update(current_step=num_steps)  
+            self._update_schedulers(schedulers=schedulers, step=num_steps) 
 
             # Collect experience dictionary with shape (B, ...)
             experience = collector.collect_experience(policy=self.policy, num_steps=self.config.steps_per_batch, bootstrap=False)
