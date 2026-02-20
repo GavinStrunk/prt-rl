@@ -21,18 +21,8 @@ from dataclasses import dataclass, asdict
 from prt_rl.common.collectors import Collector
 from prt_rl.common.buffers import ReplayBuffer
 from prt_rl.common.components.heads import ContinuousHead, QValueHead
+from prt_rl.common.components.networks import QCritic
 
-
-class Critic(nn.Module):
-    def __init__(self, network: nn.Module, critic_head: nn.Module):
-        super().__init__()
-        self.network = network
-        self.critic_head = critic_head
-
-    def forward(self, obs, action):
-        features = self.network(obs)
-        q = self.critic_head(features, action)   # adjust signature to your head
-        return q
 
 @dataclass
 class TD3Config:
@@ -111,7 +101,7 @@ class TD3Policy(NeuralPolicy):
         self.critics = nn.ModuleList()
         self.target_critics = nn.ModuleList()
         for _ in range(self.num_critics):
-            critic = Critic(copy.deepcopy(critic_network), copy.deepcopy(critic_head))
+            critic = QCritic(copy.deepcopy(critic_network), copy.deepcopy(critic_head))
             target_critic = copy.deepcopy(critic)
 
             self.critics.append(critic)

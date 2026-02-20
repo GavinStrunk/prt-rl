@@ -217,6 +217,7 @@ class PPOAgent(Agent):
             show_progress (bool): If True, show a progress bar during training.
         """
         logger = logger or Logger()
+        evaluator = evaluator or Evaluator()
 
         if show_progress:
             progress_bar = ProgressBar(total_steps=total_steps)
@@ -307,12 +308,9 @@ class PPOAgent(Agent):
                 # logger.log_scalar('episode_reward', collector.previous_episode_reward, num_steps)
                 # logger.log_scalar('episode_length', collector.previous_episode_length, num_steps)
 
-            if evaluator is not None:
-                # Evaluate the agent periodically
-                evaluator.evaluate(agent=self.policy, iteration=num_steps)
+            evaluator.evaluate(agent=self.policy, iteration=num_steps)
 
-        if evaluator is not None:
-            evaluator.close()
+        evaluator.close()
     
     def _save_impl(self, path: Path) -> None:
         """
