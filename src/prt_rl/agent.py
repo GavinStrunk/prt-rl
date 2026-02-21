@@ -7,6 +7,7 @@ import tempfile
 import torch
 from typing import Optional, Union, List
 from prt_rl.common.schedulers import ParameterScheduler
+from prt_rl.common.loggers import Logger
 import prt_rl.common.utils as utils
 
 
@@ -62,7 +63,8 @@ class Agent(ABC):
     def _update_schedulers(
         cls,
         schedulers: Optional[List[ParameterScheduler]] = None,
-        step: int = 0
+        step: int = 0,
+        logger: Logger | None = None
     ) -> None:
         """
         Update a list of parameter schedulers to the current step.
@@ -76,6 +78,9 @@ class Agent(ABC):
         if schedulers is not None:
             for scheduler in schedulers:
                 scheduler.update(current_step=step)
+
+                if (logger is not None) and (logger.should_log(step)):
+                    logger.log_scalar(name=scheduler.parameter_name, value=scheduler.get_value(), iteration=step)
 
     @classmethod
     def _update_optimizer(

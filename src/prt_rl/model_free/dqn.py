@@ -2,17 +2,20 @@
 Deep Q-Network (DQN) Agents
 """
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+from pathlib import Path
 import numpy as np
 import torch
-from typing import Optional, List, Tuple
+from torch import nn, Tensor
+from typing import Optional, List, Tuple, Dict
 from prt_rl.env.interface import EnvironmentInterface
-from prt_rl.common.buffers import ReplayBuffer, BaseBuffer, PrioritizedReplayBuffer
+from prt_rl.common.buffers import ReplayBuffer, PrioritizedReplayBuffer
 from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.collectors import Collector
 from prt_rl.common.loggers import Logger
 from prt_rl.agent import Agent
 from prt_rl.common.policies import NeuralPolicy, RandomPolicy
+from prt_rl.common.decision_functions import DecisionFunction
 from prt_rl.common.progress_bar import ProgressBar
 from prt_rl.common.evaluators import Evaluator
 import prt_rl.common.utils as utils
@@ -56,10 +59,32 @@ class DQNPolicy(NeuralPolicy):
     """
     def __init__(self,
                  network: nn.Module,
+                 decision_function: DecisionFunction
                  ) -> None:
         super().__init__()
         self.network = network
+        self.decision_function = decision_function
+        self.target_network = copy.deepcopy(network)
 
+    @torch.no_grad()
+    def act(self, obs: Tensor, deterministic: bool = False) -> Tuple[Tensor, Dict[str, Tensor]]:
+        """Return an action tensor and auxiliary policy outputs."""  
+        q_values = self.get_q_values(obs)
+
+        if not deterministic:
+            action = self.decision_function.select_action(q_values)
+        else:
+            action = torch.argmax(q_values, dim=1)
+
+        return action, {}
+
+    def get_q_values(self, obs: Tensor) -> Tensor:
+        """Return the Q-values for the given observation."""
+        return self.network(obs)  
+    
+    def get_target_q_values(self, obs: Tensor) -> Tensor:
+        """Return the Q-values from the target network for the given observation."""
+        return self.target_network(obs)
 
 
 class DQNAgent(Agent):
@@ -98,14 +123,8 @@ class DQNAgent(Agent):
         self.policy = policy 
         self.policy.to(self.device)
 
-        # Initialize target network
-        self.target = copy.deepcopy(self.policy).to(self.device)
-
         # Initialize optimizer
-        self.optimizer = torch.optim.Adam(
-            params=self.policy.parameters(),
-            lr=self.config.learning_rate
-        )
+        self.optimizer = torch.optim.Adam(params=self.policy.network.parameters(), lr=self.config.learning_rate)
 
     def _compute_td_targets(self, 
                             next_state: torch.Tensor, 
@@ -116,7 +135,7 @@ class DQNAgent(Agent):
         Compute the TD target values for the sampled batch.
 
         """
-        target_values = self.target.get_q_values(next_state)
+        target_values = self.policy.get_target_q_values(next_state)
         td_target = reward + (1-done.float()) * self.config.gamma * torch.max(target_values, dim=1, keepdim=True)[0]
         return td_target
 
@@ -133,22 +152,20 @@ class DQNAgent(Agent):
         # loss = torch.nn.functional.smooth_l1_loss(qsa, td_target)
         return loss, td_error
 
-    def predict(self,
-                 state: torch.Tensor,
-                 deterministic: bool = False
-                 ) -> torch.Tensor:
+    @torch.no_grad()
+    def act(self, obs: Tensor, deterministic: bool = False) -> Tensor:
         """
-        Predict the action using the policy network.
+        Perform an action based on the current state.
 
         Args:
-            state (torch.Tensor): Current state of the environment.
-            deterministic (bool): If True, the action will be selected deterministically.
+            obs (torch.Tensor): The current observation of the environment.
+            deterministic (bool): If True, the agent will select actions deterministically.
 
         Returns:
-            torch.Tensor: Action to be taken.
+            torch.Tensor: The action to be taken.
         """
-        with torch.no_grad():
-            return self.policy(state, deterministic=deterministic)
+        action, _ = self.policy.act(obs, deterministic=deterministic)
+        return action
 
     def train(self,
               env: EnvironmentInterface,
@@ -169,6 +186,7 @@ class DQNAgent(Agent):
             show_progress (bool): If True, show a progress bar during training.            
         """
         logger = logger or Logger()
+        evaluator = evaluator or Evaluator()
 
         if show_progress:
             progress_bar = ProgressBar(total_steps=total_steps)
@@ -177,7 +195,6 @@ class DQNAgent(Agent):
         collector = Collector(env, logger=logger, flatten=True)
         replay_buffer = ReplayBuffer(capacity=self.config.buffer_size, device=torch.device(self.device))
         
-        experience = {}
         num_steps = 0
         training_steps = 0
 
@@ -193,7 +210,7 @@ class DQNAgent(Agent):
 
         # Run DQN training loop
         while num_steps < total_steps:
-            self._update_schedulers(schedulers=schedulers, step=num_steps)
+            self._update_schedulers(schedulers=schedulers, step=num_steps, logger=logger)
             
             # Collect experience and add to replay buffer
             self.policy.eval()
@@ -234,7 +251,7 @@ class DQNAgent(Agent):
                     # Optimize policy model parameters
                     self.optimizer.zero_grad()
                     loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=self.config.max_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(self.policy.network.parameters(), max_norm=self.config.max_grad_norm)
                     self.optimizer.step()
 
                     # Update sample priorities if this is a prioritized replay buffer
@@ -252,28 +269,69 @@ class DQNAgent(Agent):
             # Update target network with either hard or soft update
             if num_steps % self.config.target_update_freq == 0:
                 if self.config.polyak_tau is None:
-                    utils.hard_update(target=self.target, network=self.policy)
+                    utils.hard_update(target=self.policy.target_network, network=self.policy.network)
                 else:
                     # Polyak update
-                    utils.polyak_update(target=self.target, network=self.policy, tau=self.config.polyak_tau)
+                    utils.polyak_update(target=self.policy.target_network, network=self.policy.network, tau=self.config.polyak_tau)
                 
             # Log training metrics
             if logger.should_log(num_steps):
-                if schedulers is not None:
-                    for scheduler in schedulers:
-                        logger.log_scalar(name=scheduler.parameter_name, value=scheduler.get_value(), iteration=num_steps)
                 logger.log_scalar(name="td_error", value=np.mean(td_errors), iteration=num_steps)
                 logger.log_scalar(name="loss", value=np.mean(losses), iteration=num_steps)
 
-            if evaluator is not None:
-                evaluator.evaluate(agent=self.policy, iteration=num_steps)
+            evaluator.evaluate(agent=self.policy, iteration=num_steps)
             
-        if evaluator is not None:
-            evaluator.close()
+        evaluator.close()
 
         # Clean up for saving the agent
         # Clear the replay buffer because it can be large
         replay_buffer.clear()
+
+    def _save_impl(self, path: Path) -> None:
+        """
+        Writes a self-contained checkpoint directory.
+
+        Layout:
+          path/
+            agent.pt
+            policy.pt
+        """
+        path.mkdir(parents=True, exist_ok=True)
+
+        payload = {
+            "algo": "DQN",
+            "agent_format_version": 1,
+            "config": asdict(self.config),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+        }
+        torch.save(payload, path / "agent.pt")
+        self.policy.save(path / "policy.pt")
+
+
+    @classmethod
+    def load(cls, path: str | Path, map_location: str | torch.device = "cpu") -> "DQNAgent":
+        """
+        Loads the checkpoint and returns a fully-constructed DQNAgent.
+        """
+        p = Path(path)
+        agent_meta = torch.load(p / "agent.pt", map_location=map_location, weights_only=False)
+
+        if agent_meta.get("algo") != "DQN":
+            raise ValueError(f"Checkpoint algo mismatch: expected DQN, got {agent_meta.get('algo')}")
+
+        config = DQNConfig(**agent_meta["config"])
+        policy = DQNPolicy.load(p / "policy.pt", map_location=map_location)
+
+        agent = cls(
+            policy=policy,
+            config=config,
+            device=str(map_location),
+        )
+
+        optimizer_state = agent_meta["optimizer_state_dict"]
+        agent.optimizer.load_state_dict(optimizer_state)
+
+        return agent          
 
 class DoubleDQNAgent(DQNAgent):
     """
@@ -329,5 +387,5 @@ class DoubleDQNAgent(DQNAgent):
             torch.Tensor: TD target values.
         """
         action_selections = self.policy.get_q_values(next_state).argmax(dim=1, keepdim=True)
-        td_target = reward + (1-done.float()) * self.config.gamma * torch.gather(self.target.get_q_values(next_state), dim=1, index=action_selections)
+        td_target = reward + (1-done.float()) * self.config.gamma * torch.gather(self.policy.get_target_q_values(next_state), dim=1, index=action_selections)
         return td_target
