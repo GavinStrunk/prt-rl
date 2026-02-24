@@ -350,10 +350,22 @@ class DAggerAgent(Agent):
         path: str | Path,
         expert_policy: Policy,
         experience_buffer: ReplayBuffer,
+        policy_cls: type[DAggerPolicy],
         map_location: str | torch.device = "cpu"
     ) -> "DAggerAgent":
         """
         Loads the checkpoint and returns a fully-constructed DAggerAgent.
+
+        Args:
+            path: Path to the checkpoint directory.
+            expert_policy: The expert policy to provide actions for the states.
+            experience_buffer: The replay buffer to store experiences.
+            policy_cls: The DAggerPolicy subclass to use for loading. Must have a no-argument
+                constructor so it can be instantiated during load.
+            map_location: Device to load tensors onto.
+
+        Returns:
+            A fully-constructed DAggerAgent with loaded weights.
         """
         p = Path(path)
         agent_meta = torch.load(p / "agent.pt", map_location=map_location, weights_only=False)
@@ -362,7 +374,7 @@ class DAggerAgent(Agent):
             raise ValueError(f"Checkpoint algo mismatch: expected DAgger, got {agent_meta.get('algo')}")
 
         config = DAggerConfig(**agent_meta["config"])
-        policy = DAggerPolicy.load(p / "policy.pt", map_location=map_location)
+        policy = policy_cls.load(p / "policy.pt", map_location=map_location)
 
         agent = cls(
             expert_policy=expert_policy,
