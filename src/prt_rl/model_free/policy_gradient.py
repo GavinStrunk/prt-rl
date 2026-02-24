@@ -7,19 +7,23 @@ Example Usage:
 This example demonstrates how to initialize a Policy Gradient agent with a custom policy.
 
 """
-from dataclasses import dataclass
+import copy
+from pathlib import Path
+from dataclasses import dataclass, asdict
 import numpy as np
+import itertools
 import torch
-from typing import List
-from prt_rl.agent import AgentInterface
+from torch import nn, Tensor
+from typing import List, Tuple, Dict
+from prt_rl.agent import Agent
 from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.loggers import Logger
 from prt_rl.common.progress_bar import ProgressBar
 from prt_rl.common.evaluators import Evaluator
-from prt_rl.common.collectors import SequentialCollector, ParallelCollector
-from prt_rl.common.policies import DistributionPolicy
-from prt_rl.common.networks import MLP
+from prt_rl.common.collectors import Collector
+from prt_rl.common.policies import NeuralPolicy
+from prt_rl.common.components.heads import DistributionHead, ValueHead
 import prt_rl.common.utils as utils
 
 @dataclass
@@ -34,7 +38,6 @@ class PolicyGradientConfig:
         gae_lambda (float): Lambda parameter for Generalized Advantage Estimation. Default is 0.95.
         optim_steps (int): Number of optimization steps per training iteration. Default is 1.
         reward_to_go (bool): Whether to use rewards-to-go instead of total discounted return. Default is False.
-        use_baseline (bool): Whether to use a baseline for advantage estimation. Default is False.
         use_gae (bool): Whether to use Generalized Advantage Estimation. Default is False.
         baseline_learning_rate (float): Learning rate for the baseline network if used. Default is 5e-3.
         baseline_optim_steps (int): Number of optimization steps for the baseline network. Default is 5.
@@ -46,13 +49,73 @@ class PolicyGradientConfig:
     gae_lambda: float = 0.95
     optim_steps: int = 1
     use_reward_to_go: bool = False
-    use_baseline: bool = False
     use_gae: bool = False
     baseline_learning_rate: float = 5e-3
     baseline_optim_steps: int = 5
     normalize_advantages: bool = True
 
-class PolicyGradient(AgentInterface):
+class PolicyGradientPolicy(NeuralPolicy):
+    """
+    Base class for Policy Gradient policies. This class can be extended to create custom policies for the Policy Gradient agent.
+    The policy should output a distribution over actions given the current state.
+
+    Args:
+        network (nn.Module): The neural network that processes the input state and outputs a latent representation.
+        actor_head (DistributionHead): The head that takes the latent representation from the network and outputs a distribution over actions.
+        critic_head (ValueHead): The head that takes the latent representation from the network and outputs a value estimate for the state.
+        device (str): Device to run the policy on (e.g., 'cpu' or 'cuda'). Default is 'cpu'.
+    """
+    def __init__(self,
+                 network: nn.Module,
+                 actor_head: DistributionHead,
+                 critic_head: ValueHead | None = None,
+                 *,
+                 critic_network: nn.Module | None = None,
+                 ) -> None:
+        super().__init__()
+        self.network = network
+        self.actor_head = actor_head
+        self.critic_head = critic_head
+        self.critic_network = critic_network
+
+        if critic_head is not None and critic_network is None:
+            self.critic_network = copy.deepcopy(network)
+
+    # @torch.no_grad()
+    def act(self,
+            obs: torch.Tensor,
+            deterministic: bool = False
+            ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        """
+        Returns action + info dict.
+
+        Info dict keys (typical):
+          - "log_prob": (B,1)
+          - "value":    (B,1)
+        """        
+        latent = self.network(obs)
+
+        action, log_prob, _ = self.actor_head.sample(latent, deterministic=deterministic)
+
+        return action, {"log_prob": log_prob}  
+    
+    def get_state_value(self, obs: torch.Tensor) -> torch.Tensor:
+        """
+        Returns the state value for the given observation.
+        
+        Args:
+          obs:      (B, obs_dim)
+        Returns:
+          value:    (B,1)
+        """        
+        if self.critic_head is None:
+            raise ValueError("Critic head is not defined for this policy.")
+        
+        latent = self.critic_network(obs)
+        value = self.critic_head(latent)
+        return value
+
+class PolicyGradientAgent(Agent):
     """
     Policy Gradient agent with step-wise optimization.
 
@@ -85,12 +148,13 @@ class PolicyGradient(AgentInterface):
 
     Args:
         config (PolicyGradientConfig): Configuration for the Policy Gradient agent.
-        policy (Optional[DistributionPolicy]): The policy to be used by the agent. If None, a default policy will be created based on the environment parameters.
+        policy (PolicyGradientPolicy): The policy to be used by the agent.
         device (str): Device to run the agent on (e.g., 'cpu' or 'cuda'). Default is 'cpu'.
     """
     def __init__(self, 
+                 policy: PolicyGradientPolicy,
                  config: PolicyGradientConfig = PolicyGradientConfig(),
-                 policy: DistributionPolicy | None = None,
+                 *,
                  device: str = 'cpu',
                  ) -> None:
         super().__init__()
@@ -99,33 +163,16 @@ class PolicyGradient(AgentInterface):
 
         self.policy = policy 
         self.policy.to(self.device)
-        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.config.learning_rate)
+        self.optimizer = torch.optim.Adam(itertools.chain(self.policy.network.parameters(), self.policy.actor_head.parameters()), lr=self.config.learning_rate)
+        self.critic_optimizer = None  
 
-        if self.config.use_baseline or self.config.use_gae:
-            self.critic = MLP(
-                input_dim=self.policy.env_params.observation_shape[0],
-                output_dim=1,
-                network_arch=[64,64],
-            )
-            self.critic.to(self.device)
-            self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=self.config.baseline_learning_rate)
-        else:
-            self.critic = None
+        if self.policy.critic_head is not None:
+            self.critic_optimizer = torch.optim.Adam(itertools.chain(self.policy.critic_network.parameters(), self.policy.critic_head.parameters()), lr=self.config.baseline_learning_rate)
 
-
-    def predict(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
-        """
-        Perform an action based on the current state using the policy.
-
-        Args:
-            state (torch.Tensor): Current state of the environment.
-            deterministic (bool): If True, use the deterministic action from the policy. Default is False.
-
-        Returns:
-            torch.Tensor: Action to be taken by the agent.
-        """
-        with torch.no_grad():
-            return self.policy(state, deterministic=deterministic)  # Forward pass through the policy
+    @torch.no_grad()
+    def act(self, obs: Tensor, deterministic: bool = False) -> Tensor:
+        action, _ = self.policy.act(obs, deterministic=deterministic)
+        return action
     
     def train(self,
               env: EnvironmentInterface,
@@ -146,27 +193,26 @@ class PolicyGradient(AgentInterface):
             evaluator (Evaluator): Evaluator to evaluate the agent periodically.
             show_progress (bool): If True, show a progress bar during training.
         """
-        logger = logger or Logger.create('blank')
+        logger = logger or Logger()
+        evaluator = evaluator or Evaluator()
 
         if show_progress:
             progress_bar = ProgressBar(total_steps=total_steps)
 
         # Initialize collector without flattening so the experience shape is (B, ...)
-        collector = ParallelCollector(env=env, logger=logger, flatten=True)
+        collector = Collector(env=env, logger=logger, flatten=True)
 
         num_steps = 0
         while num_steps < total_steps:
-            # Update schedulers if any
-            for scheduler in schedulers:
-                scheduler.update(current_step=num_steps)
+            self._update_schedulers(schedulers=schedulers, step=num_steps, logger=logger)
 
             # Collect experience using the current policy
-            trajectories = collector.collect_trajectory(policy=self.policy, min_num_steps=self.config.batch_size, inference_mode=False)
+            trajectories = collector.collect_trajectory(policy=self.policy, min_num_steps=self.config.batch_size)
             num_steps += trajectories['state'].shape[0]  
 
             # Compute Monte Carlo estimate of the Q function
             if self.config.use_gae:
-                values = self.critic(trajectories['state']).detach()
+                values = self.policy.get_state_value(trajectories['state']).detach()
                 advantages, Q_hat = utils.generalized_advantage_estimates(
                     rewards=trajectories['reward'],
                     values=values,
@@ -192,10 +238,11 @@ class PolicyGradient(AgentInterface):
                         gamma=self.config.gamma
                     )
 
-                if self.config.use_baseline:
-                    advantages = Q_hat - self.critic(trajectories['state']).squeeze(1)
-                else:
-                    advantages = Q_hat
+                advantages = Q_hat
+
+                # Subtract baseline if applicable
+                if self.policy.critic_head is not None:
+                    advantages -= self.policy.get_state_value(trajectories['state'])
             
             loss = self._compute_loss(advantages, trajectories['log_prob'], self.config.normalize_advantages)
             save_loss = loss.item()
@@ -205,11 +252,12 @@ class PolicyGradient(AgentInterface):
             self.optimizer.step()  # Update the policy parameters
             
             # Update the baseline is applicable
-            if self.critic is not None:
+            critic_losses = None
+            if self.policy.critic_head is not None:
                 critic_losses = []
                 for _ in range(self.config.baseline_optim_steps):
                     # Compute the Q function predictions
-                    q_value_pred = self.critic(trajectories['state']).squeeze(1)
+                    q_value_pred = self.policy.get_state_value(trajectories['state'])
 
                     critic_loss = torch.nn.functional.mse_loss(q_value_pred, Q_hat)
                     critic_losses.append(critic_loss.item())
@@ -227,15 +275,13 @@ class PolicyGradient(AgentInterface):
             # Log the training progress
             if logger.should_log(num_steps):
                 logger.log_scalar("policy_loss", save_loss, iteration=num_steps)
-                if self.critic is not None:
+                if critic_losses is not None:
                     logger.log_scalar("critic_loss", np.mean(critic_losses), iteration=num_steps)
 
             # Evaluate the agent periodically
-            if evaluator is not None:
-                evaluator.evaluate(agent=self.policy, iteration=num_steps)
+            evaluator.evaluate(agent=self.policy, iteration=num_steps)
         
-        if evaluator is not None:
-            evaluator.close()
+        evaluator.close()
 
     @classmethod
     def _compute_loss(cls, 
@@ -260,191 +306,55 @@ class PolicyGradient(AgentInterface):
         loss = -(log_probs * advantages).mean()
         return loss
     
-    
-class PolicyGradientTrajectory(PolicyGradient):
-    """
-    Policy Gradient agent with trajectory-based training.
-    
-    This class extends the PolicyGradient class to handle trajectory-based training.
-    It collects trajectories and computes advantages based on the collected data.
-
-    Args:
-        env_params (EnvParams): Environment parameters.
-        policy (Optional[DistributionPolicy]): The policy to be used by the agent. If None, a default policy will be created based on the environment parameters.
-        batch_size (int): Size of the batch for training. Default is 100.
-        learning_rate (float): Learning rate for the optimizer. Default is 1e-3.
-        gamma (float): Discount factor for future rewards. Default is 0.99.
-        gae_lambda (float): Lambda parameter for Generalized Advantage Estimation. Default is 0.95.
-        optim_steps (int): Number of optimization steps per training iteration. Default is 1.
-        reward_to_go (bool): Whether to use rewards-to-go instead of total discounted return. Default is False.
-        use_baseline (bool): Whether to use a baseline for advantage estimation. Default is False.
-        use_gae (bool): Whether to use Generalized Advantage Estimation. Default is False.
-        baseline_learning_rate (float): Learning rate for the baseline network if used. Default is 5e-3.
-        baseline_optim_steps (int): Number of optimization steps for the baseline network. Default is 5.
-        normalize_advantages (bool): Whether to normalize advantages before training. Default is True.
-        network_arch (List[int]): Architecture of the neural network for the policy. Default is [64, 64].
-        device (str): Device to run the agent on (e.g., 'cpu' or 'cuda'). Default is 'cpu'.    
-    """
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def train(self,
-              env: EnvironmentInterface,
-              total_steps: int,
-              schedulers: List[ParameterScheduler] = [],
-              logger: Logger | None = None,
-              evaluator: Evaluator | None = None,
-              show_progress: bool = True
-              ) -> None:
+    def _save_impl(self, path: Path) -> None:
         """
-        Train the PolicyGradient agent using the provided environment
+        Writes a self-contained checkpoint directory.
 
-        Args:
-            env (EnvironmentInterface): The environment in which the agent will operate.
-            total_steps (int): Total number of training steps to perform.
-            schedulers (List[ParameterScheduler]): List of parameter schedulers to update during training.
-            logger (Optional[Logger]): Logger for logging training progress. If None, a default logger will be created.
-            evaluator (Evaluator): Evaluator to evaluate the agent periodically.
-            show_progress (bool): If True, show a progress bar during training.
+        Layout:
+          path/
+            agent.pt
+            policy.pt
         """
-        logger = logger or Logger.create('blank')
+        path.mkdir(parents=True, exist_ok=True)
 
-        if show_progress:
-            progress_bar = ProgressBar(total_steps=total_steps)
+        payload = {
+            "algo": "PolicyGradient",
+            "agent_format_version": 1,
+            "config": asdict(self.config),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+        }
 
-        # Initialize collector without flattening so the experience shape is (N, T, ...)
-        collector = SequentialCollector(env=env, logger=logger)
+        if self.critic_optimizer is not None:
+            payload["critic_optimizer_state_dict"] = self.critic_optimizer.state_dict()
 
-        num_steps = 0
-        while num_steps < total_steps:
-            # Update schedulers if any
-            for scheduler in schedulers:
-                scheduler.update(current_step=num_steps)
+        torch.save(payload, path / "agent.pt")
+        self.policy.save(path / "policy.pt")
 
-            # Collect experience using the current policy
-            # trajectories is a list of tensors, each tensor is a trajectory of shape (T_i, ...)
-            trajectories, batch_steps = collector.collect_trajectory(policy=self.policy, min_num_steps=self.batch_size)
-            num_steps += batch_steps
 
-            batch_states = torch.cat([t['state'] for t in trajectories], dim=0)  # Shape (N*T, D)
-
-            # Compute Monte Carlo estimate of the Q function
-            if not self.use_reward_to_go:
-                # \sum_{t'=0}^{T-1} \gamma^t r_t'
-                Q_hat = self._compute_trajectory_rewards(
-                    rewards=[t['reward'] for t in trajectories],
-                    gamma=self.gamma
-                )
-            else:
-                # \sum_{t'=t}^{T-1} \gamma^{t'-t} r_{t'}
-                Q_hat = self._compute_rewards_to_go(
-                    rewards=[t['reward'] for t in trajectories],
-                    dones=[t['done'] for t in trajectories],
-                    gamma=self.gamma
-                )
-
-            if self.use_baseline:
-                advantages = Q_hat - self.critic(batch_states)
-            else:
-                advantages = Q_hat
-
-            loss = self._compute_loss(advantages, [t['log_prob'] for t in trajectories], self.normalize_advantages)
-
-            self.optimizer.zero_grad()
-            loss.backward()  # Backpropagate the loss
-            self.optimizer.step()  # Update the policy parameters
-            
-            # Update the baseline is applicable
-            if self.use_baseline:
-                Q_hat = torch.cat(Q_hat, dim=0)  # Shape (N*T, 1)
-                for _ in range(self.baseline_optim_steps):
-                    batch_state = batch_states
-                    q_value_pred = self.critic(batch_state).squeeze()
-                    critic_loss = torch.nn.functional.mse_loss(q_value_pred, Q_hat)
-                    self.critic_optimizer.zero_grad()
-                    critic_loss.backward()  # Backpropagate the critic loss
-                    self.critic_optimizer.step()  # Update the critic parameters
-                    
-            if show_progress:
-                progress_bar.update(num_steps, desc=f"Episode Reward: {collector.previous_episode_reward:.2f}, "
-                                                                   f"Episode Length: {collector.previous_episode_length}, "
-                                                                   f"Loss: {loss:.4f},")
-
-            # Log the training progress
-            if logger.should_log(num_steps):
-                pass
-
-            # Evaluate the agent periodically
-            if evaluator is not None:
-                evaluator.evaluate(agent=self.policy, iteration=num_steps)
-        
-        if evaluator is not None:
-            evaluator.close()
-            
-    def _compute_loss(self, advantages, log_probs, normalize):
-
-        if normalize:
-            # Compute the mean and std of the advantages across all trajectories otherwise the advantages will all be 0 for the total discounted return
-            flat_adv = torch.cat(advantages)
-            mean_adv = flat_adv.mean()
-            std_adv = flat_adv.std()
-            for i in range(len(advantages)):
-                advantages[i] = (advantages[i] - mean_adv) / (std_adv + 1e-8)
-        # Update the policy using the computed advantages
-        # Trajectories is [T_i, ...]_N and advantages is [T_i, 1]_N
-        losses = []
-        for log_prob, adv in zip(log_probs, advantages):
-            log_prob_sum = log_prob * adv.unsqueeze(1)  # Shape (T_i, 1)
-            losses.append(log_prob_sum.sum())
-        losses = torch.stack(losses, dim=0)
-        loss = -losses.mean()        
-        return loss    
-    
-    @staticmethod        
-    def _compute_trajectory_rewards(rewards: List[torch.Tensor], gamma: float):
+    @classmethod
+    def load(cls, path: str | Path, map_location: str | torch.device = "cpu") -> "PolicyGradientAgent":
         """
-        Compute the total discounted return G from a full trajectory.
-
-        ..math::
-            \hat{Q}
-        
-        Args:
-            rewards: Tensor of shape (N, T, 1) with rewards for each timestep.
-            gamma: Discount factor
-
-        Returns:
-            Scalar float representing total discounted return with shape (N, T)
+        Loads the checkpoint and returns a fully-constructed PolicyGradientAgent.
         """
-        returns = []
-        for r in rewards:
-            T = r.shape[0]
-            discounts = gamma ** torch.arange(T, dtype=torch.float32, device=r.device).unsqueeze(1)
-            total_return = torch.sum(discounts * r).item()
-            returns.append(torch.full((T,), total_return, dtype=torch.float32, device=r.device))
-        return returns
-    
-    @staticmethod
-    def _compute_rewards_to_go(rewards: List[torch.Tensor], dones: List[torch.Tensor], gamma: float) -> List[torch.Tensor]:
-        """
-        Compute rewards-to-go from rewards and done flags.
+        p = Path(path)
+        agent_meta = torch.load(p / "agent.pt", map_location=map_location, weights_only=False)
 
-        Args:
-            rewards (torch.Tensor): Rewards from the environment with shape (N, T, 1).
-            dones (torch.Tensor): Done flags indicating if the episode has ended with shape (N, T, 1).
-            gamma (float): Discount factor.
+        if agent_meta.get("algo") != "PolicyGradient":
+            raise ValueError(f"Checkpoint algo mismatch: expected PolicyGradient, got {agent_meta.get('algo')}")
 
-        Returns:
-            torch.Tensor: Computed rewards-to-go with shape (N, T)
-        """
-        rewards_to_go = []
-        for reward_traj, done_traj in zip(rewards, dones):
-            returns = []
-            R = 0.0
-            for reward, done in zip(reversed(reward_traj), reversed(done_traj)):
-                if done:
-                    R = 0.0
-                R = reward + gamma * R
-                returns.insert(0, R)
-            rewards_to_go.append(torch.tensor(returns, dtype=torch.float32, device=reward_traj.device))
+        config = PolicyGradientConfig(**agent_meta["config"])
+        policy = PolicyGradientPolicy.load(p / "policy.pt", map_location=map_location)
 
-        return rewards_to_go 
+        agent = cls(
+            policy=policy,
+            config=config,
+            device=str(map_location),
+        )
+
+        opt_state = agent_meta["optimizer_state_dict"]
+        agent.optimizer.load_state_dict(opt_state)
+
+        if "critic_optimizer_state_dict" in agent_meta:
+            agent.critic_optimizer.load_state_dict(agent_meta["critic_optimizer_state_dict"])
+
+        return agent      

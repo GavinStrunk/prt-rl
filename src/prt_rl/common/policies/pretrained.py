@@ -1,4 +1,6 @@
 import torch
+from torch import Tensor
+from typing import Dict, Tuple
 
 class SB3Policy:
     """
@@ -76,7 +78,7 @@ class SB3Policy:
         self.model = self.model_class.load(self.model_path, device=self.device, **kwargs)
 
     @torch.no_grad()
-    def act(self, obs: torch.Tensor, deterministic: bool = True) -> torch.Tensor:
+    def act(self, obs: torch.Tensor, deterministic: bool = True) -> Tuple[Tensor, Dict[str, Tensor]]:
         """
         Perform an action based on the current observation.
 
@@ -100,4 +102,4 @@ class SB3Policy:
             action = torch.tensor(action, device=self.device).unsqueeze(-1)
         else:
             action = torch.tensor(action, device=self.device)
-        return action
+        return action, {}

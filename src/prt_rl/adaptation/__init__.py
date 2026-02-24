@@ -13,3 +13,10 @@ In contrast to standard model-free algorithms that learn a fixed policy
 for a single MDP, these agents focus on fast test-time adaptation,
 sim-to-real robustness, and cross-task generalization.
 """
+from .rma import RMAConfig, RMAAgent, RMAPolicy
+
+__all__ = [
+    "RMAConfig",
+    "RMAAgent",
+    "RMAPolicy"
+]

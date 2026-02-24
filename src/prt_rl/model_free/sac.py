@@ -1,11 +1,16 @@
 """
 Soft Actor-Critic (SAC)
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+from pathlib import Path
+import itertools
 import torch
-from typing import Optional, List, Tuple
-from prt_rl.agent import AgentInterface
-from prt_rl.env.interface import EnvParams, EnvironmentInterface
+from torch import Tensor, nn
+import torch.nn.functional as F
+from typing import Optional, List, Tuple, Dict
+from prt_rl.agent import Agent
+from prt_rl.env.interface import EnvironmentInterface
+from prt_rl.common.policies import NeuralPolicy, RandomPolicy
 from prt_rl.common.loggers import Logger
 from prt_rl.common.schedulers import ParameterScheduler
 from prt_rl.common.progress_bar import ProgressBar
@@ -13,10 +18,10 @@ from prt_rl.common.evaluators import Evaluator
 
 import copy
 import numpy as np
-from prt_rl.common.collectors import ParallelCollector
+from prt_rl.common.collectors import Collector
 from prt_rl.common.buffers import ReplayBuffer
-from prt_rl.common.policies import DistributionPolicy, StateActionCritic, BasePolicy
-import prt_rl.common.distributions as dist
+from prt_rl.common.components.heads import DistributionHead, QValueHead
+from prt_rl.common.components.networks import QCritic
 import prt_rl.common.utils as utils
 
 @dataclass
@@ -34,10 +39,11 @@ class SACConfig:
         tau (float): Soft update coefficient for the target networks.
         gamma (float): Discount factor for future rewards.
         entropy_coeff (float | None): Initial value for the entropy coefficient, alpha. If None, it will be learned.
-        target_entropy (float | None): Target entropy for the policy. If None, it will be set to -action_dim.
+        target_entropy (float | None): Target entropy for the policy. A reasonable default is -action_dim.
         use_log_entropy (bool): If True, optimize the log of the entropy coefficient, else optimize the coefficient directly.
         reward_scale (float): Scaling factor for rewards.
     """
+    target_entropy: float
     buffer_size: int = 1000000
     min_buffer_size: int = 100
     steps_per_batch: int = 1
@@ -47,11 +53,10 @@ class SACConfig:
     tau: float = 0.005
     gamma: float = 0.99
     entropy_coeff: Optional[float] = None
-    target_entropy: Optional[float] = None
     use_log_entropy: bool = True
     reward_scale: float = 1.0
     
-class SACPolicy(BasePolicy):
+class SACPolicy(NeuralPolicy):
     """
     Soft Actor-Critic (SAC) policy class.
 
@@ -66,53 +71,49 @@ class SACPolicy(BasePolicy):
         device (str): Device to run the model on (e.g., 'cpu' or 'cuda').
     """
     def __init__(self,
-                env_params: EnvParams,
+                network: nn.Module,
+                actor_head: DistributionHead,
+                critic_head: QValueHead,
+                *,
+                action_min: Tensor,
+                action_max: Tensor,
                 num_critics: int = 2,
-                actor: DistributionPolicy | None = None,
-                critic: StateActionCritic | None = None,
-                device: str = 'cpu'
+                critic_network: Optional[nn.Module] = None,
                 ) -> None:
-        super().__init__(env_params=env_params)
+        super().__init__()
         self.num_critics = num_critics
-        self.device = torch.device(device)
+        self.action_min = action_min
+        self.action_max = action_max
+        self.action_scale = (action_max - action_min) / 2
+        self.action_bias = (action_max + action_min) / 2
+        self.actor_network = network
+        self.actor_head = actor_head
 
-        self.actor = actor if actor is not None else DistributionPolicy(env_params=env_params, policy_kwargs={'network_arch': [256, 256]}, distribution=dist.TanhGaussian)
-        self.actor.to(self.device)
+        # Create a separate critic network backbone by default if one is not provided
+        critic_network = critic_network if critic_network is not None else copy.deepcopy(network)    
 
-        self.critic = critic if critic is not None else StateActionCritic(env_params=env_params, num_critics=num_critics)
-        self.critic.to(self.device)
-        self.critic_target = copy.deepcopy(self.critic)
-        self.critic_target.to(self.device)
+        # Create critics and target critics
+        self.critics = nn.ModuleList()
+        self.target_critics = nn.ModuleList()
+        for _ in range(self.num_critics):
+            critic = QCritic(copy.deepcopy(critic_network), copy.deepcopy(critic_head))
+            target_critic = copy.deepcopy(critic)
 
-        # Compute the scaling and bias for rescaling the actions
-        amax = self.env_params.get_action_max_tensor().to(self.device)
-        amin = self.env_params.get_action_min_tensor().to(self.device)
-        self.action_scale = (amax - amin) / 2
-        self.action_bias = (amax + amin) / 2
+            self.critics.append(critic)
+            self.target_critics.append(target_critic)
 
-    def forward(self, 
-                state: torch.Tensor, 
-                deterministic: bool = False
-                ) -> torch.Tensor:
-        """
-        Forward pass through the policy network.
-
-        Args:
-            state (torch.Tensor): The current state of the environment.
-            deterministic (bool): If True, the action will be selected deterministically.
-
-        Returns:
-            The action to be taken.
-        """
-        # Get the action from the Squashed Gaussian policy which is in the range [-1, 1]
-        action = self.actor(state, deterministic=deterministic)
-        action = action * self.action_scale + self.action_bias
-        return action
-
-    def predict(self, 
-                state: torch.Tensor, 
-                deterministic: bool = False
-                ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def metadata(self):
+        return {
+            "num_critics": self.num_critics,
+            "action_min": self.action_min,
+            "action_max": self.action_max,
+        }
+    
+    @torch.no_grad()
+    def act(self,
+            obs: torch.Tensor,
+            deterministic: bool = False
+            ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """
         Predict the action based on the current state.
 
@@ -123,20 +124,18 @@ class SACPolicy(BasePolicy):
         Returns:
             Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the chosen action, value estimate, and action log probability.
                 - action (torch.Tensor): Tensor with the chosen action. Shape (B, action_dim)
-                - value_estimate (torch.Tensor): Tensor with the estimated value of the state. Shape (B, C, 1) where C is the number of critics
                 - log_prob (torch.Tensor): None
         """
-        action, _, log_probs = self.actor.predict(state, deterministic=deterministic) 
+        latent = self.actor_network(obs)
+        action, log_prob, _ = self.actor_head.sample(latent, deterministic=deterministic) 
 
         # Rescale the action to the environment's action space
-        action = action * self.action_scale + self.action_bias  
+        action = action * self.action_scale.to(obs.device) + self.action_bias.to(obs.device)
 
-        value_estimates = self.critic(state, action)
-        value_estimates = torch.stack(value_estimates, dim=1)  # Shape (B, C, 1) where C is the number of critics
-        return action, value_estimates, log_probs
+        return action, {"log_prob": log_prob}
     
     def get_q_values(self,
-                     state: torch.Tensor,
+                     obs: torch.Tensor,
                      action: torch.Tensor,
                      index: Optional[int] = None
                      ) -> torch.Tensor:
@@ -144,39 +143,39 @@ class SACPolicy(BasePolicy):
         Get Q-values from all critics for the given state-action pairs.
 
         Args:
-            state (torch.Tensor): Current state tensor.
+            obs (torch.Tensor): Current observation tensor.
             action (torch.Tensor): Action tensor.
 
         Returns:
             torch.Tensor: Tensor containing Q-values from all critics. Shape (B, C, 1) where C is the number of critics.
         """
         if index is None:
-            q_values = self.critic(state, action)
+            q_values = [critic(obs, action) for critic in self.critics]
             q_values = torch.stack(q_values, dim=1)  # Shape (B, C, 1) where C is the number of critics
         else:
-            q_values = self.critic.forward_indexed(index, state, action)
+            q_values = self.critics[index](obs, action)
         return q_values
     
     def get_target_q_values(self,
-                            state: torch.Tensor,
+                            obs: torch.Tensor,
                             action: torch.Tensor,
                             ) -> torch.Tensor:
         """
         Get target Q-values from all target critics for the given state-action pairs.
 
         Args:
-            state (torch.Tensor): Current state tensor.
+            obs (torch.Tensor): Current observation tensor.
             action (torch.Tensor): Action tensor.
 
         Returns:
             torch.Tensor: Tensor containing target Q-values from all critics. Shape (B, C, 1) where C is the number of critics.
         """
-        q_values = self.critic_target(state, action)
+        q_values = [critic(obs, action) for critic in self.target_critics]
         q_values = torch.stack(q_values, dim=1)  # Shape (B, C, 1) where C is the number of critics
         return q_values
 
 
-class SAC(AgentInterface):
+class SACAgent(Agent):
     """
     Soft Actor-Critic (SAC) agent.
 
@@ -190,7 +189,8 @@ class SAC(AgentInterface):
     """
     def __init__(self, 
                  policy: SACPolicy,
-                 config: SACConfig = SACConfig(), 
+                 config: SACConfig, 
+                 *,
                  device: str = 'cpu'
                  ) -> None:
         super().__init__()
@@ -202,11 +202,6 @@ class SAC(AgentInterface):
         self.policy.to(self.device)
 
         # Initialize the entropy coefficient and target
-        if self.config.target_entropy is None:
-            self.target_entropy = -float(self.policy.env_params.action_len)
-        else:
-            self.target_entropy = self.config.target_entropy
-        
         if self.config.entropy_coeff is None:
             if self.config.use_log_entropy:
                 self.entropy_coeff = torch.log(torch.ones(1, device=self.device)).requires_grad_(True)
@@ -219,27 +214,14 @@ class SAC(AgentInterface):
             self.entropy_optimizer = None
 
         # Configure the optimizers
-        self.actor_optimizer = torch.optim.Adam(self.policy.actor.parameters(), lr=self.config.learning_rate)
-        self.critic_optimizers = [
-            torch.optim.Adam(critic.parameters(), lr=self.config.learning_rate) for critic in self.policy.critic.critics
-        ]
+        self.actor_optimizer = torch.optim.Adam(itertools.chain(self.policy.actor_network.parameters(), self.policy.actor_head.parameters()), lr=self.config.learning_rate)
+        self.critic_optimizer = torch.optim.Adam(self.policy.critics.parameters(), lr=self.config.learning_rate)
 
-    def predict(self, 
-                state: torch.Tensor, 
-                deterministic: bool = False
-                ) -> torch.Tensor:
-        """
-        Predict the action based on the current state.
-        
-        Args:
-            state (torch.Tensor): Current state tensor.
-            deterministic (bool): If True, choose the action deterministically. Default is False.
-        
-        Returns:
-            torch.Tensor: Tensor with the chosen action. Shape (B, action_dim)
-        """
-        with torch.no_grad():
-            return self.policy(state, deterministic=deterministic)
+
+    @torch.no_grad()
+    def act(self, obs: Tensor, deterministic: bool = False) -> Tensor:
+        action, _ = self.policy.act(obs, deterministic=deterministic)
+        return action
 
     def train(self,
               env: EnvironmentInterface,
@@ -260,21 +242,32 @@ class SAC(AgentInterface):
             evaluator (Evaluator | None): Evaluator for periodic evaluation during training.
             show_progress (bool): If True, display a progress bar during training.
         """
-        logger = logger or Logger.create('blank')
+        logger = logger or Logger()
+        evaluator = evaluator or Evaluator()
 
         if show_progress:
             progress_bar = ProgressBar(total_steps=total_steps)
 
         num_steps = 0
 
-        collector = ParallelCollector(env=env, logger=logger, flatten=True)   
+        collector = Collector(env=env, logger=logger, flatten=True)   
         replay_buffer = ReplayBuffer(capacity=self.config.buffer_size, device=self.device)
 
+        # Collect initial experience until replay buffer has enough samples for training with policy so we have log probabilities 
+        while replay_buffer.get_size() < self.config.min_buffer_size:
+            experience = collector.collect_experience(policy=self.policy, num_steps=self.config.steps_per_batch)
+
+            # Apply reward scaling
+            experience['reward'] = experience['reward'] * self.config.reward_scale  
+
+            replay_buffer.add(experience)
+            num_steps += experience['state'].shape[0]
+
+            if show_progress:
+                progress_bar.update(current_step=num_steps, desc="Collecting initial experience...")        
+
         while num_steps < total_steps:
-            # Update schedulers
-            if schedulers is not None:
-                for scheduler in schedulers:
-                    scheduler.update(current_step=num_steps)  
+            self._update_schedulers(schedulers=schedulers, step=num_steps) 
 
             # Collect experience dictionary with shape (B, ...)
             experience = collector.collect_experience(policy=self.policy, num_steps=self.config.steps_per_batch, bootstrap=False)
@@ -286,12 +279,6 @@ class SAC(AgentInterface):
             # Add experience to the replay buffer
             replay_buffer.add(experience)
 
-            # Collect a minimum number of steps in the replay buffer before training
-            if replay_buffer.get_size() < self.config.min_buffer_size:
-                if show_progress:
-                    progress_bar.update(current_step=num_steps, desc="Collecting initial experience...")
-                continue            
-
             actor_losses = []
             critics_losses = []
             entropy_losses = []
@@ -300,7 +287,8 @@ class SAC(AgentInterface):
                 mini_batch = replay_buffer.sample(batch_size=self.config.mini_batch_size)
 
                 # Compute the current policy's action and log probability
-                current_action, _, current_log_prob = self.policy.predict(mini_batch['state'])
+                current_action, action_info = self.policy.act(mini_batch['state'])
+                current_log_prob = action_info['log_prob']
 
                 # Entropy coefficient optimization
                 if self.config.use_log_entropy:
@@ -309,7 +297,7 @@ class SAC(AgentInterface):
                     entropy_coeff = self.entropy_coeff
 
                 if self.entropy_optimizer is not None:
-                    entropy_loss = -(self.entropy_coeff * (current_log_prob + self.target_entropy).detach()).mean()
+                    entropy_loss = -(self.entropy_coeff * (current_log_prob + self.config.target_entropy).detach()).mean()
                     entropy_losses.append(entropy_loss.item())
 
                     self.entropy_optimizer.zero_grad()
@@ -319,10 +307,11 @@ class SAC(AgentInterface):
                 # Compute the target values from the current policy
                 with torch.no_grad():
                     # Select next action based on current policy
-                    next_action, _, next_log_prob = self.policy.predict(mini_batch['next_state'])
+                    next_action, action_info = self.policy.act(mini_batch['next_state'])
+                    next_log_prob = action_info['log_prob']
 
                     # Compute the Q-values for all critics using target networks
-                    next_q_values = self.policy.get_target_q_values(state=mini_batch['next_state'], action=next_action).squeeze(-1)
+                    next_q_values = self.policy.get_target_q_values(obs=mini_batch['next_state'], action=next_action).squeeze(-1)
                     next_q_values = torch.min(next_q_values, dim=1, keepdim=True)[0]
 
                     # Add the entropy term to the target Q-values
@@ -331,18 +320,18 @@ class SAC(AgentInterface):
                     # Compute the discounted target Q-values
                     y = mini_batch['reward'] + (1 - mini_batch['done'].float()) * self.config.gamma * next_q_values
 
-                # Update critics
-                for i in range(self.policy.num_critics):
-                    q_i = self.policy.get_q_values(state=mini_batch['state'].detach(), action=mini_batch['action'].detach(), index=i)
-                    critic_loss = torch.nn.functional.mse_loss(q_i, y)
-                    critics_losses.append(critic_loss.item())
+                # Sum the losses across all critics
+                qs = [self.policy.get_q_values(mini_batch['state'].detach(), mini_batch['action'].detach(), index=i) for i in range(self.policy.num_critics)]
+                critic_loss = sum(F.mse_loss(y, q) for q in qs)
+                critics_losses.append(critic_loss.item())
 
-                    self.critic_optimizers[i].zero_grad()
-                    critic_loss.backward()
-                    self.critic_optimizers[i].step()
+                # Take a gradient step on the critics
+                self.critic_optimizer.zero_grad()
+                critic_loss.backward()
+                self.critic_optimizer.step()
 
                 # Compute Actor loss
-                q_values_pi = self.policy.get_q_values(state=mini_batch['state'], action=current_action)
+                q_values_pi = self.policy.get_q_values(obs=mini_batch['state'], action=current_action)
                 q_values_pi = torch.min(q_values_pi, dim=1, keepdim=True)[0]
                 actor_loss = (entropy_coeff * current_log_prob - q_values_pi).mean()
                 actor_losses.append(actor_loss.item())
@@ -353,7 +342,7 @@ class SAC(AgentInterface):
 
                 # Update target critic networks
                 for i in range(self.policy.num_critics):
-                    utils.polyak_update(self.policy.critic_target.critics[i], self.policy.critic.critics[i], tau=self.config.tau)   
+                    utils.polyak_update(self.policy.target_critics[i], self.policy.critics[i], tau=self.config.tau)   
 
             if show_progress:
                 tracker = collector.get_metric_tracker()
@@ -368,11 +357,67 @@ class SAC(AgentInterface):
                 logger.log_scalar('actor_loss', np.mean(actor_losses), num_steps)
                 logger.log_scalar('entropy_loss', np.mean(entropy_losses), num_steps)
                 logger.log_scalar('entropy_coeff', entropy_coeff.item(), num_steps)
-                for i in range(self.policy.num_critics):
-                    logger.log_scalar(f'critic{i}_loss', np.mean(critics_losses[i]), num_steps)
+                logger.log_scalar(f'critic_loss', critic_loss.item(), num_steps)
 
-            if evaluator is not None:
-                evaluator.evaluate(agent=self.policy, iteration=num_steps)
+            evaluator.evaluate(agent=self.policy, iteration=num_steps)
+        
+        evaluator.close()                                 
 
-        if evaluator is not None:
-            evaluator.close()                                 
+    def _save_impl(self, path: Path) -> None:
+        """
+        Writes a self-contained checkpoint directory.
+
+        Layout:
+          path/
+            agent.pt
+            policy.pt
+        """
+        path.mkdir(parents=True, exist_ok=True)
+
+        payload = {
+            "algo": "SAC",
+            "agent_format_version": 1,
+            "config": asdict(self.config),
+            "actor_optimizer_state_dict": self.actor_optimizer.state_dict(),
+            "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
+        }
+        if self.entropy_optimizer is not None:
+            payload["entropy_optimizer_state_dict"] = self.entropy_optimizer.state_dict()
+
+        torch.save(payload, path / "agent.pt")
+        self.policy.save(path / "policy.pt")
+
+
+    @classmethod
+    def load(cls, path: str | Path, map_location: str | torch.device = "cpu") -> "SACAgent":
+        """
+        Loads the checkpoint and returns a fully-constructed SACAgent.
+        """
+        p = Path(path)
+        agent_meta = torch.load(p / "agent.pt", map_location=map_location, weights_only=False)
+
+        if agent_meta.get("algo") != "SAC":
+            raise ValueError(f"Checkpoint algo mismatch: expected SAC, got {agent_meta.get('algo')}")
+
+        config = SACConfig(**agent_meta["config"])
+        policy = SACPolicy.load(p / "policy.pt", map_location=map_location)
+
+        agent = cls(
+            policy=policy,
+            config=config,
+            device=str(map_location),
+        )
+
+        actor_opt_state = agent_meta["actor_optimizer_state_dict"]
+        critic_opt_state = agent_meta["critic_optimizer_state_dict"]
+        agent.actor_optimizer.load_state_dict(actor_opt_state)
+        agent.critic_optimizer.load_state_dict(critic_opt_state)
+
+        if "entropy_optimizer_state_dict" in agent_meta:
+            entropy_opt_state = agent_meta["entropy_optimizer_state_dict"]
+            if agent.entropy_optimizer is not None:
+                agent.entropy_optimizer.load_state_dict(entropy_opt_state)
+            else:
+                print("Warning: checkpoint has entropy optimizer state but current agent does not have an entropy optimizer. Skipping loading entropy optimizer state.")
+        
+        return agent

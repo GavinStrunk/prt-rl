@@ -1,4 +1,3 @@
-from abc import ABC
 import copy
 import math
 from typing import Optional
@@ -6,8 +5,9 @@ import numpy as np
 from prt_rl.env.interface import EnvironmentInterface
 from prt_rl.common.loggers import Logger
 from prt_rl.common.collectors import Collector
+from prt_rl.common.policies import Policy
 
-class Evaluator(ABC):
+class Evaluator:
     """
     Base class for all evaluators in the PRT-RL framework.
     This class provides a common interface for evaluating agents in different environments with different objectives.
@@ -103,20 +103,20 @@ class RewardEvaluator(Evaluator):
         self.keep_best = keep_best
         self.deterministic = deterministic
         self.best_reward = float("-inf")
-        self.best_agent = None
+        self.best_policy = None
 
         self.collector = Collector(env)
 
     def evaluate(self, 
-                 agent,
+                 policy: Policy,
                  iteration: int,
                  is_last: bool = False
                  ) -> None:
         """
-        Evaluate the agent's performance in the given environment.
+        Evaluate the policy's performance in the given environment.
 
         Args:
-            agent: The agent to be evaluated.
+            policy: The policy to be evaluated.
             iteration (int): The current iteration number.
             is_last (bool): Whether this is the last evaluation.
         """
@@ -125,7 +125,7 @@ class RewardEvaluator(Evaluator):
             return
         
         # Collect desired number of trajectories
-        trajectories = self.collector.collect_trajectory(agent, num_trajectories=self.num_episodes)
+        trajectories = self.collector.collect_trajectory(policy, num_trajectories=self.num_episodes)
 
         rewards = trajectories['reward'].detach().cpu().numpy().reshape(-1)
         dones = trajectories['done'].detach().cpu().numpy().reshape(-1)
@@ -147,7 +147,7 @@ class RewardEvaluator(Evaluator):
             self.best_reward = avg_reward
 
             if self.keep_best:
-                self.best_agent = copy.deepcopy(agent)
+                self.best_policy = copy.deepcopy(policy)
 
         if self.logger is not None:
             self.logger.log_scalar("evaluation_reward", avg_reward, iteration=iteration)
@@ -155,13 +155,23 @@ class RewardEvaluator(Evaluator):
             self.logger.log_scalar("evaluation_reward_max", np.max(episode_rewards), iteration=iteration)
             self.logger.log_scalar("evaluation_reward_min", np.min(episode_rewards), iteration=iteration)
 
+    def get_best_policy(self) -> Optional[Policy]:
+        """
+        Get the best policy based on evaluation performance.
+
+        Returns:
+            Optional[Policy]: The best policy if keep_best is True and a best policy exists, otherwise None.
+        """
+        if self.keep_best and self.best_policy is not None:
+            return self.best_policy
+        else:
+            return None
 
     def close(self) -> None:
         """
         Close the evaluator and release any resources.
         """
-        if self.keep_best and self.best_agent is not None and self.logger is not None:
-            self.logger.save_agent(self.best_agent, "agent-best.pt")
+        self.env.close()
 
 class NumberOfStepsEvaluator(Evaluator):
     """
@@ -192,21 +202,21 @@ class NumberOfStepsEvaluator(Evaluator):
         self.logger = logger
         self.keep_best = keep_best
         self.deterministic = deterministic
-        self.best_agent = None
+        self.best_policy = None
         self.best_timestep = math.inf
 
         self.collector = Collector(env)
 
     def evaluate(self,
-                 agent,
+                 policy: Policy,
                  iteration: int,
                  is_last: bool = False
                  ) -> None:
         """
-        Evaluate the agent's performance in the given environment based on timesteps.
+        Evaluate the policy's performance in the given environment based on timesteps.
 
         Args:
-            agent: The agent to be evaluated.
+            policy: The policy to be evaluated.
             iteration (int): The current iteration number.
             is_last (bool): Whether this is the last evaluation.
 
@@ -217,7 +227,7 @@ class NumberOfStepsEvaluator(Evaluator):
         if not is_last and not self._should_evaluate(iteration):
             return
         
-        trajectories = self.collector.collect_trajectory(agent, num_trajectories=self.num_episodes)
+        trajectories = self.collector.collect_trajectory(policy, num_trajectories=self.num_episodes)
 
         rewards = trajectories['reward'].detach().cpu().numpy().reshape(-1)
         dones = trajectories['done'].detach().cpu().numpy().reshape(-1)
@@ -239,14 +249,25 @@ class NumberOfStepsEvaluator(Evaluator):
             self.best_timestep = iteration
 
             if self.keep_best:
-                self.best_agent = copy.deepcopy(agent)
+                self.best_policy = copy.deepcopy(policy)
 
         if self.logger is not None:
             self.logger.log_scalar("evaluation_numsteps", self.best_timestep, iteration=iteration)
         
+    def get_best_policy(self) -> Optional[Policy]:
+        """
+        Get the best policy based on evaluation performance.
+
+        Returns:
+            Optional[Policy]: The best policy if keep_best is True and a best policy exists, otherwise None.
+        """
+        if self.keep_best and self.best_policy is not None:
+            return self.best_policy
+        else:
+            return None
+
     def close(self) -> None:
         """
         Close the evaluator and release any resources.
         """
-        if self.keep_best and self.best_agent is not None and self.logger is not None:
-            self.logger.save_agent(self.best_agent, "agent-best.pt")        
+        self.env.close()

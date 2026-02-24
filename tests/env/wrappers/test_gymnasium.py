@@ -1,8 +1,10 @@
 import numpy as np
 import pytest
 import torch
+import gymnasium as gym
 from prt_rl.env import wrappers
 import prt_sim.gymnasium 
+from prt_rl.env.wrappers.gymnasium_wrappers import RandomPendulum
 
 def test_gymnasium_wrapper_for_cliff_walking():
     # Reference: https://gymnasium.farama.org/environments/toy_text/cliff_walking/
@@ -203,6 +205,74 @@ def test_gymnasium_get_params_from_dict():
     assert act_min == [0, 0.0, 0.0, 0.0, 0.0, 0.0]
     assert act_max == [2, 1.0, 1.0, 1.0, 1.0, 1.0]
 
+def test_gymnasium_wrapper_env_factory_single_env():
+    env = wrappers.GymnasiumWrapper(
+        env_factory=lambda env_index, seed: gym.make("Pendulum-v1"),
+        render_mode=None,
+    )
+
+    params = env.get_parameters()
+    assert params.action_len == 1
+    assert params.action_continuous is True
+    assert params.observation_shape == (3,)
+
+    state, info = env.reset()
+    assert state.shape == (1, *params.observation_shape)
+    assert state.dtype == torch.float32
+
+def test_gymnasium_wrapper_env_factory_multienv_with_seeds():
+    factory_calls = []
+
+    def make_randomized_pendulum(env_index: int, seed: int | None):
+        factory_calls.append((env_index, seed))
+        return gym.make("Pendulum-v1")
+
+    env = wrappers.GymnasiumWrapper(
+        env_factory=make_randomized_pendulum,
+        num_envs=3,
+        seed=13,
+        render_mode=None,
+    )
+
+    assert factory_calls == [(0, 13), (1, 14), (2, 15)]
+
+    params = env.get_parameters()
+    state, _ = env.reset()
+    assert state.shape == (3, *params.observation_shape)
+    assert state.dtype == torch.float32
+
+def test_gymnasium_wrapper_requires_exactly_one_source():
+    with pytest.raises(ValueError):
+        wrappers.GymnasiumWrapper()
+
+    with pytest.raises(ValueError):
+        wrappers.GymnasiumWrapper(
+            gym_name="CartPole-v1",
+            env_factory=lambda env_index, seed: gym.make("Pendulum-v1"),
+        )
+
+def test_random_pendulum_reset_seed_reproducible():
+    wrapped = RandomPendulum(gym.make("Pendulum-v1"))
+
+    _, info1 = wrapped.reset(seed=123)
+    _, info2 = wrapped.reset(seed=123)
+
+    assert info1["domain_params"] == info2["domain_params"]
+
+def test_random_pendulum_randomization_seed_reproducible_sequence():
+    wrapped1 = RandomPendulum(gym.make("Pendulum-v1"), randomization_seed=777)
+    wrapped2 = RandomPendulum(gym.make("Pendulum-v1"), randomization_seed=777)
+
+    seq1 = []
+    seq2 = []
+    for _ in range(5):
+        _, info1 = wrapped1.reset()
+        _, info2 = wrapped2.reset()
+        seq1.append(info1["domain_params"])
+        seq2.append(info2["domain_params"])
+
+    assert seq1 == seq2
+
 @pytest.mark.skip("ImagePipeline-v0 requires downloading the BDD100K dataset.")
 def test_gymnasium_image_pipeline_dict():
     env = wrappers.GymnasiumWrapper(
@@ -217,4 +287,3 @@ def test_gymnasium_image_pipeline_dict():
     assert params.observation_continuous is True
     assert params.observation_min == np.zeros((3, 720, 1280)).tolist()
     assert params.observation_max == np.ones((3, 720, 1280)).tolist()
-

@@ -1,10 +1,13 @@
 """
 Twin Delayed Deep Deterministic Policy Gradient (TD3)
 """
+from pathlib import Path
 import torch
 import torch.nn.functional as F
-from typing import Optional, List, Tuple
-from prt_rl.agent import AgentInterface
+from torch import nn, Tensor
+from typing import Optional, List, Tuple, Dict
+from prt_rl.agent import Agent
+from prt_rl.common.policies import NeuralPolicy, RandomPolicy
 from prt_rl.env.interface import EnvParams, EnvironmentInterface
 from prt_rl.common.loggers import Logger
 from prt_rl.common.schedulers import ParameterScheduler
@@ -14,10 +17,11 @@ import prt_rl.common.utils as utils
 
 import copy
 import numpy as np
-from dataclasses import dataclass
-from prt_rl.common.collectors import ParallelCollector
+from dataclasses import dataclass, asdict
+from prt_rl.common.collectors import Collector
 from prt_rl.common.buffers import ReplayBuffer
-from prt_rl.common.policies import BasePolicy, ContinuousPolicy, StateActionCritic
+from prt_rl.common.components.heads import ContinuousHead, QValueHead
+from prt_rl.common.components.networks import QCritic
 
 
 @dataclass
@@ -52,9 +56,8 @@ class TD3Config:
     noise_clip: float = 0.5
     delay_freq: int = 2
     tau: float = 0.005
-    num_critics: int = 2
 
-class TD3Policy(BasePolicy):
+class TD3Policy(NeuralPolicy):
     """
     TD3 Policy
 
@@ -71,74 +74,84 @@ class TD3Policy(BasePolicy):
         device (str): Device to run the policy on ('cpu' or 'cuda'). Default is 'cpu'.
     """
     def __init__(self, 
-                 env_params: EnvParams, 
+                 network: nn.Module,
+                 actor_head: ContinuousHead,
+                 critic_head: QValueHead,
+                 *,
+                 action_min: Tensor,
+                 action_max: Tensor,
                  num_critics: int = 2,
-                 actor: Optional[ContinuousPolicy] = None,
-                 critic: Optional[StateActionCritic] = None,
-                 share_encoder: bool = True,
-                 device: str='cpu'
+                 exploration_noise: float = 0.1,
+                 critic_network: Optional[nn.Module] = None,
                  ) -> None:
-        super().__init__(env_params=env_params)
+        super().__init__()
         self.num_critics = num_critics
-        self.share_encoder = share_encoder
-        self.device = torch.device(device)
+        self.action_min = action_min
+        self.action_max = action_max
+        self.exploration_noise = exploration_noise
 
-        # Create actor and target actor networks
-        self.actor = actor if actor is not None else ContinuousPolicy(env_params=env_params)
-        self.actor.to(self.device)
-        actor_encoder = self.actor.get_encoder()
-        if not self.share_encoder and actor_encoder is not None:
-            actor_encoder = copy.deepcopy(actor_encoder)
+        # Create an unified actor network and target actor network
+        self.actor = nn.Sequential(network, actor_head)
+        self.target_actor = copy.deepcopy(self.actor)
 
-        self.actor_target = copy.deepcopy(self.actor)
-        self.actor_target.to(self.device)
+        # Create a separate critic network backbone by default if one is not provided
+        critic_network = critic_network if critic_network is not None else copy.deepcopy(network)    
 
-        self.critic = critic if critic is not None else StateActionCritic(env_params=env_params, num_critics=num_critics, encoder=actor_encoder)
-        self.critic.to(self.device)
-        self.critic_target = copy.deepcopy(self.critic)
-        self.critic_target.to(self.device)
+        # Create critics and target critics
+        self.critics = nn.ModuleList()
+        self.target_critics = nn.ModuleList()
+        for _ in range(self.num_critics):
+            critic = QCritic(copy.deepcopy(critic_network), copy.deepcopy(critic_head))
+            target_critic = copy.deepcopy(critic)
 
-    def forward(self, 
-                state: torch.Tensor, 
-                deterministic: bool = False
-                ) -> torch.Tensor:
-        """
-        Forward pass through the policy network.
+            self.critics.append(critic)
+            self.target_critics.append(target_critic)
 
-        Args:
-            state (torch.Tensor): The current state of the environment.
-            deterministic (bool): If True, the action will be selected deterministically.
+    def metadata(self):
+        return {
+            "num_critics": self.num_critics,
+            "action_min": self.action_min,
+            "action_max": self.action_max,
+            "exploration_noise": self.exploration_noise,
+        }
 
-        Returns:
-            The action to be taken.
-        """
-        return self.actor(state, deterministic=deterministic)
+    @torch.no_grad()
+    def act(self,
+            obs: torch.Tensor,
+            deterministic: bool = False
+            ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        action = self.actor(obs)
+        if not deterministic:
+            # Add noise to the action for exploration
+            noise = utils.gaussian_noise(mean=0, std=self.exploration_noise, shape=action.shape, device=self.device)
+            action = action + noise
+        
+        # Ensure action is within bounds    
+        action = action.clamp(self.action_min.to(self.device), self.action_max.to(self.device))
+        return action, {}
     
-    def predict(self, 
-                state: torch.Tensor, 
-                deterministic: bool = False
-                ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def target_actor_action(self, obs:Tensor, policy_noise: float, noise_clip: float, action_shape) -> torch.Tensor:
         """
-        Predict the action based on the current state.
-
+        Compute the target actor's action with added noise for policy smoothing.
         Args:
-            state (torch.Tensor): Current state tensor.
-            deterministic (bool): If True, choose the action deterministically. Default is False.
-            
+            obs (torch.Tensor): The current observation of the environment.
+            policy_noise (float): Standard deviation of noise added to the target policy's actions.
+            noise_clip (float): Maximum absolute value of noise added to the target policy's actions.
+            action_shape: Shape of the action tensor.
         Returns:
-            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the chosen action, value estimate, and action log probability.
-                - action (torch.Tensor): Tensor with the chosen action. Shape (B, action_dim)
-                - value_estimate (torch.Tensor): Tensor with the estimated value of the state. Shape (B, C, 1) where C is the number of critics
-                - log_prob (torch.Tensor): None
+            torch.Tensor: The action computed by the target actor with added noise, clipped to action bounds.
         """
-        action = self.actor(state, deterministic=deterministic)
+        # Generate additive Gaussian noise and clip it to the specified range
+        noise = utils.gaussian_noise(mean=0, std=policy_noise, shape=action_shape, device=self.device)
+        noise_clipped = noise.clamp(-noise_clip, noise_clip)
 
-        value_estimates = self.critic(state, action)
-        value_estimates = torch.stack(value_estimates, dim=1)  # Shape (B, C, 1) where C is the number of critics
-        return action, value_estimates, None
-    
+        # Get target actor action plus noise and clip to action bounds
+        action = self.target_actor(obs) + noise_clipped
+        action = action.clamp(self.action_min.to(self.device), self.action_max.to(self.device))
+        return action
+        
     def get_q_values(self,
-                     state: torch.Tensor,
+                     obs: torch.Tensor,
                      action: torch.Tensor,
                      index: Optional[int] = None
                      ) -> torch.Tensor:
@@ -146,39 +159,39 @@ class TD3Policy(BasePolicy):
         Get Q-values from all critics for the given state-action pairs.
 
         Args:
-            state (torch.Tensor): Current state tensor.
+            obs (torch.Tensor): Current observation tensor.
             action (torch.Tensor): Action tensor.
 
         Returns:
             torch.Tensor: Tensor containing Q-values from all critics. Shape (B, C, 1) where C is the number of critics.
         """
         if index is None:
-            q_values = self.critic(state, action)
+            q_values = [critic(obs, action) for critic in self.critics]
             q_values = torch.stack(q_values, dim=1)  # Shape (B, C, 1) where C is the number of critics
         else:
-            q_values = self.critic.forward_indexed(index, state, action)
+            q_values = self.critics[index](obs, action)
         return q_values
     
     def get_target_q_values(self,
-                            state: torch.Tensor,
+                            obs: torch.Tensor,
                             action: torch.Tensor,
                             ) -> torch.Tensor:
         """
         Get target Q-values from all target critics for the given state-action pairs.
 
         Args:
-            state (torch.Tensor): Current state tensor.
+            obs (torch.Tensor): Current observation tensor.
             action (torch.Tensor): Action tensor.
 
         Returns:
             torch.Tensor: Tensor containing target Q-values from all critics. Shape (B, C, 1) where C is the number of critics.
         """
-        q_values = self.critic_target(state, action)
+        q_values = [critic(obs, action) for critic in self.target_critics]
         q_values = torch.stack(q_values, dim=1)  # Shape (B, C, 1) where C is the number of critics
         return q_values
     
 
-class TD3(AgentInterface):
+class TD3Agent(Agent):
     """
     Twin Delayed Deep Deterministic Policy Gradient (TD3)
 
@@ -192,6 +205,7 @@ class TD3(AgentInterface):
     def __init__(self,
                  policy: TD3Policy,
                  config: TD3Config = TD3Config(),
+                 *,
                  device: str = 'cpu',
                  ) -> None:
         super().__init__()
@@ -202,31 +216,21 @@ class TD3(AgentInterface):
         self.policy.to(self.device)
 
         self.actor_optimizer = torch.optim.Adam(self.policy.actor.parameters(), lr=self.config.learning_rate)
-        self.critic_optimizers = [
-            torch.optim.Adam(critic.parameters(), lr=self.config.learning_rate) for critic in self.policy.critic.critics
-        ]
+        self.critic_optimizer = torch.optim.Adam(self.policy.critics.parameters(), lr=self.config.learning_rate)
 
-        self.action_min = torch.tensor(self.policy.env_params.action_min, device=self.device, dtype=torch.float32)
-        self.action_max = torch.tensor(self.policy.env_params.action_max, device=self.device, dtype=torch.float32)
-
-    def predict(self, state: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
+    @torch.no_grad()
+    def act(self, obs: Tensor, deterministic: bool = False) -> Tensor:
         """
         Perform an action based on the current state.
 
         Args:
-            state (torch.Tensor): The current state of the environment.
+            obs (torch.Tensor): The current observation of the environment.
             deterministic (bool): If True, the agent will select actions deterministically.
 
         Returns:
             torch.Tensor: The action to be taken.
         """
-        with torch.no_grad():
-            action = self.policy(state)
-            if not deterministic:
-                # Add noise to the action for exploration
-                noise = utils.gaussian_noise(mean=0, std=self.config.exploration_noise, shape=action.shape, device=self.device)
-                action = action + noise
-                action = action.clamp(self.action_min, self.action_max)
+        action, _ = self.policy.act(obs, deterministic=deterministic)
         return action
         
     def train(self,
@@ -249,7 +253,8 @@ class TD3(AgentInterface):
             evaluator: Evaluator for evaluating the agent's performance.
             show_progress: If True, show a progress bar during training.
         """
-        logger = logger or Logger.create('blank')
+        logger = logger or Logger()
+        evaluator = evaluator or Evaluator()
 
         if show_progress:
             progress_bar = ProgressBar(total_steps=total_steps)
@@ -258,14 +263,21 @@ class TD3(AgentInterface):
         num_gradient_steps = 0
 
         # Make collector and flatten the experience so the shape is (B, ...)
-        collector = ParallelCollector(env=env, logger=logger, flatten=True)
+        collector = Collector(env=env, logger=logger, flatten=True)
         replay_buffer = ReplayBuffer(capacity=self.config.buffer_size, device=self.device)
 
+        # Collect initial experience until replay buffer has enough samples for training with random policy
+        random_policy = RandomPolicy(env.get_parameters())
+        while replay_buffer.get_size() < self.config.min_buffer_size:
+            experience = collector.collect_experience(policy=random_policy, num_steps=self.config.steps_per_batch)
+            replay_buffer.add(experience)
+            num_steps += experience['state'].shape[0]
+
+            if show_progress:
+                progress_bar.update(current_step=num_steps, desc="Collecting initial experience...")
+
         while num_steps < total_steps:
-            # Update Schedulers if provided
-            if schedulers is not None:
-                for scheduler in schedulers:
-                    scheduler.update(current_step=num_steps)
+            self._update_schedulers(schedulers, num_steps)
 
             # Collect experience dictionary with shape (B, ...)
             experience = collector.collect_experience(policy=self.policy, num_steps=self.config.steps_per_batch)
@@ -273,12 +285,6 @@ class TD3(AgentInterface):
 
             # Store experience in replay buffer
             replay_buffer.add(experience)
-
-            # Collect a minimum number of steps in the replay buffer before training
-            if replay_buffer.get_size() < self.config.min_buffer_size:
-                if show_progress:
-                    progress_bar.update(current_step=num_steps, desc="Collecting initial experience...")
-                continue
 
             actor_losses = []
             critics_losses = []
@@ -292,10 +298,13 @@ class TD3(AgentInterface):
                 # We compute the target y values without gradients because they will be used to compute the loss for each critic
                 # so an error will be raised for trying to backpropagate through y more than once.
                 with torch.no_grad():
-                    # Compute the policies next action with noise and clip to ensure it does not exceed action bounds
-                    noise = utils.gaussian_noise(mean=0, std=self.config.policy_noise, shape=batch['action'].shape, device=self.device)
-                    noise_clipped = noise.clamp(-self.config.noise_clip, self.config.noise_clip)
-                    next_action = (self.policy.actor_target(batch['next_state']) + noise_clipped) #.clamp(self.env_params.action_min, self.env_params.action_max)
+                    # Compute the policies next action with noise and clip to ensure it does not exceed action bounds - [B, A]
+                    next_action = self.policy.target_actor_action(
+                        obs=batch['next_state'],
+                        policy_noise=self.config.policy_noise,
+                        noise_clip=self.config.noise_clip,
+                        action_shape=batch['action'].shape
+                    )
 
                     # Compute the Q-Values for all the critics - shape (B, C, 1) -> (B, C)
                     next_q_values = self.policy.get_target_q_values(batch['next_state'], next_action).squeeze(-1) 
@@ -306,21 +315,20 @@ class TD3(AgentInterface):
                     # Compute the target Q-Value
                     y = batch['reward'] + self.config.gamma * (1 - batch['done'].float()) * next_q_values
 
-                # Update critics
-                for i in range(self.policy.num_critics):
-                    # Compute critics loss
-                    q_i = self.policy.get_q_values(batch['state'].detach(), batch['action'].detach(), index=i)
-                    critic_loss = F.mse_loss(y, q_i)
-                    critics_losses.append(critic_loss.item())
+                # Sum the losses across all critics
+                qs = [self.policy.get_q_values(batch['state'].detach(), batch['action'].detach(), index=i) for i in range(self.policy.num_critics)]
+                critic_loss = sum(F.mse_loss(y, q) for q in qs)
+                critics_losses.append(critic_loss.item())
 
-                    self.critic_optimizers[i].zero_grad()
-                    critic_loss.backward()
-                    self.critic_optimizers[i].step()
+                # Take a gradient step on the critics
+                self.critic_optimizer.zero_grad()
+                critic_loss.backward()
+                self.critic_optimizer.step()
 
                 # Delayed policy update 
                 if num_gradient_steps % self.config.delay_freq == 0:
                     # Compute actor loss
-                    actor_loss = -self.policy.get_q_values(state=batch['state'], action=self.policy.actor(batch['state']), index=0).mean()
+                    actor_loss = -self.policy.get_q_values(obs=batch['state'], action=self.policy.actor(batch['state']), index=0).mean()
                     actor_losses.append(actor_loss.item())
 
                     # Take a gradient step on the actor
@@ -329,9 +337,9 @@ class TD3(AgentInterface):
                     self.actor_optimizer.step()
 
                     # Update target networks
-                    utils.polyak_update(self.policy.actor_target, self.policy.actor, tau=self.config.tau)
+                    utils.polyak_update(self.policy.target_actor, self.policy.actor, tau=self.config.tau)
                     for i in range(self.policy.num_critics):
-                        utils.polyak_update(self.policy.critic_target.critics[i], self.policy.critic.critics[i], tau=self.config.tau)
+                        utils.polyak_update(self.policy.target_critics[i], self.policy.critics[i], tau=self.config.tau)
 
             if show_progress:
                 tracker = collector.get_metric_tracker()
@@ -343,11 +351,57 @@ class TD3(AgentInterface):
 
             if logger.should_log(num_steps):
                 logger.log_scalar('actor_loss', np.mean(actor_losses), num_steps)
-                for i in range(self.policy.num_critics):
-                    logger.log_scalar(f'critic{i}_loss', np.mean(critics_losses[i]), num_steps)
+                logger.log_scalar(f'critic_loss', critic_loss.detach().cpu().item(), num_steps)
 
-            if evaluator is not None:
-                evaluator.evaluate(agent=self.policy, iteration=num_steps)
+            evaluator.evaluate(agent=self.policy, iteration=num_steps)
 
-        if evaluator is not None:
-            evaluator.close()
+        evaluator.close()
+
+    def _save_impl(self, path: Path) -> None:
+        """
+        Writes a self-contained checkpoint directory.
+
+        Layout:
+          path/
+            agent.pt
+            policy.pt
+        """
+        path.mkdir(parents=True, exist_ok=True)
+
+        payload = {
+            "algo": "TD3",
+            "agent_format_version": 1,
+            "config": asdict(self.config),
+            "actor_optimizer_state_dict": self.actor_optimizer.state_dict(),
+            "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
+        }
+        torch.save(payload, path / "agent.pt")
+        self.policy.save(path / "policy.pt")
+
+
+    @classmethod
+    def load(cls, path: str | Path, map_location: str | torch.device = "cpu") -> "TD3Agent":
+        """
+        Loads the checkpoint and returns a fully-constructed TD3Agent.
+        """
+        p = Path(path)
+        agent_meta = torch.load(p / "agent.pt", map_location=map_location, weights_only=False)
+
+        if agent_meta.get("algo") != "TD3":
+            raise ValueError(f"Checkpoint algo mismatch: expected TD3, got {agent_meta.get('algo')}")
+
+        config = TD3Config(**agent_meta["config"])
+        policy = TD3Policy.load(p / "policy.pt", map_location=map_location)
+
+        agent = cls(
+            policy=policy,
+            config=config,
+            device=str(map_location),
+        )
+
+        actor_opt_state = agent_meta["actor_optimizer_state_dict"]
+        critic_opt_state = agent_meta["critic_optimizer_state_dict"]
+        agent.actor_optimizer.load_state_dict(actor_opt_state)
+        agent.critic_optimizer.load_state_dict(critic_opt_state)
+
+        return agent         

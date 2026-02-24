@@ -32,7 +32,6 @@ class CategoricalHead(DistributionHead):
         logits = self.logits(latent)  # (B, n_actions)
         return torch.distributions.Categorical(logits=logits)
 
-    @torch.no_grad()
     def sample(self, latent: Tensor, deterministic: bool = False) -> Tuple[Tensor, Tensor, Tensor]:
         dist = self._dist(latent)
 
@@ -58,6 +57,18 @@ class CategoricalHead(DistributionHead):
     def entropy(self, latent: Tensor) -> Tensor:
         dist = self._dist(latent)
         return dist.entropy().unsqueeze(-1)  # (B,1)
+    
+    def get_logits(self, latent: Tensor) -> Tensor:
+        """
+        Get the raw logits output by the head for inspection or auxiliary losses.
+
+        Args:
+            latent (Tensor): Latent state representation of shape (B, latent_dim).
+
+        Returns:
+            Tensor: Logits of shape (B, num_actions).
+        """
+        return self.logits(latent)
     
 class ContinuousHead(nn.Module):
     """
@@ -184,7 +195,6 @@ class GaussianHead(DistributionHead):
         std = log_std.exp()
         return torch.distributions.Normal(mean, std)
 
-    @torch.no_grad()
     def sample(self, latent: Tensor, deterministic: bool = False) -> Tuple[Tensor, Tensor, Tensor]:
         dist = self._dist(latent)
 
@@ -324,7 +334,6 @@ class TanhGaussianHead(nn.Module):
         log_scale = torch.log(scale).sum().expand(a_env.shape[0], 1)  # (B,1)
         return a, log_scale
 
-    @torch.no_grad()
     def sample(
         self,
         latent: Tensor,
@@ -495,7 +504,6 @@ class BetaHead(DistributionHead):
         log_scale = torch.log(scale).sum().expand(action_env.shape[0], 1)
         return a01, log_scale
 
-    @torch.no_grad()
     def sample(self, latent: Tensor, deterministic: bool = False) -> Tuple[Tensor, Tensor, Tensor]:
         dist = self._dist(latent)
 
@@ -582,11 +590,12 @@ class QValueHead(nn.Module):
 
     Args:
         latent_dim (int): Dimension of the latent state representation.
+        action_dim (int): Dimension of the action vector.
     """
 
-    def __init__(self, latent_dim: int):
+    def __init__(self, latent_dim: int, action_dim: int):
         super().__init__()
-        self.q = nn.Linear(latent_dim, 1)
+        self.q = nn.Linear(latent_dim + action_dim, 1)
 
     def forward(self, latent: Tensor, action: Tensor) -> Tensor:
         """
